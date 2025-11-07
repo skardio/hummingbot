@@ -48,8 +48,11 @@ def market_2_prompt() -> str:
 
 def order_amount_prompt() -> str:
     trading_pair = amm_arb_config_map["market_1"].value
-    base_asset, quote_asset = trading_pair.split("-")
-    return f"What is the amount of {base_asset} per order? >>> "
+    if trading_pair and "-" in trading_pair:
+        base_asset, quote_asset = trading_pair.split("-")
+        return f"What is the amount of {base_asset} per order? >>> "
+    else:
+        return "What is the order amount? >>> "
 
 
 amm_arb_config_map = {
