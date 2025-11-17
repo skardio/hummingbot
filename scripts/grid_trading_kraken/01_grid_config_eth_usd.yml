@@ -1,0 +1,41 @@
+# Grid Trading Configuration for ETH/EUR on Kraken
+# Optimized config with dynamic range and logarithmic spacing
+
+trading_pair: "ETH-EUR"
+connector: "kraken"
+
+# Price Grid Setup (Auto-adjusted based on 24h high/low)
+start_price: 2950  # Lowest buy order (~3% below mid)
+end_price: 3200    # Highest sell order (~5% above mid)
+num_grids: 10      # How many levels
+grid_type: "logarithmic"  # Denser spacing in middle for more fills
+
+# Capital & Position Management
+total_amount_eur: 100  # Total capital to use (€100)
+position_mode: "two_sided"  # Buy and sell simultaneously
+
+# Order Management
+max_open_orders: 8
+order_type: "limit"
+time_in_force: "GTC"  # Good till cancelled
+
+# Risk Management
+stop_loss: 2850  # ~5.7% below start (was 3% - too tight for ETH volatility)
+take_profit: 3300  # If price goes above this, close all and restart
+auto_range_adjustment: true  # Recalibrate range every 6 hours based on 24h high/low
+range_adjustment_interval_hours: 6
+
+# Fee Assumptions
+maker_fee_pct: 0.16  # Kraken maker fee (volume discount)
+taker_fee_pct: 0.26  # Kraken taker fee
+
+# Monitoring
+check_interval_sec: 10
+log_level: "INFO"
+log_pnl_per_grid: true  # Track which grids are most profitable
+
+# Advanced
+activate_order_optimization: true
+rebalance_interval: 300  # Rebalance every 5 min (was 60s - too frequent)
+adaptive_order_size: true  # Larger orders in middle where more liquidity
+min_grid_spacing_pct: 0.8  # Minimum 0.8% between grids (> 2x fees of 0.42%)

@@ -1,0 +1,231 @@
+# Multi-Coin Grid Trading Bot - Configuration
+# Environment: DEVELOPMENT
+
+# =============================================================================
+# EXCHANGE SETTINGS
+# =============================================================================
+exchange:
+  name: "kraken"
+  api_key: "${KRAKEN_API_KEY}"      # Set via environment variable
+  api_secret: "${KRAKEN_SECRET_KEY}" # Set via environment variable
+
+# =============================================================================
+# COIN DISCOVERY
+# =============================================================================
+coin_discovery:
+  base_currency: "EUR"
+  min_volume_24h: 100000  # Minimum €100k daily volume
+  max_spread: 0.005       # Maximum 0.5% spread
+  blacklist: []           # Coins to exclude
+
+# =============================================================================
+# TREND DETECTION
+# =============================================================================
+trend:
+  method: "multi_indicator"  # Options: raw, ema, linreg, multi_indicator
+  lookback_periods: 60       # 30 minutes at 30s intervals
+  update_interval: 30        # Seconds between updates
+
+  # EMA settings
+  ema:
+    fast_periods: 30
+    slow_periods: 60
+
+  # Linear regression settings
+  linreg:
+    periods: 60
+    confidence_level: 0.95
+
+  # Volatility normalization
+  normalize_by_volatility: true
+  volatility_window: 60
+
+  # Multi-indicator weights (must sum to 1.0)
+  weights:
+    raw: 0.2
+    ema: 0.4
+    linreg: 0.4
+
+  # Auto-tuning engine 🆕 (Phase 2.5 - ADVANCED)
+  auto_tuning:
+    enabled: false              # Disable until Phase 2.5
+    min_trades_required: 500    # Need data before tuning
+    tune_interval_days: 7       # Tune weekly
+    max_param_change_pct: 0.20  # Max 20% change per tune
+    parameters_to_tune:
+      - "atr_multipliers"
+      - "switch_threshold_k"
+      - "ema_windows"
+      - "grid_count"
+    validation_method: "walk_forward"  # Not in-sample!
+    rollback_threshold: -0.10   # Rollback if -10% worse
+    require_human_approval: true # Safety first
+
+# =============================================================================
+# COIN SWITCHING
+# =============================================================================
+switching:
+  method: "threshold"  # Options: cooldown, threshold, hybrid
+
+  # Cooldown method (legacy)
+  cooldown_minutes: 60
+
+  # Threshold method (new)
+  min_improvement_ratio: 1.5  # new_trend > current_trend + (1.5 * volatility)
+  min_hold_time_minutes: 15   # Never switch before this time
+
+  # Switch cost consideration
+  consider_switch_cost: true
+  min_profit_multiple: 2.0    # Expected profit must be 2x switch cost
+
+# =============================================================================
+# GRID STRATEGY
+# =============================================================================
+grid:
+  type: "dynamic"  # Options: fixed, dynamic, adaptive
+
+  # Fixed grid settings
+  fixed:
+    num_buy_orders: 3
+    num_sell_orders: 3
+    buy_range_pct: -0.03   # -3%
+    sell_range_pct: 0.08   # +8%
+
+  # Dynamic grid settings (ATR-based)
+  dynamic:
+    atr_periods: 14
+    atr_multiplier_lower: 1.0
+    atr_multiplier_upper: 1.5
+    min_grids: 2
+    max_grids: 6
+
+  # Adaptive settings (trend-aware)
+  adaptive:
+    uptrend_buy_grids: 2
+    uptrend_sell_grids: 4
+    downtrend_buy_grids: 4
+    downtrend_sell_grids: 2
+    sideways_buy_grids: 3
+    sideways_sell_grids: 3
+
+  # Refill behavior
+  refill:
+    enabled: true
+    rebuild_threshold_pct: 3.0  # Rebuild grid if price moved >3%
+
+# =============================================================================
+# CAPITAL MANAGEMENT
+# =============================================================================
+capital:
+  total: 100.0              # Total capital in EUR (DEV: €100)
+  max_position_pct: 0.8     # Use max 80% of capital
+  reserve_pct: 0.2          # Keep 20% in reserve
+
+  # Per-coin limits
+  max_per_coin: 80.0        # Maximum per coin in EUR
+
+# =============================================================================
+# RISK MANAGEMENT
+# =============================================================================
+risk:
+  # Stop-loss
+  stop_loss:
+    enabled: true
+    trigger_pct: -0.08      # Trigger at -8% loss
+    action: "liquidate"     # Options: liquidate, reduce, alert
+
+  # Circuit breaker
+  circuit_breaker:
+    enabled: true
+    volatility_threshold: 0.05    # 5% move in 1 minute
+    error_threshold: 3            # Pause after 3 consecutive errors
+    no_fill_minutes: 180          # Alert if no fills for 3 hours
+
+  # Daily risk limits 🆕
+  daily_limits:
+    enabled: true
+    max_loss_pct: -0.03           # Stop if -3% daily loss
+    track_unrealized: true         # Include unrealized P&L
+    reset_time_utc: "00:00"       # Reset at midnight UTC
+    lock_until_reset: true        # Don't trade until next day
+
+  # Market-wide risk protection 🆕
+  market_risk:
+    enabled: true
+    btc_pair: "BTC/EUR"           # Use BTC as market indicator
+    crash_threshold_pct: 0.03     # BTC drop >3% in 1 min = crash
+    crash_window_seconds: 60      # Detection window
+    spread_threshold: 0.01        # >1% spread = stress
+    gap_threshold: 0.05           # >5% gap = anomaly
+    pause_on_stress: true         # Auto-pause on detection
+    resume_delay_minutes: 5       # Wait 5 min after stability
+    max_trades_during_stress: 1   # Max 1 concurrent trade if stress
+
+  # Position limits
+  position_limits:
+    max_exposure_pct: 0.9         # Max 90% of capital in positions
+    max_single_position_pct: 0.15 # Max 15% in single coin
+
+  # Daily limits
+  daily_limits:
+    max_loss_pct: -0.03           # Stop if -3% daily loss
+    max_switches: 20               # Max 20 switches per day
+
+# =============================================================================
+# MONITORING & ALERTS
+# =============================================================================
+monitoring:
+  # Logging
+  logging:
+    level: "INFO"           # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    console: true
+    file: true
+    log_dir: "logs"
+    max_file_size_mb: 100
+    backup_count: 5
+    format: "detailed"      # simple, detailed, json
+
+  # Metrics tracking
+  metrics:
+    enabled: true
+    track_pnl: true
+    track_win_rate: true
+    track_sharpe: true
+    save_interval_minutes: 5
+
+  # Alerts
+  alerts:
+    enabled: false          # TODO: Implement in Phase 6
+    email: []
+    telegram: []
+    conditions:
+      - "stop_loss_triggered"
+      - "circuit_breaker_activated"
+      - "daily_loss_limit_reached"
+      - "api_error_threshold_exceeded"
+
+# =============================================================================
+# BACKTESTING
+# =============================================================================
+backtest:
+  enabled: false
+  start_date: "2025-01-01"
+  end_date: "2025-11-14"
+  data_source: "backtest/data/"
+  results_dir: "backtest/results/"
+
+# =============================================================================
+# DEVELOPMENT / DEBUG
+# =============================================================================
+dev:
+  mode: "development"       # development, testing, production
+  paper_trading: false      # Simulate trades without real orders
+  mock_api: false           # Use mock API responses
+  fast_mode: false          # Reduce delays for testing
+
+  # Debug options
+  debug:
+    log_api_calls: true
+    log_orders: true
+    log_fills: true
+    verbose_trend: false

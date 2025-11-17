@@ -1,0 +1,44 @@
+# Grid Trading Configuration for XRP/EUR on Kraken
+# Optimized config with logarithmic spacing and high volatility
+
+trading_pair: "XRP-EUR"
+connector: "kraken"
+
+# Price Grid Setup (Based on recent 24h range)
+start_price: 2.1350  # -3% from current (~€2.20)
+end_price: 2.2671    # +3% from current
+num_grids: 10        # 10 levels for good coverage
+grid_type: "logarithmic"  # Denser spacing in middle
+
+# Capital & Position Management
+total_capital_eur: 100  # Use €100 of your €176 total
+position_mode: "two_sided"  # Buy and sell simultaneously
+
+# Order Management
+max_open_orders: 10
+order_type: "limit"
+time_in_force: "GTC"  # Good till cancelled
+
+# Risk Management
+stop_loss: 2.05  # -6.8% below current (protect against big drop)
+take_profit: 2.35  # +6.8% above current (take profit on spike)
+auto_range_adjustment: true  # Recalibrate every 6 hours
+range_adjustment_interval_hours: 6
+
+# Fee Assumptions (Kraken)
+maker_fee_pct: 0.16  # With volume discount
+taker_fee_pct: 0.26
+
+# Monitoring
+check_interval_sec: 10
+log_level: "INFO"
+log_pnl_per_grid: true
+
+# Advanced
+activate_order_optimization: true
+rebalance_interval: 300  # 5 minutes (XRP moves fast)
+adaptive_order_size: true
+min_grid_spacing_pct: 0.8  # Minimum spacing > fees
+
+# XRP Specific Settings
+min_order_size: 10  # Kraken XRP minimum

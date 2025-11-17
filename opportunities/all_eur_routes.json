@@ -1,0 +1,2705 @@
+{
+  "total_routes": 142,
+  "routes": [
+    {
+      "currencies": [
+        "EUR",
+        "AAVE",
+        "BTC",
+        "EUR"
+      ],
+      "pairs": [
+        "AAVE/EUR",
+        "AAVE/BTC",
+        "BTC/EUR"
+      ],
+      "description": "EUR \u2192 AAVE \u2192 BTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "AAVE",
+        "ETH",
+        "EUR"
+      ],
+      "pairs": [
+        "AAVE/EUR",
+        "AAVE/ETH",
+        "ETH/EUR"
+      ],
+      "description": "EUR \u2192 AAVE \u2192 ETH \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "PEAQ",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "PEAQ/EUR",
+        "PEAQ/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 PEAQ \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "XMR",
+        "BTC",
+        "EUR"
+      ],
+      "pairs": [
+        "XMR/EUR",
+        "XMR/BTC",
+        "BTC/EUR"
+      ],
+      "description": "EUR \u2192 XMR \u2192 BTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "XMR",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "XMR/EUR",
+        "XMR/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 XMR \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "XMR",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "XMR/EUR",
+        "XMR/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 XMR \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ADA",
+        "BTC",
+        "EUR"
+      ],
+      "pairs": [
+        "ADA/EUR",
+        "ADA/BTC",
+        "BTC/EUR"
+      ],
+      "description": "EUR \u2192 ADA \u2192 BTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ADA",
+        "ETH",
+        "EUR"
+      ],
+      "pairs": [
+        "ADA/EUR",
+        "ADA/ETH",
+        "ETH/EUR"
+      ],
+      "description": "EUR \u2192 ADA \u2192 ETH \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ADA",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "ADA/EUR",
+        "ADA/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 ADA \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ADA",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "ADA/EUR",
+        "ADA/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 ADA \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "EURC",
+        "BTC",
+        "EUR"
+      ],
+      "pairs": [
+        "EURC/EUR",
+        "BTC/EURC",
+        "BTC/EUR"
+      ],
+      "description": "EUR \u2192 EURC \u2192 BTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "EURC",
+        "ETH",
+        "EUR"
+      ],
+      "pairs": [
+        "EURC/EUR",
+        "ETH/EURC",
+        "ETH/EUR"
+      ],
+      "description": "EUR \u2192 EURC \u2192 ETH \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "EURC",
+        "SOL",
+        "EUR"
+      ],
+      "pairs": [
+        "EURC/EUR",
+        "SOL/EURC",
+        "SOL/EUR"
+      ],
+      "description": "EUR \u2192 EURC \u2192 SOL \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "EURC",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "EURC/EUR",
+        "EURC/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 EURC \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "OBOL",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "OBOL/EUR",
+        "OBOL/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 OBOL \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "WBTC",
+        "BTC",
+        "EUR"
+      ],
+      "pairs": [
+        "WBTC/EUR",
+        "WBTC/BTC",
+        "BTC/EUR"
+      ],
+      "description": "EUR \u2192 WBTC \u2192 BTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETHW",
+        "ETH",
+        "EUR"
+      ],
+      "pairs": [
+        "ETHW/EUR",
+        "ETHW/ETH",
+        "ETH/EUR"
+      ],
+      "description": "EUR \u2192 ETHW \u2192 ETH \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "XDC",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "XDC/EUR",
+        "XDC/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 XDC \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "TON",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "TON/EUR",
+        "TON/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 TON \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "TON",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "TON/EUR",
+        "TON/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 TON \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "SNX",
+        "BTC",
+        "EUR"
+      ],
+      "pairs": [
+        "SNX/EUR",
+        "SNX/BTC",
+        "BTC/EUR"
+      ],
+      "description": "EUR \u2192 SNX \u2192 BTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "TBTC",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "TBTC/BTC",
+        "TBTC/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 TBTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "UNI",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "UNI/BTC",
+        "UNI/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 UNI \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "ETH",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "ETH/BTC",
+        "ETH/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 ETH \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "XLM",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "XLM/BTC",
+        "XLM/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 XLM \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "SC",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "SC/BTC",
+        "SC/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 SC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "TRX",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "TRX/BTC",
+        "TRX/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 TRX \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "ETC",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "ETC/BTC",
+        "ETC/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 ETC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "ATOM",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "ATOM/BTC",
+        "ATOM/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 ATOM \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "ZRX",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "ZRX/BTC",
+        "ZRX/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 ZRX \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "DAI",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "BTC/DAI",
+        "DAI/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 DAI \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "SAND",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "SAND/BTC",
+        "SAND/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 SAND \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "BTC/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "PYUSD",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "BTC/PYUSD",
+        "PYUSD/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 PYUSD \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "SOL",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "SOL/BTC",
+        "SOL/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 SOL \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "BCH",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "BCH/BTC",
+        "BCH/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 BCH \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "LINK",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "LINK/BTC",
+        "LINK/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 LINK \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "MANA",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "MANA/BTC",
+        "MANA/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 MANA \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "XRP",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "XRP/BTC",
+        "XRP/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 XRP \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "USDR",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "BTC/USDR",
+        "USDR/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 USDR \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "EUROP",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "BTC/EUROP",
+        "EUROP/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 EUROP \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "MINA",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "MINA/BTC",
+        "MINA/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 MINA \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "USDQ",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "BTC/USDQ",
+        "USDQ/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 USDQ \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "ALGO",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "ALGO/BTC",
+        "ALGO/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 ALGO \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "DOGE",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "DOGE/BTC",
+        "DOGE/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 DOGE \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "LTC",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "LTC/BTC",
+        "LTC/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 LTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "COMP",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "COMP/BTC",
+        "COMP/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 COMP \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "ANKR",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "ANKR/BTC",
+        "ANKR/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 ANKR \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "GRT",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "GRT/BTC",
+        "GRT/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 GRT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "PAXG",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "PAXG/BTC",
+        "PAXG/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 PAXG \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "DOT",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "DOT/BTC",
+        "DOT/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 DOT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "FIL",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "FIL/BTC",
+        "FIL/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 FIL \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "BTC/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BTC",
+        "MLN",
+        "EUR"
+      ],
+      "pairs": [
+        "BTC/EUR",
+        "MLN/BTC",
+        "MLN/EUR"
+      ],
+      "description": "EUR \u2192 BTC \u2192 MLN \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "CRO",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "CRO/EUR",
+        "CRO/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 CRO \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "CRO",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "CRO/EUR",
+        "CRO/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 CRO \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "KAS",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "KAS/EUR",
+        "KAS/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 KAS \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "UNI",
+        "ETH",
+        "EUR"
+      ],
+      "pairs": [
+        "UNI/EUR",
+        "UNI/ETH",
+        "ETH/EUR"
+      ],
+      "description": "EUR \u2192 UNI \u2192 ETH \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "TRX",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "TRX/ETH",
+        "TRX/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 TRX \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "ETC",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "ETC/ETH",
+        "ETC/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 ETC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "ATOM",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "ATOM/ETH",
+        "ATOM/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 ATOM \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "LSETH",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "LSETH/ETH",
+        "LSETH/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 LSETH \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "DAI",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "ETH/DAI",
+        "DAI/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 DAI \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "ETH/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "PYUSD",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "ETH/PYUSD",
+        "PYUSD/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 PYUSD \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "SOL",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "SOL/ETH",
+        "SOL/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 SOL \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "BCH",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "BCH/ETH",
+        "BCH/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 BCH \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "LINK",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "LINK/ETH",
+        "LINK/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 LINK \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "XRP",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "XRP/ETH",
+        "XRP/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 XRP \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "EUROP",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "ETH/EUROP",
+        "EUROP/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 EUROP \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "ALGO",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "ALGO/ETH",
+        "ALGO/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 ALGO \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "LTC",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "LTC/ETH",
+        "LTC/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 LTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "PAXG",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "PAXG/ETH",
+        "PAXG/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 PAXG \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "DOT",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "DOT/ETH",
+        "DOT/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 DOT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "FIL",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "FIL/ETH",
+        "FIL/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 FIL \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ETH",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "ETH/EUR",
+        "ETH/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 ETH \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "EURR",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "EURR/EUR",
+        "EURR/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 EURR \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "EURR",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "EURR/EUR",
+        "EURR/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 EURR \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BERA",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "BERA/EUR",
+        "BERA/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 BERA \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BERA",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "BERA/EUR",
+        "BERA/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 BERA \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "TRX",
+        "USDD",
+        "EUR"
+      ],
+      "pairs": [
+        "TRX/EUR",
+        "TRX/USDD",
+        "USDD/EUR"
+      ],
+      "description": "EUR \u2192 TRX \u2192 USDD \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "TRUMP",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "TRUMP/EUR",
+        "TRUMP/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 TRUMP \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "TRUMP",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "TRUMP/EUR",
+        "TRUMP/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 TRUMP \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ATOM",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "ATOM/EUR",
+        "ATOM/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 ATOM \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ATOM",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "ATOM/EUR",
+        "ATOM/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 ATOM \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "SHIB",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "SHIB/EUR",
+        "SHIB/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 SHIB \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "SHIB",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "SHIB/EUR",
+        "SHIB/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 SHIB \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "FARTCOIN",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "FARTCOIN/EUR",
+        "FARTCOIN/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 FARTCOIN \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "FARTCOIN",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "FARTCOIN/EUR",
+        "FARTCOIN/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 FARTCOIN \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "DAI",
+        "USDT",
+        "EUR"
+      ],
+      "pairs": [
+        "DAI/EUR",
+        "DAI/USDT",
+        "USDT/EUR"
+      ],
+      "description": "EUR \u2192 DAI \u2192 USDT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "SOL",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "SOL/USDT",
+        "SOL/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 SOL \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "PENGU",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "PENGU/USDT",
+        "PENGU/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 PENGU \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "USDE",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "USDE/USDT",
+        "USDE/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 USDE \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "BNB",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "BNB/USDT",
+        "BNB/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 BNB \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "BCH",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "BCH/USDT",
+        "BCH/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 BCH \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "AI16Z",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "AI16Z/USDT",
+        "AI16Z/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 AI16Z \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "XTZ",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "XTZ/USDT",
+        "XTZ/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 XTZ \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "LINK",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "LINK/USDT",
+        "LINK/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 LINK \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "MANA",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "MANA/USDT",
+        "MANA/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 MANA \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "XRP",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "XRP/USDT",
+        "XRP/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 XRP \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "USDR",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "USDR/USDT",
+        "USDR/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 USDR \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "APE",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "APE/USDT",
+        "APE/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 APE \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "SIDEKICK",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "SIDEKICK/USDT",
+        "SIDEKICK/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 SIDEKICK \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "USTC",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "USTC/USDT",
+        "USTC/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 USTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "VIRTUAL",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "VIRTUAL/USDT",
+        "VIRTUAL/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 VIRTUAL \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "USDQ",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "USDQ/USDT",
+        "USDQ/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 USDQ \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "ALGO",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "ALGO/USDT",
+        "ALGO/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 ALGO \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "MELANIA",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "MELANIA/USDT",
+        "MELANIA/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 MELANIA \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "DOGE",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "DOGE/USDT",
+        "DOGE/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 DOGE \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "LTC",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "LTC/USDT",
+        "LTC/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 LTC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "AVAX",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "AVAX/USDT",
+        "AVAX/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 AVAX \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "DOT",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "DOT/USDT",
+        "DOT/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 DOT \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "S",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "S/USDT",
+        "S/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 S \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "CC",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "CC/USDT",
+        "CC/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 CC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDT",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "USDT/EUR",
+        "USDC/USDT",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 USDT \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "SOL",
+        "LSSOL",
+        "EUR"
+      ],
+      "pairs": [
+        "SOL/EUR",
+        "LSSOL/SOL",
+        "LSSOL/EUR"
+      ],
+      "description": "EUR \u2192 SOL \u2192 LSSOL \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "SOL",
+        "PUMP",
+        "EUR"
+      ],
+      "pairs": [
+        "SOL/EUR",
+        "PUMP/SOL",
+        "PUMP/EUR"
+      ],
+      "description": "EUR \u2192 SOL \u2192 PUMP \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "SOL",
+        "JITOSOL",
+        "EUR"
+      ],
+      "pairs": [
+        "SOL/EUR",
+        "JITOSOL/SOL",
+        "JITOSOL/EUR"
+      ],
+      "description": "EUR \u2192 SOL \u2192 JITOSOL \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "SOL",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "SOL/EUR",
+        "SOL/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 SOL \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "PENGU",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "PENGU/EUR",
+        "PENGU/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 PENGU \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDE",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "USDE/EUR",
+        "USDE/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 USDE \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BNB",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "BNB/EUR",
+        "BNB/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 BNB \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "BCH",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "BCH/EUR",
+        "BCH/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 BCH \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "AI16Z",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "AI16Z/EUR",
+        "AI16Z/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 AI16Z \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "XTZ",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "XTZ/EUR",
+        "XTZ/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 XTZ \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "LINK",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "LINK/EUR",
+        "LINK/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 LINK \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "MANA",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "MANA/EUR",
+        "MANA/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 MANA \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "XRP",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "XRP/EUR",
+        "XRP/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 XRP \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDR",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "USDR/EUR",
+        "USDR/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 USDR \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "APE",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "APE/EUR",
+        "APE/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 APE \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "EUROP",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "EUROP/EUR",
+        "EUROP/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 EUROP \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USTC",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "USTC/EUR",
+        "USTC/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 USTC \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "VIRTUAL",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "VIRTUAL/EUR",
+        "VIRTUAL/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 VIRTUAL \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "USDQ",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "USDQ/EUR",
+        "USDQ/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 USDQ \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "ALGO",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "ALGO/EUR",
+        "ALGO/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 ALGO \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "MELANIA",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "MELANIA/EUR",
+        "MELANIA/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 MELANIA \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "DOGE",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "DOGE/EUR",
+        "DOGE/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 DOGE \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "LTC",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "LTC/EUR",
+        "LTC/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 LTC \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "AVAX",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "AVAX/EUR",
+        "AVAX/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 AVAX \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "DOT",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "DOT/EUR",
+        "DOT/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 DOT \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "S",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "S/EUR",
+        "S/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 S \u2192 USDC \u2192 EUR"
+    },
+    {
+      "currencies": [
+        "EUR",
+        "CC",
+        "USDC",
+        "EUR"
+      ],
+      "pairs": [
+        "CC/EUR",
+        "CC/USDC",
+        "USDC/EUR"
+      ],
+      "description": "EUR \u2192 CC \u2192 USDC \u2192 EUR"
+    }
+  ],
+  "monitor_format": [
+    [
+      "AAVE-EUR",
+      "AAVE-BTC",
+      "BTC-EUR"
+    ],
+    [
+      "AAVE-EUR",
+      "AAVE-ETH",
+      "ETH-EUR"
+    ],
+    [
+      "PEAQ-EUR",
+      "PEAQ-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "XMR-EUR",
+      "XMR-BTC",
+      "BTC-EUR"
+    ],
+    [
+      "XMR-EUR",
+      "XMR-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "XMR-EUR",
+      "XMR-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "ADA-EUR",
+      "ADA-BTC",
+      "BTC-EUR"
+    ],
+    [
+      "ADA-EUR",
+      "ADA-ETH",
+      "ETH-EUR"
+    ],
+    [
+      "ADA-EUR",
+      "ADA-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "ADA-EUR",
+      "ADA-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "EURC-EUR",
+      "BTC-EURC",
+      "BTC-EUR"
+    ],
+    [
+      "EURC-EUR",
+      "ETH-EURC",
+      "ETH-EUR"
+    ],
+    [
+      "EURC-EUR",
+      "SOL-EURC",
+      "SOL-EUR"
+    ],
+    [
+      "EURC-EUR",
+      "EURC-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "OBOL-EUR",
+      "OBOL-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "WBTC-EUR",
+      "WBTC-BTC",
+      "BTC-EUR"
+    ],
+    [
+      "ETHW-EUR",
+      "ETHW-ETH",
+      "ETH-EUR"
+    ],
+    [
+      "XDC-EUR",
+      "XDC-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "TON-EUR",
+      "TON-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "TON-EUR",
+      "TON-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "SNX-EUR",
+      "SNX-BTC",
+      "BTC-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "TBTC-BTC",
+      "TBTC-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "UNI-BTC",
+      "UNI-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "ETH-BTC",
+      "ETH-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "XLM-BTC",
+      "XLM-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "SC-BTC",
+      "SC-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "TRX-BTC",
+      "TRX-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "ETC-BTC",
+      "ETC-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "ATOM-BTC",
+      "ATOM-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "ZRX-BTC",
+      "ZRX-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "BTC-DAI",
+      "DAI-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "SAND-BTC",
+      "SAND-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "BTC-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "BTC-PYUSD",
+      "PYUSD-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "SOL-BTC",
+      "SOL-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "BCH-BTC",
+      "BCH-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "LINK-BTC",
+      "LINK-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "MANA-BTC",
+      "MANA-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "XRP-BTC",
+      "XRP-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "BTC-USDR",
+      "USDR-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "BTC-EUROP",
+      "EUROP-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "MINA-BTC",
+      "MINA-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "BTC-USDQ",
+      "USDQ-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "ALGO-BTC",
+      "ALGO-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "DOGE-BTC",
+      "DOGE-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "LTC-BTC",
+      "LTC-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "COMP-BTC",
+      "COMP-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "ANKR-BTC",
+      "ANKR-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "GRT-BTC",
+      "GRT-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "PAXG-BTC",
+      "PAXG-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "DOT-BTC",
+      "DOT-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "FIL-BTC",
+      "FIL-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "BTC-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "BTC-EUR",
+      "MLN-BTC",
+      "MLN-EUR"
+    ],
+    [
+      "CRO-EUR",
+      "CRO-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "CRO-EUR",
+      "CRO-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "KAS-EUR",
+      "KAS-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "UNI-EUR",
+      "UNI-ETH",
+      "ETH-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "TRX-ETH",
+      "TRX-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "ETC-ETH",
+      "ETC-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "ATOM-ETH",
+      "ATOM-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "LSETH-ETH",
+      "LSETH-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "ETH-DAI",
+      "DAI-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "ETH-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "ETH-PYUSD",
+      "PYUSD-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "SOL-ETH",
+      "SOL-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "BCH-ETH",
+      "BCH-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "LINK-ETH",
+      "LINK-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "XRP-ETH",
+      "XRP-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "ETH-EUROP",
+      "EUROP-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "ALGO-ETH",
+      "ALGO-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "LTC-ETH",
+      "LTC-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "PAXG-ETH",
+      "PAXG-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "DOT-ETH",
+      "DOT-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "FIL-ETH",
+      "FIL-EUR"
+    ],
+    [
+      "ETH-EUR",
+      "ETH-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "EURR-EUR",
+      "EURR-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "EURR-EUR",
+      "EURR-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "BERA-EUR",
+      "BERA-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "BERA-EUR",
+      "BERA-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "TRX-EUR",
+      "TRX-USDD",
+      "USDD-EUR"
+    ],
+    [
+      "TRUMP-EUR",
+      "TRUMP-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "TRUMP-EUR",
+      "TRUMP-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "ATOM-EUR",
+      "ATOM-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "ATOM-EUR",
+      "ATOM-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "SHIB-EUR",
+      "SHIB-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "SHIB-EUR",
+      "SHIB-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "FARTCOIN-EUR",
+      "FARTCOIN-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "FARTCOIN-EUR",
+      "FARTCOIN-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "DAI-EUR",
+      "DAI-USDT",
+      "USDT-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "SOL-USDT",
+      "SOL-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "PENGU-USDT",
+      "PENGU-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "USDE-USDT",
+      "USDE-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "BNB-USDT",
+      "BNB-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "BCH-USDT",
+      "BCH-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "AI16Z-USDT",
+      "AI16Z-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "XTZ-USDT",
+      "XTZ-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "LINK-USDT",
+      "LINK-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "MANA-USDT",
+      "MANA-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "XRP-USDT",
+      "XRP-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "USDR-USDT",
+      "USDR-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "APE-USDT",
+      "APE-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "SIDEKICK-USDT",
+      "SIDEKICK-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "USTC-USDT",
+      "USTC-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "VIRTUAL-USDT",
+      "VIRTUAL-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "USDQ-USDT",
+      "USDQ-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "ALGO-USDT",
+      "ALGO-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "MELANIA-USDT",
+      "MELANIA-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "DOGE-USDT",
+      "DOGE-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "LTC-USDT",
+      "LTC-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "AVAX-USDT",
+      "AVAX-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "DOT-USDT",
+      "DOT-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "S-USDT",
+      "S-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "CC-USDT",
+      "CC-EUR"
+    ],
+    [
+      "USDT-EUR",
+      "USDC-USDT",
+      "USDC-EUR"
+    ],
+    [
+      "SOL-EUR",
+      "LSSOL-SOL",
+      "LSSOL-EUR"
+    ],
+    [
+      "SOL-EUR",
+      "PUMP-SOL",
+      "PUMP-EUR"
+    ],
+    [
+      "SOL-EUR",
+      "JITOSOL-SOL",
+      "JITOSOL-EUR"
+    ],
+    [
+      "SOL-EUR",
+      "SOL-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "PENGU-EUR",
+      "PENGU-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "USDE-EUR",
+      "USDE-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "BNB-EUR",
+      "BNB-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "BCH-EUR",
+      "BCH-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "AI16Z-EUR",
+      "AI16Z-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "XTZ-EUR",
+      "XTZ-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "LINK-EUR",
+      "LINK-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "MANA-EUR",
+      "MANA-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "XRP-EUR",
+      "XRP-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "USDR-EUR",
+      "USDR-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "APE-EUR",
+      "APE-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "EUROP-EUR",
+      "EUROP-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "USTC-EUR",
+      "USTC-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "VIRTUAL-EUR",
+      "VIRTUAL-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "USDQ-EUR",
+      "USDQ-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "ALGO-EUR",
+      "ALGO-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "MELANIA-EUR",
+      "MELANIA-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "DOGE-EUR",
+      "DOGE-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "LTC-EUR",
+      "LTC-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "AVAX-EUR",
+      "AVAX-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "DOT-EUR",
+      "DOT-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "S-EUR",
+      "S-USDC",
+      "USDC-EUR"
+    ],
+    [
+      "CC-EUR",
+      "CC-USDC",
+      "USDC-EUR"
+    ]
+  ]
+}

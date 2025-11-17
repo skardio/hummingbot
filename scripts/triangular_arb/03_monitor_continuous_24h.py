@@ -11,11 +11,16 @@ Usage:
 This script is intentionally conservative: by default it only detects and logs
 opportunities. Set `execute_trades=True` to simulate execution in paper-trade markets.
 """
+import os
+import sys
+
+# Add hummingbot repo root to path so we can import hummingbot modules
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 import asyncio
 import importlib
 import json
 import logging
-import os
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -50,58 +55,122 @@ except Exception:
 # Simple config - update as needed
 CONFIG = {
     "exchange": "kraken",
-    # Each triple: three trading pairs (A-B, B-C, A-C) where pairs are in Hummingbot format BASE-QUOTE
-    # 35 routes from top-20 ETH + top-15 USDC (ranked by 24h liquidity)
-    # Bot will continuously monitor and report when profit edge > min_profitability_pct
+    # ALL 102 EUR TRIANGULAR ARBITRAGE ROUTES (USDT excluded for NL)
+    # Auto-generated from find_all_eur_routes.py
     "triples": [
-        # === ETH Routes (Top 20) ===
-        ["ETH-EUR", "EUR-USD", "ETH-USD"],
-        ["ETH-USDC", "USDC-EUR", "ETH-EUR"],
-        ["ETH-USDC", "USDC-USD", "ETH-USD"],
-        ["ETH-USDC", "USDC-USDT", "ETH-USDT"],
-        ["ETH-USDT", "USDT-EUR", "ETH-EUR"],
-        ["ETH-USDT", "USDT-USD", "ETH-USD"],
-        ["ETH-EUR", "EUR-GBP", "ETH-GBP"],
-        ["ETH-USDC", "USDC-GBP", "ETH-GBP"],
-        ["ETH-USDT", "USDT-GBP", "ETH-GBP"],
-        ["ETH-GBP", "GBP-USD", "ETH-USD"],
-        ["ETH-USDC", "USDC-CAD", "ETH-CAD"],
-        ["ETH-USD", "USD-CAD", "ETH-CAD"],
-        ["ETH-USDT", "USDT-CAD", "ETH-CAD"],
-        ["ETH-AUD", "AUD-USD", "ETH-USD"],
-        ["ETH-USDT", "USDT-AUD", "ETH-AUD"],
-        ["ETH-USDC", "USDC-AUD", "ETH-AUD"],
-        ["ETH-EUR", "EUR-CHF", "ETH-CHF"],
-        ["ETH-USDT", "USDT-CHF", "ETH-CHF"],
-        ["ETH-USD", "USD-CHF", "ETH-CHF"],
-        ["ETH-USDC", "USDC-CHF", "ETH-CHF"],
-        # === USDC Routes (Top 15) ===
-        ["USDC-USDT", "USDT-USD", "USDC-USD"],
-        ["USDC-EUR", "EUR-USD", "USDC-USD"],
-        ["USDC-USDT", "USDT-EUR", "USDC-EUR"],
-        ["USDC-USD", "USD-CAD", "USDC-CAD"],
-        ["USDC-USDT", "USDT-CAD", "USDC-CAD"],
-        ["USDC-USDT", "USDT-GBP", "USDC-GBP"],
-        ["USDC-GBP", "GBP-USD", "USDC-USD"],
-        ["USDC-USDT", "USDT-AUD", "USDC-AUD"],
-        ["USDC-EUR", "EUR-GBP", "USDC-GBP"],
-        ["USDC-AUD", "AUD-USD", "USDC-USD"],
-        ["USDC-EUR", "EUR-CHF", "USDC-CHF"],
-        ["USDC-USD", "USD-CHF", "USDC-CHF"],
-        ["USDC-USDT", "USDT-CHF", "USDC-CHF"],
-        ["USDC-EUR", "EUR-CAD", "USDC-CAD"],
-        ["USDC-EUR", "EUR-AUD", "USDC-AUD"],
+        ["AAVE-EUR", "AAVE-BTC", "BTC-EUR"],
+        ["AAVE-EUR", "AAVE-ETH", "ETH-EUR"],
+        ["PEAQ-EUR", "PEAQ-USDC", "USDC-EUR"],
+        ["XMR-EUR", "XMR-BTC", "BTC-EUR"],
+        ["XMR-EUR", "XMR-USDC", "USDC-EUR"],
+        ["ADA-EUR", "ADA-BTC", "BTC-EUR"],
+        ["ADA-EUR", "ADA-ETH", "ETH-EUR"],
+        ["ADA-EUR", "ADA-USDC", "USDC-EUR"],
+        ["EURC-EUR", "BTC-EURC", "BTC-EUR"],
+        ["EURC-EUR", "ETH-EURC", "ETH-EUR"],
+        ["EURC-EUR", "SOL-EURC", "SOL-EUR"],
+        ["EURC-EUR", "EURC-USDC", "USDC-EUR"],
+        ["WBTC-EUR", "WBTC-BTC", "BTC-EUR"],
+        ["ETHW-EUR", "ETHW-ETH", "ETH-EUR"],
+        ["XDC-EUR", "XDC-USDC", "USDC-EUR"],
+        ["TON-EUR", "TON-USDC", "USDC-EUR"],
+        ["SNX-EUR", "SNX-BTC", "BTC-EUR"],
+        ["BTC-EUR", "TBTC-BTC", "TBTC-EUR"],
+        ["BTC-EUR", "UNI-BTC", "UNI-EUR"],
+        ["BTC-EUR", "ETH-BTC", "ETH-EUR"],
+        ["BTC-EUR", "XLM-BTC", "XLM-EUR"],
+        ["BTC-EUR", "SC-BTC", "SC-EUR"],
+        ["BTC-EUR", "TRX-BTC", "TRX-EUR"],
+        ["BTC-EUR", "ETC-BTC", "ETC-EUR"],
+        ["BTC-EUR", "ATOM-BTC", "ATOM-EUR"],
+        ["BTC-EUR", "ZRX-BTC", "ZRX-EUR"],
+        ["BTC-EUR", "BTC-DAI", "DAI-EUR"],
+        ["BTC-EUR", "SAND-BTC", "SAND-EUR"],
+        ["BTC-EUR", "BTC-PYUSD", "PYUSD-EUR"],
+        ["BTC-EUR", "SOL-BTC", "SOL-EUR"],
+        ["BTC-EUR", "BCH-BTC", "BCH-EUR"],
+        ["BTC-EUR", "LINK-BTC", "LINK-EUR"],
+        ["BTC-EUR", "MANA-BTC", "MANA-EUR"],
+        ["BTC-EUR", "XRP-BTC", "XRP-EUR"],
+        ["BTC-EUR", "BTC-USDR", "USDR-EUR"],
+        ["BTC-EUR", "BTC-EUROP", "EUROP-EUR"],
+        ["BTC-EUR", "MINA-BTC", "MINA-EUR"],
+        ["BTC-EUR", "BTC-USDQ", "USDQ-EUR"],
+        ["BTC-EUR", "ALGO-BTC", "ALGO-EUR"],
+        ["BTC-EUR", "DOGE-BTC", "DOGE-EUR"],
+        ["BTC-EUR", "LTC-BTC", "LTC-EUR"],
+        ["BTC-EUR", "COMP-BTC", "COMP-EUR"],
+        ["BTC-EUR", "ANKR-BTC", "ANKR-EUR"],
+        ["BTC-EUR", "GRT-BTC", "GRT-EUR"],
+        ["BTC-EUR", "PAXG-BTC", "PAXG-EUR"],
+        ["BTC-EUR", "DOT-BTC", "DOT-EUR"],
+        ["BTC-EUR", "FIL-BTC", "FIL-EUR"],
+        ["BTC-EUR", "BTC-USDC", "USDC-EUR"],
+        ["BTC-EUR", "MLN-BTC", "MLN-EUR"],
+        ["CRO-EUR", "CRO-USDC", "USDC-EUR"],
+        ["UNI-EUR", "UNI-ETH", "ETH-EUR"],
+        ["ETH-EUR", "TRX-ETH", "TRX-EUR"],
+        ["ETH-EUR", "ETC-ETH", "ETC-EUR"],
+        ["ETH-EUR", "ATOM-ETH", "ATOM-EUR"],
+        ["ETH-EUR", "LSETH-ETH", "LSETH-EUR"],
+        ["ETH-EUR", "ETH-DAI", "DAI-EUR"],
+        ["ETH-EUR", "ETH-PYUSD", "PYUSD-EUR"],
+        ["ETH-EUR", "SOL-ETH", "SOL-EUR"],
+        ["ETH-EUR", "BCH-ETH", "BCH-EUR"],
+        ["ETH-EUR", "LINK-ETH", "LINK-EUR"],
+        ["ETH-EUR", "XRP-ETH", "XRP-EUR"],
+        ["ETH-EUR", "ETH-EUROP", "EUROP-EUR"],
+        ["ETH-EUR", "ALGO-ETH", "ALGO-EUR"],
+        ["ETH-EUR", "LTC-ETH", "LTC-EUR"],
+        ["ETH-EUR", "PAXG-ETH", "PAXG-EUR"],
+        ["ETH-EUR", "DOT-ETH", "DOT-EUR"],
+        ["ETH-EUR", "FIL-ETH", "FIL-EUR"],
+        ["ETH-EUR", "ETH-USDC", "USDC-EUR"],
+        ["EURR-EUR", "EURR-USDC", "USDC-EUR"],
+        ["BERA-EUR", "BERA-USDC", "USDC-EUR"],
+        ["TRX-EUR", "TRX-USDD", "USDD-EUR"],
+        ["TRUMP-EUR", "TRUMP-USDC", "USDC-EUR"],
+        ["ATOM-EUR", "ATOM-USDC", "USDC-EUR"],
+        ["SHIB-EUR", "SHIB-USDC", "USDC-EUR"],
+        ["FARTCOIN-EUR", "FARTCOIN-USDC", "USDC-EUR"],
+        ["SOL-EUR", "LSSOL-SOL", "LSSOL-EUR"],
+        ["SOL-EUR", "PUMP-SOL", "PUMP-EUR"],
+        ["SOL-EUR", "JITOSOL-SOL", "JITOSOL-EUR"],
+        ["SOL-EUR", "SOL-USDC", "USDC-EUR"],
+        ["PENGU-EUR", "PENGU-USDC", "USDC-EUR"],
+        ["USDE-EUR", "USDE-USDC", "USDC-EUR"],
+        ["BNB-EUR", "BNB-USDC", "USDC-EUR"],
+        ["BCH-EUR", "BCH-USDC", "USDC-EUR"],
+        ["AI16Z-EUR", "AI16Z-USDC", "USDC-EUR"],
+        ["XTZ-EUR", "XTZ-USDC", "USDC-EUR"],
+        ["LINK-EUR", "LINK-USDC", "USDC-EUR"],
+        ["MANA-EUR", "MANA-USDC", "USDC-EUR"],
+        ["XRP-EUR", "XRP-USDC", "USDC-EUR"],
+        ["USDR-EUR", "USDR-USDC", "USDC-EUR"],
+        ["APE-EUR", "APE-USDC", "USDC-EUR"],
+        ["EUROP-EUR", "EUROP-USDC", "USDC-EUR"],
+        ["USTC-EUR", "USTC-USDC", "USDC-EUR"],
+        ["VIRTUAL-EUR", "VIRTUAL-USDC", "USDC-EUR"],
+        ["USDQ-EUR", "USDQ-USDC", "USDC-EUR"],
+        ["ALGO-EUR", "ALGO-USDC", "USDC-EUR"],
+        ["MELANIA-EUR", "MELANIA-USDC", "USDC-EUR"],
+        ["DOGE-EUR", "DOGE-USDC", "USDC-EUR"],
+        ["LTC-EUR", "LTC-USDC", "USDC-EUR"],
+        ["AVAX-EUR", "AVAX-USDC", "USDC-EUR"],
+        ["DOT-EUR", "DOT-USDC", "USDC-EUR"],
+        ["S-EUR", "S-USDC", "USDC-EUR"],
+        ["CC-EUR", "CC-USDC", "USDC-EUR"],
     ],
-    "order_amount": Decimal("0.03"),  # amount in base currency A for each check
+    "order_amount": Decimal("1.0"),  # UNUSED: Set to 1.0 (ignored). Dynamic allocation from available balance is used instead.
+    "order_amount_pct": Decimal("1.0"),  # Use 100% of available base currency A balance for each arbitrage cycle
     "min_profitability_pct": Decimal("0.0"),  # Set to 0.0 to catch any positive opportunity (even tiny ones)
     "poll_interval": 5.0,  # seconds between each polling cycle
-    "execute_trades": False,  # False = monitoring only (log candidates); True = paper-trade execution
+    "execute_trades": True,  # True = enables candidate logging with fee simulation
     "use_paper_trade": True,  # Use paper-trade market for live-feed monitoring
     # Fee and slippage estimation used for pre-execution checks (percent)
-    # taker_fee_pct: percent fee charged by exchange per trade (e.g. 0.26 for 0.26%)
-    # slippage_pct_per_leg: conservative per-leg price impact to apply when simulating execution
-    "taker_fee_pct": Decimal("0.26"),
-    "slippage_pct_per_leg": Decimal("0.2"),
+    # 0% FEES under €10k volume! 🎉
+    "taker_fee_pct": Decimal("0.00"),  # ZERO FEES!
+    "slippage_pct_per_leg": Decimal("0.03"),  # Conservative 0.03% per leg
     # If True, the bot will log a warning and skip simulated execution when expected net profit
     # after fees+slippage is below `min_profitability_pct`.
     "warn_before_execute": False,  # Don't warn, just log all candidates
@@ -187,20 +256,21 @@ def compute_implied_price(price_ab: Decimal, price_bc: Decimal) -> Decimal:
     return price_ab * price_bc
 
 
-def _get_mid_price(curr_market, pair: str, exchange: str) -> Decimal:
-    """Try to obtain a mid-price for `pair` using the market first.
+def _get_bid_ask_prices(curr_market, pair: str, exchange: str) -> tuple:
+    """Get bid and ask prices for a pair.
 
-    If the connector/maket does not have an order book for the pair, fall
-    back to a REST Ticker query for Kraken (when exchange == 'kraken').
-    Returns a Decimal price (quote per base) or raises an exception if both
-    methods fail.
+    Returns (bid, ask) tuple as Decimals.
+    For triangular arbitrage, you MUST use:
+    - ASK when BUYING (you pay the ask price)
+    - BID when SELLING (you receive the bid price)
     """
     try:
-        # primary: use connector-provided price
-        p = curr_market.get_price_by_type(pair, PriceType.MidPrice)
-        return Decimal(str(p))
+        # Try to get bid/ask from connector
+        bid_price = curr_market.get_price_by_type(pair, PriceType.BestBid)
+        ask_price = curr_market.get_price_by_type(pair, PriceType.BestAsk)
+        return Decimal(str(bid_price)), Decimal(str(ask_price))
     except Exception as e:
-        logger.debug("Connector price read failed for %s: %s", pair, e)
+        logger.debug("Connector bid/ask read failed for %s: %s", pair, e)
 
     # fallback: use Kraken REST Ticker if applicable
     if exchange.lower() == 'kraken':
@@ -210,13 +280,12 @@ def _get_mid_price(curr_market, pair: str, exchange: str) -> Decimal:
             if not kr_pair:
                 raise Exception(f"No Kraken mapping for HB pair '{pair}'")
 
-            logger.info("REST-fallback: ophalen ticker voor %s (Kraken code %s)", pair, kr_pair)
+            logger.debug("REST-fallback: ophalen ticker voor %s (Kraken code %s)", pair, kr_pair)
             url = f"https://api.kraken.com/0/public/Ticker?pair={urllib.parse.quote(kr_pair)}"
             with urllib.request.urlopen(url, timeout=10) as r:
                 data = json.load(r)
 
             res = data.get('result') or {}
-            # result key can differ from requested kr_pair; pick the first available
             if not res:
                 raise Exception("Empty ticker result from Kraken")
             first = next(iter(res.values()))
@@ -228,23 +297,23 @@ def _get_mid_price(curr_market, pair: str, exchange: str) -> Decimal:
                 last = first.get('c', [None])[0] if first.get('c') else None
                 if last is None:
                     raise Exception("No bid/ask/last available in Kraken ticker")
-                return Decimal(str(last))
+                last_dec = Decimal(str(last))
+                return last_dec, last_dec  # Use last price for both if no bid/ask
 
-            mid = (bid + ask) / Decimal('2')
-            logger.debug("REST-fallback ticker mid for %s: bid=%s ask=%s mid=%s", pair, bid, ask, mid)
-            return mid
+            logger.debug("REST-fallback ticker for %s: bid=%s ask=%s", pair, bid, ask)
+            return bid, ask
         except Exception as e:
             logger.warning("REST-fallback failed for %s: %s", pair, e)
             raise
 
-    # If not Kraken or fallback not available, re-raise original situation
     raise Exception(f"No order book and no REST fallback available for pair {pair}")
 
 
 async def monitor_loop(config):
     exchange = config["exchange"]
     triples: List[List[str]] = config["triples"]
-    order_amount: Decimal = config["order_amount"]
+    order_amount: Decimal = config["order_amount"]  # UNUSED if order_amount_pct is set
+    order_amount_pct: Decimal = config.get("order_amount_pct", Decimal("1.0"))  # % of available balance to use
     min_profit = config["min_profitability_pct"] / Decimal("100")
     poll_interval = config["poll_interval"]
     execute_trades = config["execute_trades"]
@@ -287,6 +356,27 @@ async def monitor_loop(config):
         logger.debug("Monitored pairs (sample): %s", monitored_pairs[:50])
         logger.info("Nu maak ik paper-trade market aan en start ik netwerk om orderboeken te vullen...")
         market = create_paper_trade_market(exchange, monitored_pairs)
+
+        # Initialize paper-trade account with starting balances
+        initial_balances = {
+            'ETH': Decimal('0.5'),      # ~€50 at current rates
+            'USDC': Decimal('50.0'),    # ~€50
+            'EUR': Decimal('50.0'),     # €50
+            'AUD': Decimal('50.0'),     # ~€30 AUD
+            'USD': Decimal('50.0'),     # ~€50
+            'GBP': Decimal('40.0'),     # ~€50
+            'CAD': Decimal('65.0'),     # ~€50
+            'CHF': Decimal('45.0'),     # ~€50
+            'JPY': Decimal('5500.0'),   # ~€50
+            'USDT': Decimal('50.0'),    # ~€50
+        }
+        logger.info("Initializing paper-trade balances:")
+        for currency, amount in initial_balances.items():
+            try:
+                market.set_balance(currency, amount)
+                logger.info("  %s: %s", currency, amount)
+            except Exception as e:
+                logger.debug("  %s: failed to set balance (%s)", currency, e)
     else:
         # Create a non-trading connector instance which provides live order book data by default
         conn_settings = AllConnectorSettings.get_connector_settings()
@@ -474,69 +564,141 @@ async def monitor_loop(config):
             for triple in triples:
                 logger.debug("Nu ophalen van prijzen voor triple: %s", triple)
                 a_b, b_c, a_c = triple
+
+                # Extract base currency from the first pair (e.g., "ETH-USDC" -> "ETH")
+                base_currency = a_b.split('-')[0]
+
+                # Fetch available balance for base currency A
                 try:
-                    price_ab = _get_mid_price(market, a_b, exchange)
-                    price_bc = _get_mid_price(market, b_c, exchange)
-                    price_ac = _get_mid_price(market, a_c, exchange)
+                    available_balance = Decimal(str(market.get_balance(base_currency)))
+                    if available_balance <= 0:
+                        logger.debug("Geen beschikbaar saldo voor %s, sla triple %s over", base_currency, triple)
+                        continue
+                    # Calculate order amount as percentage of available balance
+                    order_amount_for_cycle = available_balance * order_amount_pct
+                except Exception as e:
+                    logger.debug("Ophalen saldo voor %s mislukt, gebruik fallback fixed amount: %s", base_currency, e)
+                    order_amount_for_cycle = order_amount
+
+                # 🔧 FIX: Determine BUY/SELL direction per leg based on asset flow
+                # Route ["ETH-EUR", "ETH-USDT", "USDT-EUR"] means:
+                # - Start with EUR (quote of first pair)
+                # - Leg 1: BUY ETH with EUR (ETH-EUR pair, we buy base)
+                # - Leg 2: SELL ETH for USDT (ETH-USDT pair, we sell base)
+                # - Leg 3: SELL USDT for EUR (USDT-EUR pair, we sell base)
+
+                try:
+                    bid_ab, ask_ab = _get_bid_ask_prices(market, a_b, exchange)
+                    bid_bc, ask_bc = _get_bid_ask_prices(market, b_c, exchange)
+                    bid_ac, ask_ac = _get_bid_ask_prices(market, a_c, exchange)
                 except Exception as e:
                     logger.info("Ophalen prijzen voor triple %s mislukt (connector+REST fallback): %s", triple, e)
                     continue
-                # mark that we successfully read prices for this triple
                 checked_count += 1
 
-                implied_ac = compute_implied_price(price_ab, price_bc)
+                # Parse assets from pairs (format: BASE-QUOTE)
+                base_ab, quote_ab = a_b.split('-')
+                base_bc, quote_bc = b_c.split('-')
+                base_ac, quote_ac = a_c.split('-')
 
-                # relative edge: (implied - actual) / actual
-                if price_ac == 0:
+                # Triangular arbitrage: simulate trading 1 unit of start currency through the route
+                start_currency = quote_ab
+                start_amount = Decimal('1')
+
+                # Leg 1: We have start_currency, trade on a_b pair
+                if start_currency == quote_ab:
+                    # BUY base with quote (e.g., buy ETH with EUR)
+                    amount_after_leg1 = start_amount / ask_ab
+                    asset_after_leg1 = base_ab
+                    leg1_side = "BUY"
+                else:
+                    # SELL base for quote
+                    amount_after_leg1 = start_amount * bid_ab
+                    asset_after_leg1 = quote_ab
+                    leg1_side = "SELL"
+
+                # Leg 2: We have asset_after_leg1, trade on b_c pair
+                if asset_after_leg1 == base_bc:
+                    # We have base, SELL it for quote
+                    amount_after_leg2 = amount_after_leg1 * bid_bc
+                    asset_after_leg2 = quote_bc
+                    leg2_side = "SELL"
+                elif asset_after_leg1 == quote_bc:
+                    # We have quote, BUY base
+                    amount_after_leg2 = amount_after_leg1 / ask_bc
+                    asset_after_leg2 = base_bc
+                    leg2_side = "BUY"
+                else:
+                    logger.warning("Invalid route %s: asset %s not in pair %s", triple, asset_after_leg1, b_c)
                     continue
-                edge = (implied_ac - price_ac) / price_ac
+
+                # Leg 3: We have asset_after_leg2, trade on a_c pair to get back start_currency
+                if asset_after_leg2 == base_ac:
+                    # We have base, SELL it for quote
+                    amount_after_leg3 = amount_after_leg2 * bid_ac
+                    asset_after_leg3 = quote_ac
+                    leg3_side = "SELL"
+                elif asset_after_leg2 == quote_ac:
+                    # We have quote, BUY base
+                    amount_after_leg3 = amount_after_leg2 / ask_ac
+                    asset_after_leg3 = base_ac
+                    leg3_side = "BUY"
+                else:
+                    logger.warning("Invalid route %s: asset %s not in pair %s", triple, asset_after_leg2, a_c)
+                    continue
+
+                # Check if we ended up with start currency
+                if asset_after_leg3 != start_currency:
+                    logger.warning("Route %s doesn't return to start currency %s (ended with %s)",
+                                   triple, start_currency, asset_after_leg3)
+                    continue
+
+                # Calculate edge: (final_amount - start_amount) / start_amount
+                edge = (amount_after_leg3 - start_amount) / start_amount
+
+                logger.debug("Triple %s: %s→%s→%s→%s | %.6f→%.6f→%.6f→%.6f | edge=%.4f%%",
+                             triple, start_currency, asset_after_leg1, asset_after_leg2, asset_after_leg3,
+                             start_amount, amount_after_leg1, amount_after_leg2, amount_after_leg3,
+                             float(edge * 100))
 
                 if edge > min_profit:
-                    logger.info("Arbitrage detected for triple %s: implied_ac=%.8f actual_ac=%.8f edge=%.4f%%",
-                                triple, implied_ac, price_ac, float(edge * 100))
+                    logger.info("Arbitrage detected for triple %s: edge=%.4f%% (route: %s→%s→%s→%s)",
+                                triple, float(edge * 100), start_currency, asset_after_leg1, asset_after_leg2, asset_after_leg3)
                     found_count += 1
                     # collect human-friendly detail for summary and persistence
                     detail = {
                         "timestamp": datetime.utcnow().isoformat(),
                         "triple": triple,
-                        "implied_ac": float(implied_ac),
-                        "actual_ac": float(price_ac),
                         "edge_pct": float(edge * 100),
+                        "route": f"{start_currency}→{asset_after_leg1}→{asset_after_leg2}→{asset_after_leg3}",
                     }
 
                     if execute_trades:
-                        logger.info("Nu ga ik simulatie uitvoeren voor cycle %s amount=%s", triple, order_amount)
-                        logger.debug("Toepassen fees=%.4f%% slippage_per_leg=%.4f%%", float(taker_fee * 100), float(slippage * 100))
-                        # Conservative simulated execution applying slippage and taker fees per leg.
-                        # Prices and amounts are Decimal.
-                        amount_a = order_amount
-                        # A -> B: sell A at price_ab => receive B = amount_a * (price_ab * (1 - slippage)) * (1 - fee)
-                        effective_price_ab = price_ab * (Decimal("1") - slippage)
-                        amount_b = amount_a * effective_price_ab * (Decimal("1") - taker_fee)
+                        # The edge calculation above already includes proper bid/ask logic
+                        # Now apply slippage and fees to estimate final profit
+                        logger.info("Candidate found for cycle %s with edge=%.4f%% (before slippage/fees)", triple, float(edge * 100))
+                        logger.debug("Applying fees=%.4f%% slippage_per_leg=%.4f%%", float(taker_fee * 100), float(slippage * 100))
 
-                        # B -> C: sell B at price_bc => receive C = amount_b * (price_bc * (1 - slippage)) * (1 - fee)
-                        effective_price_bc = price_bc * (Decimal("1") - slippage)
-                        amount_c = amount_b * effective_price_bc * (Decimal("1") - taker_fee)
+                        # Total slippage impact (3 legs)
+                        total_slippage = slippage * Decimal("3")
+                        # Total fee impact (3 legs)
+                        total_fees = taker_fee * Decimal("3")
 
-                        # C -> A: buy A with C at A-C price; buying uses a worse price due to slippage
-                        effective_price_ac = price_ac * (Decimal("1") + slippage)
-                        # amount of A we can buy = (amount_c / effective_price_ac) * (1 - fee)
-                        amount_a_final = (amount_c / effective_price_ac) * (Decimal("1") - taker_fee) if price_ac > 0 else Decimal("0")
+                        # Estimated profit after slippage and fees
+                        profit_pct_after_costs = edge - total_slippage - total_fees
 
-                        profit = amount_a_final - amount_a
-                        profit_pct = (profit / amount_a) if amount_a != 0 else Decimal("0")
-                        logger.info("Simulated cycle result (after fees %.4f%% and slippage %.4f%%/leg): start A=%.8f end A=%.8f profit=%.8f (%.4f%%)",
-                                    float(taker_fee * 100), float(slippage * 100), amount_a, amount_a_final, profit, float(profit_pct * 100))
+                        logger.info("Simulated cycle result: edge=%.4f%% - slippage=%.4f%% - fees=%.4f%% = profit_after_costs=%.4f%%",
+                                    float(edge * 100), float(total_slippage * 100), float(total_fees * 100), float(profit_pct_after_costs * 100))
 
                         # Pre-execution check: warn and skip if net profit after fees+slippage is below configured min_profit
-                        if warn_before_execute and profit_pct <= min_profit:
+                        if warn_before_execute and profit_pct_after_costs <= min_profit:
                             logger.warning("Simulatie resultaat: cycle %s niet rendabel na fees+slippage: profit=%.4f%% <= min_profit=%.4f%% -- simulatie overgeslagen.",
-                                           triple, float(profit_pct * 100), float(min_profit * 100))
+                                           triple, float(profit_pct_after_costs * 100), float(min_profit * 100))
                         else:
-                            logger.info("Simulatie resultaat: cycle %s lijkt rendabel: verwacht profit after fees+slippage = %.4f%%", triple, float(profit_pct * 100))
+                            logger.info("Simulatie resultaat: cycle %s lijkt rendabel: verwacht profit after fees+slippage = %.4f%%", triple, float(profit_pct_after_costs * 100))
                         # attach simulated profit to detail
                         try:
-                            detail['profit_pct_after_fees'] = float(profit_pct * 100)
+                            detail['profit_pct_after_fees'] = float(profit_pct_after_costs * 100)
                         except Exception:
                             detail['profit_pct_after_fees'] = None
                 # else: no arbitrage

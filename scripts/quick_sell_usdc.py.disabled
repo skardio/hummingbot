@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Verkoop USDC snel via Kraken API"""
+import os
+import time
+import hmac
+import hashlib
+import base64
+import urllib.parse
+import urllib.request
+import json
+
+API_KEY = os.environ.get('KRAKEN_API_KEY', '')
+API_SECRET = os.environ.get('KRAKEN_API_SECRET', '')
+
+def kraken_request(uri_path, data):
+    """Make Kraken API request"""
+    postdata = urllib.parse.urlencode(data)
+    encoded = (str(data['nonce']) + postdata).encode()
+    message = uri_path.encode() + hashlib.sha256(encoded).digest()
+
+    mac = hmac.new(base64.b64decode(API_SECRET), message, hashlib.sha512)
+    sigdigest = base64.b64encode(mac.digest())
+
+    headers = {
+        'API-Key': API_KEY,
+        'API-Sign': sigdigest.decode()
+    }
+
+    req = urllib.request.Request('https://api.kraken.com' + uri_path,
+                                  postdata.encode(), headers)
+    response = urllib.request.urlopen(req)
+    return json.loads(response.read())
+
+# Get balance
+print("💰 Checking balance...")
+balance_resp = kraken_request('/0/private/Balance', {'nonce': int(time.time() * 1000)})
+balances = balance_resp.get('result', {})
+
+eur = float(balances.get('ZEUR', 0))
+usdc = float(balances.get('USDC', 0))
+
+print(f"   EUR: {eur:.2f}")
+print(f"   USDC: {usdc:.2f}")
+
+if usdc > 0.1:
+    print(f"\n🔄 Selling {usdc:.2f} USDC for EUR...")
+
+    # Sell USDC (market order)
+    order_data = {
+        'nonce': int(time.time() * 1000),
+        'pair': 'USDCEUR',
+        'type': 'sell',
+        'ordertype': 'market',
+        'volume': str(usdc)
+    }
+
+    order_resp = kraken_request('/0/private/AddOrder', order_data)
+
+    if order_resp.get('error'):
+        print(f"❌ Error: {order_resp['error']}")
+    else:
+        print(f"✓ Order placed: {order_resp.get('result', {})}")
+
+        # Check new balance
+        time.sleep(2)
+        balance_resp = kraken_request('/0/private/Balance', {'nonce': int(time.time() * 1000)})
+        balances = balance_resp.get('result', {})
+
+        new_eur = float(balances.get('ZEUR', 0))
+        new_usdc = float(balances.get('USDC', 0))
+
+        print(f"\n💰 NEW BALANCE:")
+        print(f"   EUR: {new_eur:.2f} (was {eur:.2f})")
+        print(f"   USDC: {new_usdc:.2f} (was {usdc:.2f})")
+else:
+    print("\n✓ No USDC to sell")

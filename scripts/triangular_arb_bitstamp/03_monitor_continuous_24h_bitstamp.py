@@ -11,11 +11,16 @@ Usage:
 This script is intentionally conservative: by default it only detects and logs
 opportunities. Set `execute_trades=True` to simulate execution in paper-trade markets.
 """
+import os
+import sys
+
+# Add hummingbot repo root to path so we can import hummingbot modules
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 import asyncio
 import importlib
 import json
 import logging
-import os
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -49,12 +54,13 @@ except Exception:
 
 # Simple config - update as needed
 CONFIG = {
-    "exchange": "kraken",
+    "exchange": "kraken",  # Use Kraken connector for data (Bitstamp doesn't have good Hummingbot integration yet)
     # Each triple: three trading pairs (A-B, B-C, A-C) where pairs are in Hummingbot format BASE-QUOTE
-    # 35 routes from top-20 ETH + top-15 USDC (ranked by 24h liquidity)
+    # Routes adapted for Bitstamp (which has different pair support than Kraken)
+    # Bitstamp supports: BTC, ETH, USDC, EUR, GBP, USD, USDT, XRP, LTC, BCH, XLM, etc.
     # Bot will continuously monitor and report when profit edge > min_profitability_pct
     "triples": [
-        # === ETH Routes (Top 20) ===
+        # === ETH Routes ===
         ["ETH-EUR", "EUR-USD", "ETH-USD"],
         ["ETH-USDC", "USDC-EUR", "ETH-EUR"],
         ["ETH-USDC", "USDC-USD", "ETH-USD"],
@@ -65,42 +71,31 @@ CONFIG = {
         ["ETH-USDC", "USDC-GBP", "ETH-GBP"],
         ["ETH-USDT", "USDT-GBP", "ETH-GBP"],
         ["ETH-GBP", "GBP-USD", "ETH-USD"],
-        ["ETH-USDC", "USDC-CAD", "ETH-CAD"],
-        ["ETH-USD", "USD-CAD", "ETH-CAD"],
-        ["ETH-USDT", "USDT-CAD", "ETH-CAD"],
-        ["ETH-AUD", "AUD-USD", "ETH-USD"],
-        ["ETH-USDT", "USDT-AUD", "ETH-AUD"],
-        ["ETH-USDC", "USDC-AUD", "ETH-AUD"],
-        ["ETH-EUR", "EUR-CHF", "ETH-CHF"],
-        ["ETH-USDT", "USDT-CHF", "ETH-CHF"],
-        ["ETH-USD", "USD-CHF", "ETH-CHF"],
-        ["ETH-USDC", "USDC-CHF", "ETH-CHF"],
-        # === USDC Routes (Top 15) ===
+        # === USDC Routes ===
         ["USDC-USDT", "USDT-USD", "USDC-USD"],
         ["USDC-EUR", "EUR-USD", "USDC-USD"],
         ["USDC-USDT", "USDT-EUR", "USDC-EUR"],
-        ["USDC-USD", "USD-CAD", "USDC-CAD"],
-        ["USDC-USDT", "USDT-CAD", "USDC-CAD"],
         ["USDC-USDT", "USDT-GBP", "USDC-GBP"],
         ["USDC-GBP", "GBP-USD", "USDC-USD"],
-        ["USDC-USDT", "USDT-AUD", "USDC-AUD"],
-        ["USDC-EUR", "EUR-GBP", "USDC-GBP"],
-        ["USDC-AUD", "AUD-USD", "USDC-USD"],
-        ["USDC-EUR", "EUR-CHF", "USDC-CHF"],
-        ["USDC-USD", "USD-CHF", "USDC-CHF"],
-        ["USDC-USDT", "USDT-CHF", "USDC-CHF"],
-        ["USDC-EUR", "EUR-CAD", "USDC-CAD"],
-        ["USDC-EUR", "EUR-AUD", "USDC-AUD"],
+        # === EUR Routes ===
+        ["EUR-GBP", "GBP-USD", "EUR-USD"],
+        # === BTC Routes ===
+        ["BTC-EUR", "EUR-USD", "BTC-USD"],
+        ["BTC-GBP", "GBP-USD", "BTC-USD"],
+        # === Additional stable routes ===
+        ["USDT-EUR", "EUR-USD", "USDT-USD"],
+        ["USDT-GBP", "GBP-USD", "USDT-USD"],
     ],
-    "order_amount": Decimal("0.03"),  # amount in base currency A for each check
+    "order_amount": Decimal("1.0"),  # UNUSED: Set to 1.0 (ignored). Dynamic allocation from available balance is used instead.
+    "order_amount_pct": Decimal("1.0"),  # Use 100% of available base currency A balance for each arbitrage cycle
     "min_profitability_pct": Decimal("0.0"),  # Set to 0.0 to catch any positive opportunity (even tiny ones)
     "poll_interval": 5.0,  # seconds between each polling cycle
     "execute_trades": False,  # False = monitoring only (log candidates); True = paper-trade execution
     "use_paper_trade": True,  # Use paper-trade market for live-feed monitoring
     # Fee and slippage estimation used for pre-execution checks (percent)
-    # taker_fee_pct: percent fee charged by exchange per trade (e.g. 0.26 for 0.26%)
+    # taker_fee_pct: percent fee charged by exchange per trade (e.g. 0.5 for 0.5% on Bitstamp)
     # slippage_pct_per_leg: conservative per-leg price impact to apply when simulating execution
-    "taker_fee_pct": Decimal("0.26"),
+    "taker_fee_pct": Decimal("0.5"),
     "slippage_pct_per_leg": Decimal("0.2"),
     # If True, the bot will log a warning and skip simulated execution when expected net profit
     # after fees+slippage is below `min_profitability_pct`.
@@ -109,62 +104,45 @@ CONFIG = {
 
 
 def _fetch_kraken_hb_pairs() -> dict:
-    """Return a mapping of Hummingbot-style trading pairs (BASE-QUOTE) -> Kraken pair code supported by Kraken.
+    """Return a mapping of Hummingbot-style trading pairs (BASE-QUOTE) -> Bitstamp pair code supported by Bitstamp.
 
-    Prefer using the AssetPairs 'wsname' when available (it contains 'BASE/QUOTE').
-    Returns a dict where keys are 'BASE-QUOTE' strings and values are the Kraken pair code.
+    Bitstamp uses lowercase pair names like 'btcusd', 'ethusd', etc.
+    Returns a dict where keys are 'BASE-QUOTE' strings and values are the Bitstamp pair code.
     """
     # simple in-memory cache to avoid repeated HTTP calls in a single run
     if getattr(_fetch_kraken_hb_pairs, "_cache", None) is not None:
         return _fetch_kraken_hb_pairs._cache
 
     try:
-        logger.info("Ophalen Kraken AssetPairs van https://api.kraken.com/0/public/AssetPairs ...")
-        url = 'https://api.kraken.com/0/public/AssetPairs'
+        logger.info("Ophalen Bitstamp trading pairs van https://www.bitstamp.net/api/v2/trading-pairs-info/...")
+        url = 'https://www.bitstamp.net/api/v2/trading-pairs-info/'
         with urllib.request.urlopen(url, timeout=10) as r:
             data = json.load(r)
 
-        # Debug: list a few AssetPairs to help development (kan veel zijn)
-        pairs = data.get('result', {})
-        try:
-            sample = list(pairs.items())[:10]
-            for pair_code, info in sample:
-                logger.debug("Kraken AssetPair sample - %s: %s", pair_code, info.get('wsname'))
-        except Exception:
-            pass
+        # Bitstamp returns array of objects with 'url_symbol' field (e.g., 'btcusd')
         hb_map = {}
-        for pair_code, info in pairs.items():
-            # prefer wsname like 'FIL/XBT'
-            ws = info.get('wsname') or info.get('wsname')
-            if ws and '/' in ws:
-                parts = ws.split('/')
-                if len(parts) == 2:
-                    base_hb = parts[0].upper()
-                    quote_hb = parts[1].upper()
-                    hb = f"{base_hb}-{quote_hb}"
-                    hb_map[hb] = pair_code
-                    continue
-
-            # fallback: try to use 'base' and 'quote' fields and map via Assets altname
-            try:
-                assets_resp = json.load(urllib.request.urlopen('https://api.kraken.com/0/public/Assets', timeout=10))
-                assets = {k: v.get('altname', k).upper() for k, v in assets_resp.get('result', {}).items()}
-                base = info.get('base')
-                quote = info.get('quote')
-                if base in assets and quote in assets:
-                    base_hb = assets[base].upper()
-                    quote_hb = assets[quote].upper()
-                    hb = f"{base_hb}-{quote_hb}"
-                    hb_map[hb] = pair_code
-            except Exception:
-                # ignore per-pair asset mapping failures
+        for pair_info in data:
+            url_symbol = pair_info.get('url_symbol', '').upper()
+            if not url_symbol:
                 continue
+
+            # url_symbol is like 'BTCUSD' -> convert to 'BTC-USD'
+            # Most pairs are 3-letter/6-letter, but handle variable lengths
+            # Try to split intelligently - for now assume last 3-4 chars are quote
+            if len(url_symbol) >= 6:
+                # Assume quote currency is last 3 chars (USD, EUR, GBP, etc.)
+                base = url_symbol[:-3]
+                quote = url_symbol[-3:]
+                hb = f"{base}-{quote}"
+                hb_map[hb] = url_symbol
+                logger.debug("Bitstamp pair: %s -> %s", url_symbol, hb)
 
         # store in function attribute cache
         _fetch_kraken_hb_pairs._cache = hb_map
+        logger.info("Cached %d Bitstamp trading pairs", len(hb_map))
         return hb_map
     except Exception:
-        logger.exception('Failed to fetch Kraken AssetPairs; assuming no external filtering')
+        logger.exception('Failed to fetch Bitstamp trading pairs; assuming no external filtering')
         return {}
 
 
@@ -202,33 +180,30 @@ def _get_mid_price(curr_market, pair: str, exchange: str) -> Decimal:
     except Exception as e:
         logger.debug("Connector price read failed for %s: %s", pair, e)
 
-    # fallback: use Kraken REST Ticker if applicable
-    if exchange.lower() == 'kraken':
+    # fallback: use Bitstamp REST Ticker if applicable
+    if exchange.lower() == 'bitstamp':
         try:
-            hb2kr = _fetch_kraken_hb_pairs()
-            kr_pair = hb2kr.get(pair)
-            if not kr_pair:
-                raise Exception(f"No Kraken mapping for HB pair '{pair}'")
+            hb2bs = _fetch_kraken_hb_pairs()
+            bs_pair = hb2bs.get(pair)
+            if not bs_pair:
+                raise Exception(f"No Bitstamp mapping for HB pair '{pair}'")
 
-            logger.info("REST-fallback: ophalen ticker voor %s (Kraken code %s)", pair, kr_pair)
-            url = f"https://api.kraken.com/0/public/Ticker?pair={urllib.parse.quote(kr_pair)}"
+            logger.info("REST-fallback: ophalen ticker voor %s (Bitstamp code %s)", pair, bs_pair)
+            # Bitstamp ticker: https://www.bitstamp.net/api/v2/ticker/{pair}/
+            url = f"https://www.bitstamp.net/api/v2/ticker/{bs_pair.lower()}/"
             with urllib.request.urlopen(url, timeout=10) as r:
                 data = json.load(r)
 
-            res = data.get('result') or {}
-            # result key can differ from requested kr_pair; pick the first available
-            if not res:
-                raise Exception("Empty ticker result from Kraken")
-            first = next(iter(res.values()))
-            # bids and asks are lists of [price, wholeLotVolume, lotVolume]
-            bid = Decimal(str(first.get('b', [None])[0])) if first.get('b') else None
-            ask = Decimal(str(first.get('a', [None])[0])) if first.get('a') else None
+            # Bitstamp ticker returns object with 'bid', 'ask' fields
+            bid = Decimal(str(data.get('bid'))) if data.get('bid') else None
+            ask = Decimal(str(data.get('ask'))) if data.get('ask') else None
+            last = Decimal(str(data.get('last'))) if data.get('last') else None
+
             if bid is None or ask is None:
-                # try 'c' (last trade) as fallback
-                last = first.get('c', [None])[0] if first.get('c') else None
+                # try 'last' (last trade price) as fallback
                 if last is None:
-                    raise Exception("No bid/ask/last available in Kraken ticker")
-                return Decimal(str(last))
+                    raise Exception("No bid/ask/last available in Bitstamp ticker")
+                return last
 
             mid = (bid + ask) / Decimal('2')
             logger.debug("REST-fallback ticker mid for %s: bid=%s ask=%s mid=%s", pair, bid, ask, mid)
@@ -237,14 +212,15 @@ def _get_mid_price(curr_market, pair: str, exchange: str) -> Decimal:
             logger.warning("REST-fallback failed for %s: %s", pair, e)
             raise
 
-    # If not Kraken or fallback not available, re-raise original situation
+    # If not Bitstamp or fallback not available, re-raise original situation
     raise Exception(f"No order book and no REST fallback available for pair {pair}")
 
 
 async def monitor_loop(config):
     exchange = config["exchange"]
     triples: List[List[str]] = config["triples"]
-    order_amount: Decimal = config["order_amount"]
+    order_amount: Decimal = config["order_amount"]  # UNUSED if order_amount_pct is set
+    order_amount_pct: Decimal = config.get("order_amount_pct", Decimal("1.0"))  # % of available balance to use
     min_profit = config["min_profitability_pct"] / Decimal("100")
     poll_interval = config["poll_interval"]
     execute_trades = config["execute_trades"]
@@ -261,10 +237,10 @@ async def monitor_loop(config):
     logger.info("Exchange=%s Unique configured pairs=%d", exchange, len(unique_pairs))
 
     if use_paper:
-        # For some exchanges (Kraken) certain HB pairs in our triples may not actually exist on the exchange
+        # For some exchanges (Bitstamp) certain HB pairs in our triples may not actually exist on the exchange
         # and passing unsupported pairs into the connector can cause mapping KeyErrors during startup.
         supported_pairs = set()
-        if exchange.lower() == 'kraken':
+        if exchange.lower() == 'bitstamp':
             supported_pairs = _fetch_kraken_hb_pairs()
         if supported_pairs:
             valid_pairs = [p for p in unique_pairs if p in supported_pairs]
@@ -287,6 +263,27 @@ async def monitor_loop(config):
         logger.debug("Monitored pairs (sample): %s", monitored_pairs[:50])
         logger.info("Nu maak ik paper-trade market aan en start ik netwerk om orderboeken te vullen...")
         market = create_paper_trade_market(exchange, monitored_pairs)
+
+        # Initialize paper-trade account with starting balances
+        initial_balances = {
+            'ETH': Decimal('0.5'),      # ~€50 at current rates
+            'USDC': Decimal('50.0'),    # ~€50
+            'EUR': Decimal('50.0'),     # €50
+            'AUD': Decimal('50.0'),     # ~€30 AUD
+            'USD': Decimal('50.0'),     # ~€50
+            'GBP': Decimal('40.0'),     # ~€50
+            'CAD': Decimal('65.0'),     # ~€50
+            'CHF': Decimal('45.0'),     # ~€50
+            'JPY': Decimal('5500.0'),   # ~€50
+            'USDT': Decimal('50.0'),    # ~€50
+        }
+        logger.info("Initializing paper-trade balances:")
+        for currency, amount in initial_balances.items():
+            try:
+                market.set_balance(currency, amount)
+                logger.info("  %s: %s", currency, amount)
+            except Exception as e:
+                logger.debug("  %s: failed to set balance (%s)", currency, e)
     else:
         # Create a non-trading connector instance which provides live order book data by default
         conn_settings = AllConnectorSettings.get_connector_settings()
@@ -296,7 +293,7 @@ async def monitor_loop(config):
 
         # Filter trading_pairs for this connector similar to the paper-trade path to avoid passing unsupported pairs
         connector_supported = []
-        if exchange.lower() == 'kraken':
+        if exchange.lower() == 'bitstamp':
             ks = _fetch_kraken_hb_pairs()
             if ks:
                 connector_supported = [p for p in unique_pairs if p in ks]
@@ -353,16 +350,10 @@ async def monitor_loop(config):
                 err = str(e)
                 logger.warning("Connector initialisatie gaf TypeError, probeer remapping van API key namen: %s", err)
                 remapped = False
-                if exchange.lower() == 'kraken':
-                    # map generic api_key/api_secret -> kraken_api_key/kraken_secret_key
-                    if 'api_key' in kwargs or 'api_secret' in kwargs:
-                        k = kwargs.pop('api_key', None)
-                        s = kwargs.pop('api_secret', None)
-                        if k:
-                            kwargs['kraken_api_key'] = k
-                        if s:
-                            kwargs['kraken_secret_key'] = s
-                        remapped = True
+                if exchange.lower() == 'bitstamp':
+                    # map generic api_key/api_secret -> bitstamp_api_key/bitstamp_secret_key (if needed)
+                    # For now, leave as-is since Bitstamp connector might use standard names
+                    remapped = False
                 # Add other exchange-specific remappings here if needed
 
                 if remapped:
@@ -474,6 +465,22 @@ async def monitor_loop(config):
             for triple in triples:
                 logger.debug("Nu ophalen van prijzen voor triple: %s", triple)
                 a_b, b_c, a_c = triple
+
+                # Extract base currency from the first pair (e.g., "ETH-USDC" -> "ETH")
+                base_currency = a_b.split('-')[0]
+
+                # Fetch available balance for base currency A
+                try:
+                    available_balance = Decimal(str(market.get_balance(base_currency)))
+                    if available_balance <= 0:
+                        logger.debug("Geen beschikbaar saldo voor %s, sla triple %s over", base_currency, triple)
+                        continue
+                    # Calculate order amount as percentage of available balance
+                    order_amount_for_cycle = available_balance * order_amount_pct
+                except Exception as e:
+                    logger.debug("Ophalen saldo voor %s mislukt, gebruik fallback fixed amount: %s", base_currency, e)
+                    order_amount_for_cycle = order_amount
+
                 try:
                     price_ab = _get_mid_price(market, a_b, exchange)
                     price_bc = _get_mid_price(market, b_c, exchange)
@@ -505,11 +512,11 @@ async def monitor_loop(config):
                     }
 
                     if execute_trades:
-                        logger.info("Nu ga ik simulatie uitvoeren voor cycle %s amount=%s", triple, order_amount)
+                        logger.info("Nu ga ik simulatie uitvoeren voor cycle %s amount=%s", triple, order_amount_for_cycle)
                         logger.debug("Toepassen fees=%.4f%% slippage_per_leg=%.4f%%", float(taker_fee * 100), float(slippage * 100))
                         # Conservative simulated execution applying slippage and taker fees per leg.
                         # Prices and amounts are Decimal.
-                        amount_a = order_amount
+                        amount_a = order_amount_for_cycle
                         # A -> B: sell A at price_ab => receive B = amount_a * (price_ab * (1 - slippage)) * (1 - fee)
                         effective_price_ab = price_ab * (Decimal("1") - slippage)
                         amount_b = amount_a * effective_price_ab * (Decimal("1") - taker_fee)
@@ -544,13 +551,13 @@ async def monitor_loop(config):
                 # if we found detail (edge>min_profit), persist to candidates log and append to list
                 if 'detail' in locals() and detail.get('triple') == triple:
                     found_details.append(detail)
-                    # persist to logs/tri_candidates.log
+                    # persist to logs/tri_candidates_bitstamp.log
                     try:
                         os.makedirs(os.path.join(os.getcwd(), 'logs'), exist_ok=True)
-                        with open(os.path.join('logs', 'tri_candidates.log'), 'a') as cf:
+                        with open(os.path.join('logs', 'tri_candidates_bitstamp.log'), 'a') as cf:
                             cf.write(json.dumps(detail) + '\n')
                     except Exception:
-                        logger.debug('Failed to write tri_candidates.log', exc_info=True)
+                        logger.debug('Failed to write tri_candidates_bitstamp.log', exc_info=True)
                     # remove local detail so next loop iteration doesn't re-use it
                     del detail
 
