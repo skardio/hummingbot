@@ -1,0 +1,99 @@
+# This configuration file defines the parameters for the multi-coin grid trading strategy.
+# The strategy automatically discovers and trades the best trending coins.
+
+# Logging Configuration
+log_level: INFO  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+                 # DEBUG: Detailed debugging information (very verbose)
+                 # INFO: Normal operation messages (recommended)
+                 # WARNING: Only warnings and errors
+                 # ERROR: Only errors
+                 # CRITICAL: Only critical errors
+
+# Exchange Configuration
+connector_name: kraken
+quote_asset: EUR
+
+
+paper_trading: false # Enable paper trading for testing
+                     # FIXED: Now initializes order books for common trading pairs
+
+# Coin Selection
+# Option 1: Manual trading pairs (if set, bot will ONLY trade these coins)
+# Format: ["COIN-QUOTE", "COIN-QUOTE", ...] or leave empty/null for auto-discovery
+manual_trading_pairs: null  # Example: ["XRP-EUR", "ADA-EUR", "SOL-EUR"] or null for auto-discovery
+
+# Option 2: Auto-discovery (only used if manual_trading_pairs is null/empty)
+max_coins_to_monitor: 20
+min_24h_volume_eur: 250000  # Minimum €250k daily volume (verhoogd voor betere liquiditeit)
+exclude_expensive_coins: true  # Exclude BTC/ETH
+
+# Coin Rotation
+coin_rotation_threshold: 90  # Replace coin after X updates without trades (~15 min @ 10s interval)
+
+# Trend Detection
+trend_lookback_minutes: 1440  # Track 24 hours (1440 minutes) of price history for real trends
+trend_min_change_pct: 0.15  # Minimum 0.15% trend to trade (lowered from 0.5% to find more opportunities)
+price_update_interval: 30  # Update prices every 30 seconds
+
+# Phase 2.5: Multi-Timeframe Trend Engine
+use_multi_timeframe: true  # Enable multi-timeframe analysis (60m, 240m, 1440m)
+trend_lookback_short_minutes: 60  # 1-hour lookback
+trend_lookback_mid_minutes: 240  # 4-hour lookback
+trend_lookback_long_minutes: 1440  # 24-hour lookback
+switch_threshold_percent: 1.5  # Minimum 1.5% trend_score difference to switch
+exit_short_threshold: -2.5  # Exit if 60m trend < -2.5% (RELAXED - voorkomt paniek exits bij kleine dips)
+exit_mid_threshold: -1.0  # Exit if 240m trend < -1.0% (RELAXED - alleen bij echte negatieve 4h trend)
+
+# PRO EXIT SYSTEM - Layer 3: Price-Based Emergency Exits
+emergency_exit_pct: -4.5  # Exit immediately if price drops 4.5% below entry (RELAXED - alleen bij echte crashes)
+hard_stop_pct: -6.0  # Fail-safe exit if price drops 6.0% below entry (RELAXED - last resort protection)
+
+# PRO EXIT SYSTEM - Layer 5: Grid Profit Exit
+min_grid_profit_pct: 0.6  # Exit if grid realized profit >= 0.6% (guarantees profit)
+
+# Startup Delay
+min_startup_wait_seconds: 3600  # Wait 1 hour (3600 seconds) before first trade
+
+# Switch Management
+min_switch_interval_seconds: 900  # Minimum 15 minutes between coin switches (Phase 3.3)
+min_hold_time_seconds: 3600  # Phase 3.3: Never switch <1 hour (anti-whipsaw + voorkomt paniek exits)
+smart_switch_k: 1.75  # Phase 3.1: Volatility multiplier for smart switch threshold (default 1.5-2.0)
+switch_cost_multiplier: 2.0  # Phase 3.2: Only switch if expected_profit > switch_cost * multiplier
+
+# Grid Configuration
+grid_range_pct_down: 3.0  # Place buy orders 3% below current price (fallback if ATR not available)
+grid_range_pct_up: 8.0  # Place sell orders 8% above current price (fallback if ATR not available)
+num_grids: 3  # Number of grid levels (base, will be adjusted by volatility - Phase 4.2)
+use_atr_grid_ranges: true  # Phase 4.1: Use ATR-based dynamic grid ranges
+atr_multiplier_down: 1.0  # Phase 4.1: Grid lower = price - (ATR * multiplier_down)
+atr_multiplier_up: 1.5  # Phase 4.1: Grid upper = price + (ATR * multiplier_up)
+use_asymmetric_grids: true  # Phase 4.3: Adjust grid distribution based on trend direction
+smart_refill_threshold_pct: 3.0  # Phase 4.4: Rebuild grid if price moved >3% since last grid
+
+# Capital Management
+total_amount_quote: 50  # Total €50 per grid (testing with paper trading)
+min_order_amount_quote: 10  # Minimum €10 per order
+
+# Risk Management
+stop_loss_pct: 0.08  # Stop loss at -8%
+take_profit_pct: 0.02  # Take profit at +2% per grid level
+
+# Phase 1.4: Position Size Limits
+max_exposure_per_coin_pct: 0.20  # Max 20% of capital per coin
+max_total_exposure_pct: 0.90  # Max 90% of capital total
+
+# Order Management
+max_open_orders: 5  # Maximum 5 open orders at once
+order_frequency: 3  # Wait 3 seconds between order placements
+
+blacklist:
+  - CCD-EUR
+  - FARTCOIN-EUR
+  - 0G-EUR
+  - 1INCH-EUR
+  - 2Z-EUR
+  - AB-EUR
+  - ACA-EUR
+  - USELESS-EUR
+  - CC-EUR
+  - GIGA-EUR  # Blacklisted: Exchange rate oracle errors (CoinGecko has no data)

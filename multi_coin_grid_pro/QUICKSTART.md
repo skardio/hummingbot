@@ -10,6 +10,9 @@
 # 1. Activate Hummingbot venv
 source ~/.venvs/bot/bin/activate
 
+# get_monitored_coins.py
+python multi_coin_grid_pro/scripts/get_monitored_coins.py
+
 # 2. Export Kraken API keys
 export KRAKEN_API_KEY="ld98d1D80ekCuThGZvFZnPQf4yKmuflpsn3PRLOFazNw2Jd/ECFl/6Sk"
 export KRAKEN_SECRET_KEY="4izpj+vDx6wmF6UelTAyVZLH3QwyyqKY3tvO7M9rrOQRjIKm6/It87aWEG/F2xTJnKU8miPn39EGCKockuG6jw=="
@@ -53,7 +56,7 @@ EOF
 
 ## Configuration
 
-Edit: `/home/mo/repos/hummingbot/multi_coin_grid_pro/conf/multi_coin_grid.yml`
+Edit: `/home/mo/repos/hummingbot/multi_coin_grid_pro/config/multi_coin_grid.yml`
 
 Key settings:
 ```yaml
@@ -164,7 +167,7 @@ python3 -c "import ccxt; e=ccxt.kraken({'apiKey':'YOUR_KEY','secret':'YOUR_SECRE
 ## Files
 
 - **Strategy:** `/home/mo/repos/hummingbot/scripts/multi_coin_grid_v2.py`
-- **Config:** `/home/mo/repos/hummingbot/multi_coin_grid_pro/conf/multi_coin_grid.yml`
+- **Config:** `/home/mo/repos/hummingbot/multi_coin_grid_pro/config/multi_coin_grid.yml`
 - **Controllers:** `/home/mo/repos/hummingbot/multi_coin_grid_pro/controllers/`
 - **Utils:** `/home/mo/repos/hummingbot/multi_coin_grid_pro/utils/`
 - **Tests:** `/home/mo/repos/hummingbot/multi_coin_grid_pro/tests/`

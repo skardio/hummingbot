@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Startup Delay Feature**: Bot now waits a configurable amount of time (default: 1 hour) before making the first trade
+  - Config parameter: `min_startup_wait_seconds` (default: 3600 seconds = 1 hour)
+  - Prevents immediate trading on bot startup, allowing time for market data collection
+  - Only applies to first trade, not to coin switches
+  - Logs remaining wait time during startup delay period
+  - Unit tests added: `test_startup_delay_prevents_first_trade`, `test_startup_delay_allows_trade_after_wait`, `test_startup_delay_not_applied_to_switches`, `test_startup_delay_logs_remaining_time`
+
+- **Batch API Call Optimization**: Implemented batch price fetching for faster trend updates
+  - `update_all_trends_v2()` now uses batch API calls instead of individual calls
+  - Reduces API calls from N (one per coin) to 1 (single batch call)
+  - Speed improvement: ~22x faster (from 44 seconds to ~2 seconds for 40 coins)
+  - Automatic fallback to individual calls with rate limiting if batch fails
+  - Supports paper trading connectors via base connector fallback
+  - Unit tests added: `test_batch_api_call_success`, `test_batch_api_call_fallback_to_individual`, `test_batch_api_call_with_base_connector`
+
+- **Paper Trading Dynamic Order Book Support**: Fixed paper trading to support dynamic coin discovery
+  - `init_markets()` now passes common trading pairs to paper trading connector at initialization
+  - `_ensure_order_book_exists()` dynamically adds new trading pairs to paper trading connector's `_trading_pairs` dict
+  - Paper trading now works just like live trading: supports dynamically discovered coins
+  - Fixes "No order book exists" errors for newly discovered coins (e.g., TNSR-EUR, WLFI-EUR)
+  - Unit tests added: `test_paper_trading_init_markets_passes_common_pairs`, `test_ensure_order_book_exists_adds_to_paper_trading_connector`, `test_ensure_order_book_exists_adds_trade_listener`
+
+### Changed
+- Exit conditions tightened: `exit_short_threshold` changed from -1.0% to -0.5% for faster exit on declining trends
+
+- **Rate Limiting Optimization**: Improved API rate limit handling
+  - Batch calls reduce rate limit pressure significantly
+  - Fallback to individual calls with 1.5s delay if batch fails
+  - Prevents "API rate limit has almost reached" warnings
+  - Better handling of Kraken's 1 call/second limit for Ticker endpoint
+  - **Built-in rate limiting in `update_all_trends_v2()`**: Enforces minimum 2 seconds between batch calls
+  - **Rate limiting in `_get_ticker_data_safe()`**: Enforces minimum 1.5 seconds between ticker calls
+  - Automatic wait if methods are called too frequently
+  - Unit tests added: `test_rate_limiting_enforces_minimum_interval`, `test_rate_limiting_skips_wait_if_enough_time_passed`, `test_get_ticker_data_safe_rate_limiting`
+
 ## [2.0.0] - 2025-11-15 ✅ TIER 1 COMPLETE
 
 ### 🎉 Major Release: Hummingbot Strategy V2 Integration

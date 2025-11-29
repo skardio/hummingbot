@@ -1,0 +1,77 @@
+# Multi-Coin Grid Trading Strategy Configuration
+# Environment: TESTING
+# Used for testing and validation
+
+# Logging Configuration
+log_level: DEBUG  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+                 # DEBUG: More verbose for testing
+
+# Exchange Configuration
+connector_name: kraken
+quote_asset: EUR
+
+# Coin Selection
+# Option 1: Manual trading pairs (if set, bot will ONLY trade these coins)
+# Format: ["COIN-QUOTE", "COIN-QUOTE", ...] or leave empty/null for auto-discovery
+manual_trading_pairs: null  # Auto-discovery for testing
+
+# Option 2: Auto-discovery (only used if manual_trading_pairs is null/empty)
+max_coins_to_monitor: 5  # TEST: Monitor fewer coins for faster testing
+min_24h_volume_eur: 10000  # TEST: Lower volume threshold (€10k)
+exclude_expensive_coins: true  # Exclude BTC/ETH
+
+# Trend Detection
+trend_lookback_minutes: 15  # TEST: Shorter lookback for faster testing
+trend_min_change_pct: 0.15  # TEST: Lower threshold
+price_update_interval: 30  # Update prices every 30 seconds
+
+# Switch Management
+min_switch_interval_seconds: 300  # TEST: 5 minutes for faster testing
+min_hold_time_seconds: 300  # TEST: 5 minutes minimum hold time
+smart_switch_k: 1.5  # TEST: Lower threshold for testing
+switch_cost_multiplier: 1.5  # TEST: Lower multiplier for testing
+
+# Grid Configuration
+grid_range_pct_down: 3.0  # Place buy orders 3% below current price
+grid_range_pct_up: 8.0  # Place sell orders 8% above current price
+num_grids: 3  # Number of grid levels
+use_atr_grid_ranges: false  # TEST: Simpler grids for testing
+atr_multiplier_down: 1.0  # Grid lower = price - (ATR * multiplier_down)
+atr_multiplier_up: 1.5  # Grid upper = price + (ATR * multiplier_up)
+use_asymmetric_grids: false  # TEST: Simpler for testing
+smart_refill_threshold_pct: 3.0  # Rebuild grid if price moved >3% since last grid
+
+# Capital Management
+total_amount_quote: 50  # TEST: €50 for testing
+min_order_amount_quote: 10  # Minimum €10 per order
+
+# Risk Management
+stop_loss_pct: 0.05  # TEST: 5% stop-loss (stricter for testing)
+take_profit_pct: 0.02  # Take profit at +2% per grid level
+
+# Phase 1.4: Position Size Limits
+max_exposure_per_coin_pct: 0.10  # TEST: Max 10% of capital per coin (stricter)
+max_total_exposure_pct: 0.80  # TEST: Max 80% of capital total (stricter)
+
+# Order Management
+max_open_orders: 5  # TEST: Fewer orders for testing
+order_frequency: 3  # Wait 3 seconds between order placements
+
+# Phase 1.2: Circuit Breaker
+circuit_breaker_volatility_pct: 0.05  # 5% volatility threshold
+circuit_breaker_time_window: 60  # 1 minute window
+
+# Phase 1.3: API Error Handling
+api_error_max_retries: 1  # TEST: Lower retries for faster failure detection
+api_error_backoff_time: 10  # TEST: Wait 10 seconds before retry
+
+blacklist:
+  - CCD-EUR
+  - FARTCOIN-EUR
+  - 0G-EUR
+  - 1INCH-EUR
+  - 2Z-EUR
+  - AB-EUR
+  - ACA-EUR
+  - USELESS-EUR
+  - CC-EUR

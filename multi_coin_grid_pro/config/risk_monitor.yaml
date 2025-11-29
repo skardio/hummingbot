@@ -1,0 +1,62 @@
+---
+# Stand-alone risk monitor configuration
+
+risk_monitor:
+  interval_seconds: 120          # How often to re-evaluate risk (seconds)
+  ohlcv_limit: 30                # 1m candles per pair to compute returns
+
+  # Exchanges to monitor.
+  # We maken aparte clients voor:
+  #  - kraken (spot)
+  #  - bitget_spot (spot)
+  #  - bitget_futures (perpetual futures / swap)
+  exchanges:
+    - id: kraken
+      name: kraken
+    - id: bitget
+      name: bitget_spot
+      params:
+        options:
+          defaultType: spot
+    - id: bitget
+      name: bitget_futures
+      params:
+        options:
+          defaultType: swap
+
+  # Als je 'trading_pairs' leeg laat of weglaat,
+  # dan scant de monitor automatisch de hele markt (per exchange),
+  # gefilterd op quotes + include_futures + max_symbols_per_exchange.
+  #
+  # trading_pairs:
+  #   - ETH/EUR
+  #   - BTC/EUR
+
+  # Filter de universe wanneer je dynamisch de hele markt scant:
+  quotes:
+    - EUR
+    - USDT
+
+  # Of je ook futures / perpetuals wilt meenemen in het universe
+  include_futures: true
+
+  # Safety cap zodat hij niet 500+ markets per exchange gaat trekken.
+  # Zet hoger of lager afhankelijk van je VPS.
+  max_symbols_per_exchange: 120
+
+risk:
+  trade_min_score: 70
+  caution_min_score: 40
+  weights:
+    volatility: 0.25
+    spreads: 0.25
+    latency: 0.20
+    liquidity: 0.20
+    exchange_status: 0.10
+
+telegram:
+  enabled: true
+  bot_token: 8310424124:AAGc--tOZvhucvyfJnoKeIucm6aD9L9N1Jk   # of via TELEGRAM_BOT_TOKEN env var
+  chat_id: 8586283471                                          # of via TELEGRAM_CHAT_ID env var
+  notify_on_status_change: true
+  notify_on_do_not_trade: true

@@ -1,0 +1,66 @@
+controller_name: futures_grid_bitget
+log_level: INFO
+
+paper_trading: false
+connector_name: bitget_perpetual
+quote_asset: USDT
+
+# Capital management
+total_amount_quote: 100
+min_order_amount_quote: 5
+derivative_leverage: 2             # verhoogd
+max_exposure_per_coin_pct: 0.2
+max_total_exposure_pct: 0.9
+
+# Trading universe
+manual_trading_pairs:
+  - BTC-USDT
+  - ETH-USDT
+  - SOL-USDT
+  - XRP-USDT
+  - LINK-USDT
+  - AVAX-USDT
+  - DOGE-USDT
+  - ARB-USDT
+  - OP-USDT
+  - SUI-USDT
+  - SEI-USDT
+  - TIA-USDT
+  - INJ-USDT
+  - ATOM-USDT
+  - APT-USDT
+
+max_coins_to_monitor: 10
+min_24h_volume_eur: 500000
+exclude_expensive_coins: false
+
+# Trend filtering
+trend_lookback_minutes: 1440
+trend_lookback_short_minutes: 60
+trend_lookback_mid_minutes: 240
+trend_lookback_long_minutes: 1440
+use_multi_timeframe: true
+switch_threshold_percent: 1.0
+min_switch_interval_seconds: 900
+min_hold_time_seconds: 900
+
+# Grids (perps optimized)
+grid_range_pct_down: 5.0            # groter
+grid_range_pct_up: 12.0             # groter
+num_grids: 4                        # extra fill
+use_atr_grid_ranges: true
+atr_multiplier_down: 1.0
+atr_multiplier_up: 1.5
+use_asymmetric_grids: true
+smart_refill_threshold_pct: 3.0
+
+# Risk
+stop_loss_pct: 0.10                 # ruimer
+take_profit_pct: 0.02
+max_open_orders: 6
+order_frequency: 3
+
+# Discovery
+coin_rotation_threshold: 90
+trend_min_change_pct: 0.1  # Verlaagd van 0.5 naar 0.1 voor bear markets (futures)
+price_update_interval: 30

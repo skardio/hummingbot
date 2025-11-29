@@ -310,7 +310,43 @@ class ExecutorBase(RunnableBase):
         :param trading_pair: The trading pair.
         :return: The trading rules.
         """
-        return self.connectors[connector_name].trading_rules[trading_pair]
+        connector = self.connectors[connector_name]
+
+        # Handle paper trading connectors that don't have trading_rules attribute
+        if not hasattr(connector, 'trading_rules') or connector.trading_rules is None:
+            # For paper trading connectors, try to get trading rules from base connector
+            if hasattr(connector, '_target_market') and connector._target_market is not None:
+                try:
+                    base_connector = connector._target_market()
+                    if hasattr(base_connector, 'trading_rules') and trading_pair in base_connector.trading_rules:
+                        return base_connector.trading_rules[trading_pair]
+                except Exception:
+                    pass
+
+            # Fallback: return default trading rules for paper trading
+            # These are reasonable defaults that should work for most cases
+            return TradingRule(
+                trading_pair=trading_pair,
+                min_order_size=Decimal("0.01"),
+                min_price_increment=Decimal("0.00001"),
+                min_base_amount_increment=Decimal("0.00001"),
+            )
+
+        # Check if trading_pair exists in trading_rules before accessing
+        if trading_pair not in connector.trading_rules:
+            # Trading pair not found - return default trading rules
+            self.logger().warning(
+                f"⚠️  Trading pair {trading_pair} not found in connector.trading_rules. "
+                f"Using default trading rules."
+            )
+            return TradingRule(
+                trading_pair=trading_pair,
+                min_order_size=Decimal("0.01"),
+                min_price_increment=Decimal("0.00001"),
+                min_base_amount_increment=Decimal("0.00001"),
+            )
+
+        return connector.trading_rules[trading_pair]
 
     def get_order_book(self, connector_name: str, trading_pair: str):
         """

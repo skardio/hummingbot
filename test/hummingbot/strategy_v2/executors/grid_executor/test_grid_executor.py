@@ -1,7 +1,7 @@
 from decimal import Decimal
 from test.isolated_asyncio_wrapper_test_case import IsolatedAsyncioWrapperTestCase
 from test.logger_mixin_for_test import LoggerMixinForTest
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
@@ -443,6 +443,139 @@ class TestGridExecutor(IsolatedAsyncioWrapperTestCase, LoggerMixinForTest):
         self.assertEqual(executor.realized_imbalance_quote, Decimal("145"))  # 310 - 165
         self.assertEqual(executor.realized_pnl_quote, Decimal("-145"))  # 165 - 310
         self.assertAlmostEqual(round(executor.realized_pnl_pct, 4), round(Decimal("-0.4677419355"), 4))  # -145 / 310
+
+    @patch.object(GridExecutor, "get_price")
+    def test_generate_grid_levels_logs_base_amount_using_market_price(self, get_price_mock):
+        get_price_mock.return_value = Decimal("110")
+        config = GridExecutorConfig(
+            id="test",
+            timestamp=123,
+            side=TradeType.BUY,
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            start_price=Decimal("100"),
+            end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            order_frequency=1.0,
+            max_open_orders=5,
+            max_orders_per_batch=2,
+            limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+                trailing_stop=TrailingStop(
+                    activation_price=Decimal("0.05"),
+                    trailing_delta=Decimal("0.005")
+                )
+            )
+        )
+        executor = self.get_grid_executor_from_config(config)
+        executor.mid_price = Decimal("110")
+        logger_mock = MagicMock()
+        with patch.object(executor, "logger", return_value=logger_mock):
+            grid_levels = executor._generate_grid_levels()
+
+        quote_amount = grid_levels[0].amount_quote
+        expected_base = quote_amount / Decimal("110")
+        log_messages = [call.args[0] for call in logger_mock.info.call_args_list if isinstance(call.args[0], str)]
+        self.assertTrue(log_messages, "Expected at least one info log message")
+        self.assertIn(f"(base amount: {expected_base:.8f}", log_messages[-1])
+
+    @patch.object(GridExecutor, "get_price", MagicMock(return_value=Decimal("100")))
+    async def test_close_order_waits_for_locked_balance_release(self):
+        config = GridExecutorConfig(
+            id="test",
+            timestamp=123,
+            side=TradeType.BUY,
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            start_price=Decimal("100"),
+            end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+            )
+        )
+        executor = self.get_grid_executor_from_config(config)
+        executor._status = RunnableStatus.SHUTTING_DOWN
+        executor.close_type = CloseType.EARLY_STOP
+        executor.levels_by_state = {state: [] for state in GridLevelStates}
+        executor.position_size_base = Decimal("10")
+        executor.mid_price = Decimal("100")
+        executor.current_close_quote = Decimal("100")
+        executor.trading_rules.min_order_size = Decimal("1")
+
+        connector = self.strategy.connectors["binance"]
+        connector.get_available_balance = MagicMock(
+            side_effect=[
+                Decimal("0"),
+                Decimal("0"),
+                Decimal("0"),
+                Decimal("10"),
+                Decimal("10"),
+            ]
+        )
+        connector.get_balance = MagicMock(return_value=Decimal("10"))
+
+        with patch.object(GridExecutor, "update_metrics", MagicMock()), \
+                patch.object(GridExecutor, "_sleep", new=AsyncMock()) as sleep_mock, \
+                patch.object(GridExecutor, "_refresh_connector_balances", new=AsyncMock()) as refresh_mock, \
+                patch.object(GridExecutor, "place_order", return_value="CLOSE-OID") as place_order_mock:
+            await executor.control_close_order()
+
+        self.assertTrue(refresh_mock.awaited)
+        sleep_mock.assert_awaited()
+        place_order_mock.assert_called_once()
+        self.assertEqual(place_order_mock.call_args.kwargs["amount"], Decimal("10"))
+
+    @patch.object(GridExecutor, "get_price", MagicMock(return_value=Decimal("100")))
+    async def test_close_order_caps_amount_by_available_balance(self):
+        config = GridExecutorConfig(
+            id="test",
+            timestamp=123,
+            side=TradeType.BUY,
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            start_price=Decimal("90"),
+            end_price=Decimal("110"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            limit_price=Decimal("80"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+            ),
+        )
+        executor = self.get_grid_executor_from_config(config)
+        executor._status = RunnableStatus.SHUTTING_DOWN
+        executor.close_type = CloseType.EARLY_STOP
+        executor.levels_by_state = {state: [] for state in GridLevelStates}
+        executor.position_size_base = Decimal("10")
+        executor.mid_price = Decimal("100")
+        executor.current_close_quote = Decimal("100")
+        executor.trading_rules.min_order_size = Decimal("1")
+
+        connector = self.strategy.connectors["binance"]
+        connector.get_available_balance = MagicMock(return_value=Decimal("6"))
+        connector.get_balance = MagicMock(return_value=Decimal("12"))
+
+        with patch.object(GridExecutor, "update_metrics", MagicMock()), \
+                patch.object(GridExecutor, "_sleep", new=AsyncMock()) as sleep_mock, \
+                patch.object(GridExecutor, "_refresh_connector_balances", new=AsyncMock()) as refresh_mock, \
+                patch.object(GridExecutor, "place_order", return_value="CLOSE-OID") as place_order_mock:
+            await executor.control_close_order()
+
+        refresh_mock.assert_awaited()
+        sleep_mock.assert_not_awaited()
+        place_order_mock.assert_called_once()
+        self.assertEqual(place_order_mock.call_args.kwargs["amount"], Decimal("6"))
 
     @patch.object(GridExecutor, "_sleep")
     @patch.object(GridExecutor, "get_price")
@@ -970,6 +1103,7 @@ class TestGridExecutor(IsolatedAsyncioWrapperTestCase, LoggerMixinForTest):
 
     @patch.object(GridExecutor, "get_price")
     async def test_on_start_with_position_above_end_price(self, mock_price):
+        """Test that executor shuts down when price > end_price and there IS a position"""
         mock_price.return_value = Decimal("125")
         config = GridExecutorConfig(
             id="test",
@@ -998,9 +1132,146 @@ class TestGridExecutor(IsolatedAsyncioWrapperTestCase, LoggerMixinForTest):
         )
         executor = self.get_grid_executor_from_config(config)
         executor._status = RunnableStatus.RUNNING
+        executor.mid_price = Decimal("125")
+        # Simulate that there IS a position (filled orders exist)
+        # Create a filled buy order to simulate a position
+        buy_order = InFlightOrder(
+            client_order_id="test_buy_1",
+            trading_pair="ETH-USDT",
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("0.1"),
+            price=Decimal("110"),
+            creation_timestamp=1640001112.0,
+            initial_state=OrderState.FILLED,
+        )
+        buy_order.executed_amount_base = Decimal("0.1")
+        buy_order.executed_amount_quote = Decimal("11.0")
+        executor._filled_orders = [buy_order.to_json()]
+        executor.position_amount = Decimal("0.1")  # Has position
         await executor.on_start()
+        # Should shutdown because there IS a position and price > end_price
         self.assertEqual(executor._status, RunnableStatus.SHUTTING_DOWN)
         self.assertEqual(executor.close_type, CloseType.TAKE_PROFIT)
+
+    @patch.object(GridExecutor, "get_price")
+    async def test_on_start_buy_order_take_profit_price_above_end_shuts_down(self, mock_price):
+        """BUY grid should shut down when TAKE_PROFIT triggers even if no position yet"""
+        mock_price.return_value = Decimal("125")
+        config = GridExecutorConfig(
+            id="test",
+            timestamp=1234567890,  # Recent timestamp (not expired)
+            side=TradeType.BUY,
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            start_price=Decimal("100"),
+            end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            order_frequency=1.0,
+            max_open_orders=5,
+            max_orders_per_batch=2,
+            limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+                time_limit=100,  # Long time limit
+                trailing_stop=TrailingStop(
+                    activation_price=Decimal("0.05"),
+                    trailing_delta=Decimal("0.005")
+                )
+            )
+        )
+        executor = self.get_grid_executor_from_config(config)
+        executor._status = RunnableStatus.RUNNING
+        executor.mid_price = Decimal("125")  # Above end_price
+        # No position yet (no filled orders)
+        await executor.on_start()
+        # Should shut down to respect triple-barrier condition even without a position
+        self.assertEqual(executor.close_type, CloseType.TAKE_PROFIT)
+        self.assertEqual(executor._status, RunnableStatus.SHUTTING_DOWN)
+
+    @patch.object(GridExecutor, "get_price")
+    async def test_on_start_sell_order_take_profit_price_below_end_shuts_down(self, mock_price):
+        """SELL grid should shut down when TAKE_PROFIT triggers even if no position yet
+
+        For SELL grids: start_price > end_price (sell high, buy back low)
+        Take profit triggers when price < end_price (reaches buy-back target)
+        """
+        mock_price.return_value = Decimal("75")
+        config = GridExecutorConfig(
+            id="test",
+            timestamp=1234567890,  # Recent timestamp (not expired)
+            side=TradeType.SELL,
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            start_price=Decimal("100"),  # High price (where selling begins)
+            end_price=Decimal("80"),     # Low price (buy-back target) - for SELL grid, end_price < start_price
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            order_frequency=1.0,
+            max_open_orders=5,
+            max_orders_per_batch=2,
+            limit_price=Decimal("130"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+                time_limit=100,  # Long time limit
+                trailing_stop=TrailingStop(
+                    activation_price=Decimal("0.05"),
+                    trailing_delta=Decimal("0.005")
+                )
+            )
+        )
+        executor = self.get_grid_executor_from_config(config)
+        executor._status = RunnableStatus.RUNNING
+        executor.mid_price = Decimal("75")  # Below end_price (for SELL grid) - triggers take profit
+        # No position yet (no filled orders)
+        await executor.on_start()
+        # Should shut down to respect triple-barrier condition even without a position
+        self.assertEqual(executor.close_type, CloseType.TAKE_PROFIT)
+        self.assertEqual(executor._status, RunnableStatus.SHUTTING_DOWN)
+
+    @patch.object(GridExecutor, "get_price")
+    async def test_on_start_stop_loss_shuts_down(self, mock_price):
+        """Test that STOP_LOSS close type shuts down executor"""
+        mock_price.return_value = Decimal("80")
+        config = GridExecutorConfig(
+            id="test",
+            timestamp=1234567890,  # Recent timestamp (not expired)
+            side=TradeType.BUY,
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            start_price=Decimal("100"),
+            end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            order_frequency=1.0,
+            max_open_orders=5,
+            max_orders_per_batch=2,
+            limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+                time_limit=100,  # Long time limit
+                trailing_stop=TrailingStop(
+                    activation_price=Decimal("0.05"),
+                    trailing_delta=Decimal("0.005")
+                )
+            )
+        )
+        executor = self.get_grid_executor_from_config(config)
+        executor._status = RunnableStatus.RUNNING
+        executor.mid_price = Decimal("80")
+        # Simulate position with negative PnL (stop loss condition)
+        executor.position_pnl_pct = Decimal("-0.06")  # Below stop loss threshold
+        await executor.on_start()
+        # Should shutdown because stop loss is triggered
+        self.assertEqual(executor._status, RunnableStatus.SHUTTING_DOWN)
+        self.assertEqual(executor.close_type, CloseType.STOP_LOSS)
 
     @patch.object(GridExecutor, "get_price")
     async def test_early_stop(self, mock_price):

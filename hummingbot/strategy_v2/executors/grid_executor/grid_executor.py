@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import math
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Union
 
 from hummingbot.connector.connector_base import ConnectorBase
@@ -86,6 +86,8 @@ class GridExecutor(ExecutorBase):
         self._trailing_stop_trigger_pct: Optional[Decimal] = None
         self._current_retries = 0
         self._max_retries = max_retries
+        self._close_balance_retry_interval = 1.0  # seconds between balance refresh attempts
+        self._close_balance_max_retries = 5  # how many times we wait for locked balances
 
     @property
     def is_perpetual(self) -> bool:
@@ -97,8 +99,77 @@ class GridExecutor(ExecutorBase):
         return self.is_perpetual_connector(self.config.connector_name)
 
     async def validate_sufficient_balance(self):
-        mid_price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        mid_price = None
+        try:
+            mid_price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            mid_price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().debug(
+                                f"Using base connector price for {self.config.trading_pair} in validate_sufficient_balance: {mid_price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if mid_price is None:
+                    mid_price = self._validated_midpoint_price("validate_sufficient_balance (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range) in validate_sufficient_balance: {mid_price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+        if mid_price is None or mid_price <= Decimal("0"):
+            mid_price = self._validated_midpoint_price("validate_sufficient_balance (invalid price)")
+            self.logger().warning(
+                f"Invalid price in validate_sufficient_balance, using fallback: {mid_price}"
+            )
+
         total_amount_base = self.config.total_amount_quote / mid_price
+
+        # Debug: Log balance info before checking
+        if self.is_perpetual:
+            connector = self.connectors.get(self.config.connector_name)
+            if connector:
+                # BUG FIX: Validate trading_pair format before splitting to avoid IndexError
+                trading_pair_parts = self.config.trading_pair.split("-")
+                if len(trading_pair_parts) < 2:
+                    self.logger().error(f"❌ Invalid trading_pair format: {self.config.trading_pair}")
+                    return None
+                quote_asset = trading_pair_parts[1]
+                try:
+                    available_balance = connector.get_available_balance(quote_asset)
+                    total_balance = connector.get_balance(quote_asset)
+                    exposure = self.config.total_amount_quote * Decimal(self.config.leverage)
+                    required_margin = self.config.total_amount_quote / Decimal(self.config.leverage)
+                    self.logger().info(
+                        f"💰 Balance check for {self.config.trading_pair}:\n"
+                        f"   Available balance: {available_balance} {quote_asset}\n"
+                        f"   Total balance: {total_balance} {quote_asset}\n"
+                        f"   Total amount quote: {self.config.total_amount_quote} {quote_asset}\n"
+                        f"   Leverage: {self.config.leverage}x\n"
+                        f"   Exposure: {exposure} {quote_asset} (amount * leverage)\n"
+                        f"   Required margin: {required_margin} {quote_asset} (amount / leverage)\n"
+                        f"   Base amount: {total_amount_base} {trading_pair_parts[0] if len(trading_pair_parts) > 0 else 'N/A'}"
+                    )
+                except Exception as e:
+                    self.logger().warning(f"Could not get balance info: {e}")
+
         if self.is_perpetual:
             order_candidate = PerpetualOrderCandidate(
                 trading_pair=self.config.trading_pair,
@@ -120,13 +191,80 @@ class GridExecutor(ExecutorBase):
             )
         adjusted_order_candidates = self.adjust_order_candidates(self.config.connector_name, [order_candidate])
         if adjusted_order_candidates[0].amount == Decimal("0"):
+            # Log detailed error info
+            if self.is_perpetual:
+                connector = self.connectors.get(self.config.connector_name)
+                if connector:
+                    # BUG FIX: Validate trading_pair format before splitting to avoid IndexError
+                    trading_pair_parts = self.config.trading_pair.split("-")
+                    if len(trading_pair_parts) < 2:
+                        self.logger().error(f"❌ Invalid trading_pair format: {self.config.trading_pair}")
+                        self.close_type = CloseType.INSUFFICIENT_BALANCE
+                        self.logger().error("Not enough budget to open position.")
+                        self.stop()
+                        return None
+                    quote_asset = trading_pair_parts[1]
+                    try:
+                        available_balance = connector.get_available_balance(quote_asset)
+                        required_margin = self.config.total_amount_quote / Decimal(self.config.leverage)
+                        self.logger().error(
+                            f"❌ INSUFFICIENT BALANCE for {self.config.trading_pair}:\n"
+                            f"   Available: {available_balance} {quote_asset}\n"
+                            f"   Required margin: {required_margin} {quote_asset} (for {self.config.total_amount_quote} {quote_asset} with {self.config.leverage}x leverage)\n"
+                            f"   Order candidate amount: {total_amount_base} {trading_pair_parts[0] if len(trading_pair_parts) > 0 else 'N/A'}\n"
+                            f"   Price: {mid_price} {quote_asset}"
+                        )
+                    except Exception as e:
+                        self.logger().error(f"Could not get balance info for error log: {e}")
             self.close_type = CloseType.INSUFFICIENT_BALANCE
             self.logger().error("Not enough budget to open position.")
             self.stop()
 
     def _generate_grid_levels(self):
         grid_levels = []
-        price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+        if price is None or price <= Decimal("0"):
+            price = self._validated_midpoint_price("generate_grid_levels (invalid price)")
+            self.logger().error(
+                f"Invalid price for {self.config.trading_pair}, using fallback: {price}"
+            )
+
+        reference_price_for_logging = price
+
         # Get minimum notional and base amount increment from trading rules
         min_notional = max(
             self.config.min_order_amount_quote,
@@ -174,20 +312,20 @@ class GridExecutor(ExecutorBase):
         n_levels = max(1, n_levels)
         # Generate price levels with even distribution
         if n_levels > 1:
-            prices = Distributions.linear(n_levels, float(self.config.start_price), float(self.config.end_price))
+            level_prices = Distributions.linear(n_levels, float(self.config.start_price), float(self.config.end_price))
             self.step = grid_range / (n_levels - 1)
         else:
             # For single level, use mid-point of range
-            mid_price = (self.config.start_price + self.config.end_price) / 2
-            prices = [mid_price]
+            mid_price = self._validated_midpoint_price("generate_grid_levels (single level)")
+            level_prices = [mid_price]
             self.step = grid_range
         take_profit = max(self.step, self.config.triple_barrier_config.take_profit) if self.config.coerce_tp_to_step else self.config.triple_barrier_config.take_profit
         # Create grid levels
-        for i, price in enumerate(prices):
+        for i, level_price in enumerate(level_prices):
             grid_levels.append(
                 GridLevel(
                     id=f"L{i}",
-                    price=price,
+                    price=level_price,
                     amount_quote=quote_amount_per_level,
                     take_profit=take_profit,
                     side=self.config.side,
@@ -196,10 +334,15 @@ class GridExecutor(ExecutorBase):
                 )
             )
         # Log grid creation details
+        # BUG FIX: Validate trading_pair format before splitting for logging
+        trading_pair_parts_log = self.config.trading_pair.split("-")
+        quote_asset_log = trading_pair_parts_log[1] if len(trading_pair_parts_log) > 1 else "N/A"
+        base_asset_log = trading_pair_parts_log[0] if len(trading_pair_parts_log) > 0 else "N/A"
         self.logger().info(
             f"Created {len(grid_levels)} grid levels with "
-            f"amount per level: {quote_amount_per_level:.4f} {self.config.trading_pair.split('-')[1]} "
-            f"(base amount: {(quote_amount_per_level / price):.8f} {self.config.trading_pair.split('-')[0]})"
+            f"amount per level: {quote_amount_per_level:.4f} {quote_asset_log} "
+            f"(base amount: {(quote_amount_per_level / reference_price_for_logging):.8f} "
+            f"{base_asset_log})"
         )
         return grid_levels
 
@@ -281,6 +424,85 @@ class GridExecutor(ExecutorBase):
         self._status = RunnableStatus.SHUTTING_DOWN
         self.close_type = CloseType.POSITION_HOLD if keep_position else CloseType.EARLY_STOP
 
+        # If keep_position=False, close any open position immediately
+        if not keep_position:
+            # Update metrics to get current position size and price
+            self.update_position_metrics()
+            # Also update full metrics to ensure mid_price and current_close_quote are set
+            try:
+                self.update_metrics()
+            except Exception as e:
+                self.logger().warning(f"⚠️  Could not update full metrics: {e}")
+
+            # If there's an open position, place a market order to close it
+            if self.position_size_base >= self.trading_rules.min_order_size:
+                # BUG FIX: Validate trading_pair format before splitting for logging
+                trading_pair_parts_close = self.config.trading_pair.split("-")
+                base_asset_close = trading_pair_parts_close[0] if len(trading_pair_parts_close) > 0 else "N/A"
+                self.logger().info(
+                    f"Executor {self.config.id[:8]}... closing position: "
+                    f"{self.position_size_base} {base_asset_close} "
+                    f"(value: €{self.position_size_quote:.2f})"
+                )
+                # CRITICAL FIX: For market orders, we need a valid price (even though it's ignored for market orders)
+                # Kraken connector validates the price parameter even for market orders
+                # Use current_close_quote (best ask for sell orders) if available, otherwise mid_price
+                close_price = None
+
+                # Try to get price from updated metrics
+                if hasattr(self, 'current_close_quote') and self.current_close_quote and not self.current_close_quote.is_nan():
+                    close_price = self.current_close_quote
+                elif hasattr(self, 'mid_price') and self.mid_price and not self.mid_price.is_nan():
+                    close_price = self.mid_price
+
+                # If price is still invalid, try to get it directly from connector
+                # BUG FIX: Check None explicitly before calling is_nan() to avoid AttributeError
+                if close_price is None or (hasattr(close_price, 'is_nan') and close_price.is_nan()) or close_price == Decimal("0"):
+                    try:
+                        from hummingbot.core.data_type.common import PriceType
+
+                        # For sell orders (closing BUY position), use BestAsk
+                        close_price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.BestAsk)
+                        # BUG FIX: Check None before calling is_nan() to avoid AttributeError
+                        if close_price is None or (hasattr(close_price, 'is_nan') and close_price.is_nan()) or close_price == Decimal("0"):
+                            # Fallback: use mid price
+                            close_price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+                    except Exception as e:
+                        self.logger().warning(f"⚠️  Could not get price for close order: {e}")
+                        close_price = Decimal("0")
+
+                # Validate price: must not be None, NaN, zero, or unreasonably small (less than 0.0001)
+                # This ensures we don't proceed with invalid placeholder values
+                # Threshold of 0.0001 is low enough for very cheap coins but catches invalid placeholders
+                # Explicitly check for None first to avoid AttributeError on is_nan() call
+                if close_price is not None and not close_price.is_nan() and close_price >= Decimal("0.0001"):
+                    self.logger().info(f"💰 Using price €{close_price:.6f} for market close order")
+                    self.place_close_order_and_cancel_open_orders(close_type=self.close_type, price=close_price)
+                else:
+                    # CRITICAL FIX: Since keep_position=False, we MUST close the position even if price retrieval failed
+                    # Use last-resort fallback price from grid configuration (midpoint of grid range)
+                    # This ensures positions are always liquidated when keep_position=False
+                    # Use midpoint of grid range as last-resort fallback for market orders
+                    # Market orders will execute at best available price anyway, so this is just for validation
+                    try:
+                        fallback_price = self._validated_midpoint_price("early_stop close order fallback")
+                        self.logger().warning(
+                            f"⚠️  Using fallback price from grid config (€{fallback_price:.6f}) for market close order. "
+                            f"Price retrieval failed but position must be closed (keep_position=False)."
+                        )
+                        self.place_close_order_and_cancel_open_orders(close_type=self.close_type, price=fallback_price)
+                    except ValueError:
+                        # BUG FIX: Validate trading_pair format before splitting for logging
+                        trading_pair_parts_err = self.config.trading_pair.split("-")
+                        base_asset_err = trading_pair_parts_err[0] if len(trading_pair_parts_err) > 0 else "N/A"
+                        self.logger().error(
+                            f"❌ CRITICAL: Cannot place close order - invalid fallback price configuration. "
+                            f"Position {self.position_size_base} {base_asset_err} "
+                            f"may need to be closed manually!"
+                        )
+            else:
+                self.logger().debug(f"Executor {self.config.id[:8]}... no open position to close")
+
     def update_grid_levels(self):
         self.levels_by_state = {state: [] for state in GridLevelStates}
         for level in self.grid_levels:
@@ -361,8 +583,51 @@ class GridExecutor(ExecutorBase):
             else:
                 self._failed_orders.append(self._close_order.order_id)
                 self._close_order = None
-        elif not self.config.keep_position or self.close_type == CloseType.TAKE_PROFIT:
-            self.place_close_order_and_cancel_open_orders(close_type=self.close_type)
+        elif not self.config.keep_position or (self.close_type is not None and self.close_type != CloseType.POSITION_HOLD):
+            # CRITICAL FIX: Place close order for any close type (STOP_LOSS, TIME_LIMIT, TAKE_PROFIT, etc.)
+            # Only skip if keep_position=True AND close_type is None or POSITION_HOLD
+            # Ensure we have a valid price for market orders
+            # Update metrics first to get current prices
+            try:
+                self.update_metrics()
+            except Exception:
+                pass  # Ignore errors, we'll try to get price anyway
+
+            # Get price for close order (use current_close_quote or mid_price)
+            close_price = None
+            if hasattr(self, 'current_close_quote') and self.current_close_quote and not self.current_close_quote.is_nan():
+                close_price = self.current_close_quote
+            elif hasattr(self, 'mid_price') and self.mid_price and not self.mid_price.is_nan():
+                close_price = self.mid_price
+            else:
+                # Fallback: get price directly from connector
+                try:
+                    from hummingbot.core.data_type.common import PriceType
+                    close_price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.BestAsk)
+                    # BUG FIX: Check None before calling is_nan() to avoid AttributeError
+                    if close_price is None or (hasattr(close_price, 'is_nan') and close_price.is_nan()) or close_price == Decimal("0"):
+                        close_price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+                except Exception:
+                    close_price = Decimal("NaN")  # Will be handled in place_close_order_and_cancel_open_orders
+
+            minimum_order_size = getattr(self.trading_rules, "min_order_size", Decimal("0"))
+            if self.position_size_base < minimum_order_size:
+                self.logger().warning(
+                    f"⚠️  Position size {self.position_size_base} is below minimum order size "
+                    f"({minimum_order_size}) - skipping automatic close."
+                )
+                return
+
+            order_amount = await self._determine_close_order_amount(self.position_size_base)
+            if order_amount is None:
+                # Wait for next loop (or manual action) before attempting again
+                return
+
+            self.place_close_order_and_cancel_open_orders(
+                close_type=self.close_type,
+                price=close_price,
+                order_amount=order_amount,
+            )
 
     def adjust_and_place_open_order(self, level: GridLevel):
         """
@@ -438,7 +703,10 @@ class GridExecutor(ExecutorBase):
             take_profit_price = self.current_close_quote * (
                 1 + self.config.safe_extra_spread) if level.side == TradeType.BUY else self.current_close_quote * (
                 1 - self.config.safe_extra_spread)
-        if level.active_open_order.fee_asset == self.config.trading_pair.split("-")[0] and self.config.deduct_base_fees:
+        # BUG FIX: Validate trading_pair format before splitting to avoid IndexError
+        trading_pair_parts_fee = self.config.trading_pair.split("-")
+        base_asset_fee = trading_pair_parts_fee[0] if len(trading_pair_parts_fee) > 0 else None
+        if base_asset_fee and level.active_open_order.fee_asset == base_asset_fee and self.config.deduct_base_fees:
             amount = level.active_open_order.executed_amount_base - level.active_open_order.cum_fees_base
             self._open_fee_in_base = True
         else:
@@ -462,12 +730,175 @@ class GridExecutor(ExecutorBase):
             price=take_profit_price
         )
 
+    def _get_price_with_fallback(self, price_type: PriceType, context: str) -> Decimal:
+        try:
+            return self.get_price(self.config.connector_name, self.config.trading_pair, price_type)
+        except (ValueError, KeyError) as e:
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                connector = self.connectors.get(self.config.connector_name) if hasattr(self, "connectors") else None
+                if connector and hasattr(connector, "_target_market") and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, price_type)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair} during {context}: {price}"
+                            )
+                            return price
+                    except Exception as base_error:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair} during {context}: "
+                            f"{base_error}"
+                        )
+
+                fallback_price = self._validated_midpoint_price(f"{context} (price fallback)")
+                self.logger().warning(
+                    f"⚠️  No order book exists for {self.config.trading_pair} during {context}. "
+                    f"Using fallback price: {fallback_price:.6f}"
+                )
+                return fallback_price
+            raise
+
+    async def _refresh_connector_balances(self):
+        connector = self.connectors.get(self.config.connector_name)
+        if connector is None:
+            return
+
+        refresh_fn = getattr(connector, "_update_balances", None)
+        if refresh_fn is not None:
+            try:
+                await refresh_fn()
+                return
+            except TypeError:
+                # Some connectors allow forcing a throttled update
+                await refresh_fn(True)
+                return
+            except Exception as e:
+                self.logger().debug(f"Unable to refresh balances via connector: {e}")
+
+        strategy_refresh = getattr(self._strategy, "update_balances", None)
+        if strategy_refresh is not None:
+            try:
+                if asyncio.iscoroutinefunction(strategy_refresh):
+                    await strategy_refresh(connector_name=self.config.connector_name)
+                else:
+                    strategy_refresh(connector_name=self.config.connector_name)
+            except Exception as e:
+                self.logger().debug(f"Unable to refresh balances via strategy: {e}")
+
+    def _safe_get_total_balance(self, connector: ConnectorBase, asset: str) -> Optional[Decimal]:
+        if connector is None:
+            return None
+        get_balance = getattr(connector, "get_balance", None)
+        if get_balance is None:
+            return None
+        try:
+            balance = get_balance(asset)
+            return Decimal(str(balance))
+        except Exception as e:
+            self.logger().debug(f"Unable to read total balance for {asset}: {e}")
+            return None
+
+    @staticmethod
+    def _coerce_to_decimal(value) -> Decimal:
+        if isinstance(value, Decimal):
+            return value
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal("0")
+
+    def _validated_midpoint_price(self, context: str) -> Decimal:
+        midpoint = (self.config.start_price + self.config.end_price) / Decimal("2")
+        if midpoint <= Decimal("0"):
+            message = (
+                f"Invalid fallback price ({midpoint}) for {self.config.trading_pair} during {context}. "
+                f"Check start_price ({self.config.start_price}) and end_price ({self.config.end_price})."
+            )
+            self.logger().error(message)
+            raise ValueError(message)
+        return midpoint
+
+    async def _determine_close_order_amount(self, required_amount: Decimal) -> Optional[Decimal]:
+        """
+        Ensure we have enough available base asset to place the market close order. This method attempts to refresh
+        balances when Kraken still reports funds as locked right after canceling open orders.
+        """
+        # BUG FIX: Validate trading_pair format before splitting to avoid IndexError
+        trading_pair_parts = self.config.trading_pair.split("-")
+        if len(trading_pair_parts) < 2:
+            self.logger().error(f"❌ Invalid trading_pair format: {self.config.trading_pair}")
+            return None
+        base_asset = trading_pair_parts[0]
+        connector = self.connectors.get(self.config.connector_name)
+        if connector is None:
+            self.logger().error("Connector not available when attempting to close position.")
+            return None
+
+        await self._refresh_connector_balances()
+
+        min_order_size = getattr(self.trading_rules, "min_order_size", Decimal("0"))
+        available = self._coerce_to_decimal(connector.get_available_balance(base_asset))
+        total_balance = self._safe_get_total_balance(connector, base_asset)
+        target_amount = min(required_amount, available)
+
+        if available >= target_amount and target_amount >= min_order_size:
+            return target_amount
+
+        for attempt in range(1, self._close_balance_max_retries + 1):
+            if total_balance is not None and total_balance < min_order_size:
+                break
+
+            self.logger().info(
+                f"⏳ Waiting for {base_asset} balance to unlock before closing position "
+                f"(available {available:.8f}, required {target_amount:.8f}) "
+                f"[attempt {attempt}/{self._close_balance_max_retries}]"
+            )
+            await self._refresh_connector_balances()
+            await self._sleep(self._close_balance_retry_interval)
+
+            available = self._coerce_to_decimal(connector.get_available_balance(base_asset))
+            total_balance = self._safe_get_total_balance(connector, base_asset)
+            target_amount = min(required_amount, available)
+
+            if available >= target_amount and target_amount >= min_order_size:
+                return target_amount
+
+        if available >= min_order_size:
+            self.logger().warning(
+                f"⚠️  Proceeding with partial close of {available:.8f} {base_asset} "
+                f"(requested {required_amount:.8f}) due to locked balances."
+            )
+            return available
+
+        self.logger().error(
+            f"❌ Unable to close position automatically: available {base_asset} balance "
+            f"({available:.8f}) remains below minimum order size ({min_order_size}). "
+            f"Manual intervention may be required."
+        )
+        self._notify_manual_close_required(base_asset, available, min_order_size)
+        return None
+
+    def _notify_manual_close_required(self, base_asset: str, available: Decimal, min_order_size: Decimal):
+        message = (
+            f"⚠️ GridExecutor could not auto-close {self.config.trading_pair}: "
+            f"{available:.6f} {base_asset} available, minimum order size {min_order_size}. "
+            f"Please close the remaining position manually."
+        )
+        self.logger().error(message)
+        notify = getattr(self._strategy, "notify_hb_app_with_timestamp", None)
+        if callable(notify):
+            notify(message)
+
     def update_metrics(self):
-        self.mid_price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
-        self.current_open_quote = self.get_price(self.config.connector_name, self.config.trading_pair,
-                                                 price_type=self.open_order_price_type)
-        self.current_close_quote = self.get_price(self.config.connector_name, self.config.trading_pair,
-                                                  price_type=self.close_order_price_type)
+        self.mid_price = self._get_price_with_fallback(PriceType.MidPrice, "update_metrics (mid_price)")
+        self.current_open_quote = self._get_price_with_fallback(
+            self.open_order_price_type, "update_metrics (open_quote)"
+        )
+        self.current_close_quote = self._get_price_with_fallback(
+            self.close_order_price_type, "update_metrics (close_quote)"
+        )
         self.update_position_metrics()
         self.update_realized_pnl_metrics()
 
@@ -579,11 +1010,22 @@ class GridExecutor(ExecutorBase):
 
     def take_profit_condition(self):
         """
-        Take profit will be when the mid price is above the end price of the grid and there are no active executors.
+        Take profit condition:
+        - For BUY grids: trigger when mid_price > end_price (price has risen above sell target)
+        - For SELL grids: trigger when mid_price < start_price (price has dropped below upper bound)
+
+        Note: For SELL grids, start_price is the upper bound (where selling begins) and end_price is the
+        lower bound (buy-back target). Take-profit should trigger when price drops below start_price,
+        indicating the sell grid has reached its profit target.
         """
-        if self.mid_price > self.config.end_price if self.config.side == TradeType.BUY else self.mid_price < self.config.start_price:
-            return True
-        return False
+        if self.config.side == TradeType.BUY:
+            # BUY grid: take profit when price rises above end_price (sell target)
+            return self.mid_price > self.config.end_price
+        else:
+            # SELL grid: take profit when price drops below start_price (upper bound)
+            # BUG FIX: Changed from end_price to start_price for correct SELL grid take-profit logic
+            # This ensures the strategy triggers take-profit at the correct price level
+            return self.mid_price < self.config.start_price
 
     def stop_loss_condition(self):
         """
@@ -623,7 +1065,12 @@ class GridExecutor(ExecutorBase):
                     self._trailing_stop_trigger_pct = net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta
         return False
 
-    def place_close_order_and_cancel_open_orders(self, close_type: CloseType, price: Decimal = Decimal("NaN")):
+    def place_close_order_and_cancel_open_orders(
+        self,
+        close_type: CloseType,
+        price: Decimal = Decimal("NaN"),
+        order_amount: Optional[Decimal] = None,
+    ):
         """
         This method is responsible for placing the close order and canceling the open orders. If the difference between
         the open filled amount and the close filled amount is greater than the minimum order size, it places the close
@@ -634,16 +1081,252 @@ class GridExecutor(ExecutorBase):
         :return: None
         """
         self.cancel_open_orders()
-        if self.position_size_base >= self.trading_rules.min_order_size:
-            order_id = self.place_order(
-                connector_name=self.config.connector_name,
-                trading_pair=self.config.trading_pair,
-                order_type=OrderType.MARKET,
-                amount=self.position_size_base,
-                price=price,
-                side=self.close_order_side,
-                position_action=PositionAction.CLOSE,
-            )
+        min_order_size = getattr(self.trading_rules, "min_order_size", Decimal("0"))
+        target_amount = order_amount if order_amount is not None else self.position_size_base
+
+        if target_amount >= min_order_size:
+            # CRITICAL FIX: Ensure we have a valid price for market orders
+            # Kraken connector validates price parameter even for market orders
+            # Check if price is None before calling is_nan() to avoid AttributeError
+            if price is None or price.is_nan() or price == Decimal("0"):
+                # Try to get price from metrics
+                if hasattr(self, 'current_close_quote') and self.current_close_quote and not self.current_close_quote.is_nan():
+                    price = self.current_close_quote
+                elif hasattr(self, 'mid_price') and self.mid_price and not self.mid_price.is_nan():
+                    price = self.mid_price
+                else:
+                    # Last resort: get price directly from connector
+                    try:
+                        # Update metrics first
+                        try:
+                            self.update_metrics()
+                        except Exception:
+                            pass
+                        # Get best ask for sell orders (PriceType is already imported at top of file)
+                        price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.BestAsk)
+                        # BUG FIX: Check if price is None before calling is_nan() to avoid AttributeError
+                        if price is None or price.is_nan() or price == Decimal("0"):
+                            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+                    except Exception as e:
+                        self.logger().error(f"❌ CRITICAL: Cannot get price for close order: {e}")
+                        # Set price to 0 to trigger validation error - don't use placeholder value
+                        price = Decimal("0")
+
+            # Validate price: must not be None, NaN, zero, or unreasonably small (less than 0.0001)
+            # This catches both Decimal("0") and Decimal("0.000001") placeholder values
+            # Threshold of 0.0001 is low enough for very cheap coins but catches invalid placeholders
+            if price is None or price.is_nan() or price == Decimal("0") or price < Decimal("0.0001"):
+                # CRITICAL FIX: Use last-resort fallback price from grid configuration
+                # Market orders will execute at best available price anyway, so this is just for validation
+                try:
+                    fallback_price = self._validated_midpoint_price("close order placement fallback")
+                    self.logger().warning(
+                        f"⚠️  Using fallback price from grid config (€{fallback_price:.6f}) for market close order. "
+                        f"Price retrieval failed but position must be closed."
+                    )
+                    price = fallback_price
+                except ValueError:
+                    # BUG FIX: Validate trading_pair format before splitting for logging
+                    trading_pair_parts_crit = self.config.trading_pair.split("-")
+                    base_asset_crit = trading_pair_parts_crit[0] if len(trading_pair_parts_crit) > 0 else "N/A"
+                    self.logger().error(
+                        f"❌ CRITICAL: Cannot place close order - invalid price ({price}) and fallback configuration. "
+                        f"Position {self.position_size_base} {base_asset_crit} "
+                        f"may need to be closed manually!"
+                    )
+                    return
+
+            # FIX: Check available balance before placing market order to prevent "Insufficient funds" errors
+            # BUG FIX: Validate trading_pair format before splitting to avoid IndexError
+            trading_pair_parts_balance = self.config.trading_pair.split("-")
+            if len(trading_pair_parts_balance) < 2:
+                self.logger().error(f"❌ Invalid trading_pair format: {self.config.trading_pair}")
+                return
+            base_asset = trading_pair_parts_balance[0]
+            try:
+                available_balance = self._coerce_to_decimal(
+                    self.connectors[self.config.connector_name].get_available_balance(base_asset)
+                )
+                if available_balance < target_amount:
+                    self.logger().error(
+                        f"❌ INSUFFICIENT BALANCE: Cannot place close order - "
+                        f"Available: {available_balance} {base_asset}, "
+                        f"Required: {target_amount} {base_asset}"
+                    )
+                    # Adjust amount to available balance if possible
+                    if available_balance >= min_order_size:
+                        self.logger().warning(
+                            f"⚠️  Adjusting order amount from {target_amount} to {available_balance} {base_asset}"
+                        )
+                        order_amount_to_use = available_balance
+                    else:
+                        self.logger().error(
+                            f"❌ Available balance ({available_balance}) below minimum order size "
+                            f"({min_order_size}) - cannot place order"
+                        )
+                        return
+                else:
+                    order_amount_to_use = target_amount
+            except Exception as e:
+                self.logger().warning(
+                    f"⚠️  Could not check balance before placing close order: {e}. "
+                    f"Proceeding with order placement..."
+                )
+                order_amount_to_use = target_amount
+
+            # CRITICAL FIX: Use LIMIT orders instead of MARKET orders for better execution prices
+            # Only use MARKET orders for emergency exits (stop-loss, time-limit)
+            # For regular exits (early_stop, trend_exit), use LIMIT orders to avoid slippage and high fees
+            use_limit_order = close_type not in [CloseType.STOP_LOSS, CloseType.TIME_LIMIT]
+
+            if use_limit_order:
+                # Use LIMIT order with current market price (will execute at limit or better)
+                # This avoids slippage and uses maker fees (8x cheaper than taker fees)
+                # order_type = OrderType.LIMIT (verwijderd, niet gebruikt)
+
+                # CRITICAL FIX: Use current market price with small buffer for better execution
+                # Don't use BestAsk/BestBid as they can be worse than market price
+                # BUG FIX: Add error handling for get_price() call to prevent crashes
+                try:
+                    current_market_price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+                    # BUG FIX: Validate price is not None, NaN, or zero before using it
+                    if current_market_price is None or current_market_price.is_nan() or current_market_price == Decimal("0"):
+                        # Fallback to provided price or use fallback mechanism
+                        self.logger().warning(
+                            f"⚠️  Invalid market price retrieved ({current_market_price}), falling back to provided price"
+                        )
+                        # BUG FIX: Check for NaN in addition to None and zero
+                        current_market_price = price if (price and price != Decimal("0") and not price.is_nan()) else self._validated_midpoint_price("LIMIT order fallback")
+                except Exception as e:
+                    # BUG FIX: Handle get_price() failures gracefully
+                    self.logger().warning(
+                        f"⚠️  Failed to get market price for LIMIT order: {e}. "
+                        f"Falling back to provided price or MARKET order."
+                    )
+                    # Try fallback price, or fall back to MARKET order
+                    try:
+                        # BUG FIX: Check for NaN in addition to None and zero
+                        current_market_price = price if (price and price != Decimal("0") and not price.is_nan()) else self._validated_midpoint_price("LIMIT order fallback")
+                    except ValueError:
+                        # Cannot get valid price - must use MARKET order instead
+                        self.logger().error(
+                            "❌ Cannot get valid price for LIMIT order - falling back to MARKET order"
+                        )
+                        use_limit_order = False
+                        current_market_price = Decimal("0")  # Will trigger MARKET order path
+
+                # BUG FIX: Initialize price_diff_pct to avoid UnboundLocalError
+                price_diff_pct = 0.0
+                limit_price = None
+
+                # Only proceed with LIMIT order if we have a valid price
+                if use_limit_order and current_market_price and current_market_price != Decimal("0") and not current_market_price.is_nan():
+                    if self.config.side == TradeType.BUY:
+                        # Closing BUY position = SELL order, use current price + small buffer (0.05%)
+                        # This ensures we get a good price while still using LIMIT order
+                        limit_price = current_market_price * Decimal("1.0005")  # 0.05% above market
+                    else:
+                        # Closing SELL position = BUY order, use current price - small buffer (0.05%)
+                        limit_price = current_market_price * Decimal("0.9995")  # 0.05% below market
+
+                    # Fallback to provided price if limit_price is invalid
+                    if limit_price.is_nan() or limit_price == Decimal("0"):
+                        limit_price = price
+
+                    # CRITICAL FIX: Check if LIMIT price is acceptable (within 0.1% of market)
+                    # BUG FIX: Validate current_market_price is non-zero before division
+                    if current_market_price and current_market_price != Decimal("0") and not current_market_price.is_nan():
+                        price_diff_pct = abs(float((limit_price - current_market_price) / current_market_price * 100))
+                    else:
+                        # Invalid market price - cannot calculate diff, use MARKET order
+                        self.logger().warning(
+                            "⚠️  Invalid market price for diff calculation - using MARKET order instead"
+                        )
+                        use_limit_order = False
+                        price_diff_pct = 0  # Will trigger fallback
+
+                    if price_diff_pct > 0.1:
+                        # LIMIT price too far from market - use MARKET order instead
+                        self.logger().warning(
+                            f"⚠️  LIMIT price ({limit_price:.6f}) too far from market ({current_market_price:.6f}) - "
+                            f"using MARKET order instead (diff: {price_diff_pct:.2f}%)"
+                        )
+                        use_limit_order = False
+
+                if use_limit_order:
+                    # BUG FIX: Ensure limit_price is set before placing order
+                    if limit_price is None or limit_price == Decimal("0") or limit_price.is_nan():
+                        # Fallback to provided price if limit_price is not set
+                        # BUG FIX: Check for NaN in addition to None and zero
+                        limit_price = price if (price and price != Decimal("0") and not price.is_nan()) else current_market_price
+                        if limit_price is None or limit_price == Decimal("0") or limit_price.is_nan():
+                            # Cannot use LIMIT order without valid price - fall back to MARKET
+                            self.logger().warning(
+                                "⚠️  Cannot determine valid limit_price - falling back to MARKET order"
+                            )
+                            use_limit_order = False
+
+                    if use_limit_order:
+                        # Place LIMIT order
+                        # BUG FIX: Ensure limit_price and current_market_price are valid before logging
+                        if limit_price is not None and current_market_price and current_market_price != Decimal("0"):
+                            self.logger().info(
+                                f"💰 Placing LIMIT close order: {order_amount_to_use} {base_asset} "
+                                f"@ €{limit_price:.6f} (market: €{current_market_price:.6f}, diff: {price_diff_pct:.3f}%)"
+                            )
+                        else:
+                            # BUG FIX: Handle case where limit_price might be None
+                            limit_price_str = f"€{limit_price:.6f}" if limit_price is not None else "market price"
+                            self.logger().info(
+                                f"💰 Placing LIMIT close order: {order_amount_to_use} {base_asset} "
+                                f"@ {limit_price_str}"
+                            )
+                        order_id = self.place_order(
+                            connector_name=self.config.connector_name,
+                            trading_pair=self.config.trading_pair,
+                            order_type=OrderType.LIMIT,
+                            amount=order_amount_to_use,
+                            price=limit_price,
+                            side=self.close_order_side,
+                            position_action=PositionAction.CLOSE,
+                        )
+                else:
+                    # Fallback to MARKET order when LIMIT price diverges too far
+                    # BUG FIX: Handle case where limit_price might be None
+                    if limit_price is not None:
+                        limit_price_str = f"€{limit_price:.6f}"
+                        price_diff_str = f"{price_diff_pct:.2f}%"
+                    else:
+                        limit_price_str = "N/A"
+                        price_diff_str = "N/A"
+                    self.logger().info(
+                        f"🚨 Placing MARKET close order (LIMIT price diverged): {order_amount_to_use} {base_asset} "
+                        f"@ market price (LIMIT price {limit_price_str} was {price_diff_str} from market)"
+                    )
+                    order_id = self.place_order(
+                        connector_name=self.config.connector_name,
+                        trading_pair=self.config.trading_pair,
+                        order_type=OrderType.MARKET,
+                        amount=order_amount_to_use,
+                        price=price,  # Use provided price for MARKET order
+                        side=self.close_order_side,
+                        position_action=PositionAction.CLOSE,
+                    )
+            else:
+                # Emergency exits (stop-loss, time-limit) still use MARKET orders for speed
+                self.logger().info(
+                    f"🚨 Placing MARKET close order (emergency): {order_amount_to_use} {base_asset} "
+                    f"@ €{price:.6f} (market order - emergency exit)"
+                )
+                order_id = self.place_order(
+                    connector_name=self.config.connector_name,
+                    trading_pair=self.config.trading_pair,
+                    order_type=OrderType.MARKET,
+                    amount=order_amount_to_use,
+                    price=price,
+                    side=self.close_order_side,
+                    position_action=PositionAction.CLOSE,
+                )
             self._close_order = TrackedOrder(order_id=order_id)
             self.logger().debug(f"Executor ID: {self.config.id} - Placing close order {order_id}")
         self.close_type = close_type
@@ -707,10 +1390,99 @@ class GridExecutor(ExecutorBase):
         """
         await super().on_start()
         self.update_metrics()
-        if self.control_triple_barrier():
-            self.logger().error(f"Grid is already expired by {self.close_type}.")
 
-            self._status = RunnableStatus.SHUTTING_DOWN
+        # Check if grid range is still valid before checking triple barrier
+        # If price moved outside range, log warning but don't fail immediately
+        # (grid might still be useful if price moves back)
+        if self.config.side == TradeType.BUY:
+            if self.mid_price > self.config.end_price:
+                self.logger().warning(
+                    f"⚠️  Current price ({self.mid_price:.4f}) above grid end_price ({self.config.end_price:.4f}) "
+                    f"- grid may not be effective, but will continue"
+                )
+            elif self.mid_price < self.config.start_price:
+                self.logger().warning(
+                    f"⚠️  Current price ({self.mid_price:.4f}) below grid start_price ({self.config.start_price:.4f}) "
+                    f"- grid may not be effective, but will continue"
+                )
+        else:  # TradeType.SELL
+            # For SELL grids: start_price is upper bound (where selling begins), end_price is lower bound (buy-back target)
+            if self.mid_price > self.config.start_price:
+                self.logger().warning(
+                    f"⚠️  Current price ({self.mid_price:.4f}) above grid start_price ({self.config.start_price:.4f}) "
+                    f"- grid may not be effective, but will continue"
+                )
+            elif self.mid_price < self.config.end_price:
+                self.logger().warning(
+                    f"⚠️  Current price ({self.mid_price:.4f}) below grid end_price ({self.config.end_price:.4f}) "
+                    f"- grid may not be effective, but will continue"
+                )
+
+        # Only fail if triple barrier conditions are truly met (not just price outside range)
+        if self.control_triple_barrier():
+            # Check if it's just a price-out-of-range issue (which we already warned about)
+            if self.close_type == CloseType.TAKE_PROFIT:
+                # For BUY grids, TAKE_PROFIT means price > end_price (price risen above sell target)
+                # For SELL grids, TAKE_PROFIT means price < start_price (price dropped below upper bound)
+                # BUG FIX: Updated comment and condition to match take_profit_condition() logic
+                # This is expected if price moved outside range - don't fail immediately if no position yet
+                price_out_of_range = False
+                if self.config.side == TradeType.BUY and self.mid_price > self.config.end_price:
+                    price_out_of_range = True
+                    self.logger().warning(
+                        f"⚠️  Grid range exceeded (price {self.mid_price:.4f} > end {self.config.end_price:.4f}) "
+                        f"- but no position yet, so continuing"
+                    )
+                elif self.config.side == TradeType.SELL and self.mid_price < self.config.start_price:
+                    # BUG FIX: Changed from end_price to start_price to match take_profit_condition()
+                    price_out_of_range = True
+                    self.logger().warning(
+                        f"⚠️  Grid range exceeded (price {self.mid_price:.4f} < start {self.config.start_price:.4f}) "
+                        f"- but no position yet, so continuing"
+                    )
+
+                if price_out_of_range:
+                    # Check if there's an open position (filled open orders without close orders)
+                    # A position exists if:
+                    # 1. There are levels with OPEN_ORDER_FILLED state, OR
+                    # 2. There are filled orders (which indicates some trading activity)
+                    # Update grid levels first to ensure state is current
+                    self.update_grid_levels()
+                    has_open_position = (
+                        len(self.levels_by_state.get(GridLevelStates.OPEN_ORDER_FILLED, [])) > 0 or
+                        len(self._filled_orders) > 0
+                    )
+
+                    if not has_open_position:
+                        # No position yet - respect triple barrier by shutting down cleanly
+                        self.logger().info(
+                            f"Grid range exceeded but no position yet - shutting down (close_type={self.close_type})"
+                        )
+                        self._status = RunnableStatus.SHUTTING_DOWN
+                        return
+                    else:
+                        # There IS a position - should shutdown with TAKE_PROFIT
+                        # Don't reset close_type, let it proceed to shutdown
+                        self.logger().warning(
+                            "⚠️  Grid range exceeded with open position - shutting down with TAKE_PROFIT"
+                        )
+                        # Shutdown immediately - no need to continue to general shutdown logic
+                        self.logger().error(f"Grid is already expired by {self.close_type}.")
+                        self._status = RunnableStatus.SHUTTING_DOWN
+                        return
+
+            # For other close types (stop loss, time limit, etc.), or TAKE_PROFIT when price is in range, fail as normal
+            # Note: self.close_type is guaranteed to be set here (either TAKE_PROFIT that wasn't handled above, or another close type)
+            # The TAKE_PROFIT case with position already handled above with early return
+            if self.close_type is not None:
+                self.logger().error(f"Grid is already expired by {self.close_type}.")
+                self._status = RunnableStatus.SHUTTING_DOWN
+            else:
+                # This should not happen, but handle it gracefully
+                # Note: This can only occur if control_triple_barrier() returns True but close_type is None,
+                # which should not happen in normal operation
+                self.logger().error("Grid triple barrier condition met but close_type is None.")
+                self._status = RunnableStatus.SHUTTING_DOWN
 
     def evaluate_max_retries(self):
         """

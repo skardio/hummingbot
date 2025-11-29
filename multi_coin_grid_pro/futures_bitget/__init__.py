@@ -1,0 +1,3 @@
+"""
+Bitget futures grid package
+"""

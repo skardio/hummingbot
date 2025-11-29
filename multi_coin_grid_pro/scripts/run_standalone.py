@@ -112,7 +112,7 @@ async def main():
         logger.info(f"✓ Connected to Kraken | Balance: €{eur_balance:.2f}")
 
         # Load config
-        config_path = project_root / 'conf' / 'multi_coin_grid.yml'
+        config_path = project_root / 'config' / 'multi_coin_grid.yml'
         import yaml
         with open(config_path) as f:
             config_data = yaml.safe_load(f)
