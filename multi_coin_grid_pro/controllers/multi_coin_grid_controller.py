@@ -2638,6 +2638,16 @@ class MultiCoinGridController(ControllerBase):
         # Get leverage from config (for futures) or use default 1 (for spot)
         leverage = getattr(self.config, "derivative_leverage", 1)
 
+        max_position_size_overrides = getattr(self.config, "max_position_size_per_symbol", {}) or {}
+        max_position_size_quote = max_position_size_overrides.get(symbol)
+        if max_position_size_quote is not None:
+            max_position_size_quote = Decimal(str(max_position_size_quote))
+
+        min_liquidation_distance_overrides = getattr(self.config, "min_liquidation_distance_pct_per_symbol", {}) or {}
+        min_liquidation_distance_pct = min_liquidation_distance_overrides.get(symbol)
+        if min_liquidation_distance_pct is not None:
+            min_liquidation_distance_pct = Decimal(str(min_liquidation_distance_pct))
+
         from hummingbot.core.data_type.common import TradeType
 
         grid_config = GridExecutorConfig(
@@ -2658,6 +2668,8 @@ class MultiCoinGridController(ControllerBase):
             activation_bounds=Decimal("0.05"),  # 5% activation bounds
             keep_position=False,  # Don't keep position on stop
             leverage=leverage,  # Use derivative_leverage from config (for futures) or 1 (for spot)
+            max_position_size_quote=max_position_size_quote,
+            min_liquidation_distance_pct=min_liquidation_distance_pct,
         )
 
         # Ensure controller_id is set (fallback to controller_name if id is None)

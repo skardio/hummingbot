@@ -5,7 +5,7 @@ This config defines all parameters for the multi-coin grid trading strategy.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import Field, field_validator
 
@@ -372,6 +372,24 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    max_position_size_per_symbol: Dict[str, Decimal] = Field(
+        default_factory=dict,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "(Optional) Max position size per symbol in quote (e.g., {'BTC-USDT': 50}): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+
+    min_liquidation_distance_pct_per_symbol: Dict[str, Decimal] = Field(
+        default_factory=dict,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "(Optional) Min liquidation distance %% per symbol (e.g., {'BTC-USDT': 2}): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+
     min_order_amount_quote: Decimal = Field(
         default=Decimal("5"),
         client_data=ClientFieldData(
@@ -504,6 +522,22 @@ class MultiCoinGridConfig(ControllerConfigBase):
             stop_loss_order_type=OrderType.MARKET,  # Market order for fast exit
             time_limit_order_type=OrderType.MARKET
         )
+
+    @field_validator('max_position_size_per_symbol')
+    @classmethod
+    def validate_max_position_size(cls, values: Dict[str, Decimal]) -> Dict[str, Decimal]:
+        for symbol, amount in values.items():
+            if amount is not None and amount <= 0:
+                raise ValueError(f"Max position size for {symbol} must be positive")
+        return values
+
+    @field_validator('min_liquidation_distance_pct_per_symbol')
+    @classmethod
+    def validate_min_liquidation_distance(cls, values: Dict[str, Decimal]) -> Dict[str, Decimal]:
+        for symbol, distance in values.items():
+            if distance is not None and distance < 0:
+                raise ValueError(f"Min liquidation distance for {symbol} cannot be negative")
+        return values
 
     @field_validator('trend_lookback_minutes')
     @classmethod

@@ -32,6 +32,8 @@ class GridExecutorConfig(ExecutorConfigBase):
     # Risk Management
     triple_barrier_config: TripleBarrierConfig
     leverage: int = 20
+    max_position_size_quote: Optional[Decimal] = None
+    min_liquidation_distance_pct: Optional[Decimal] = None
     level_id: Optional[str] = None
     deduct_base_fees: bool = False
     keep_position: bool = False

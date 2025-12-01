@@ -638,6 +638,14 @@ class GridExecutor(ExecutorBase):
         """
         order_candidate = self._get_open_order_candidate(level)
         self.adjust_order_candidates(self.config.connector_name, [order_candidate])
+        rejection_reason = self._validate_open_order_candidate(order_candidate)
+        if rejection_reason is not None:
+            self.logger().warning(
+                f"🚫 Skipping open order for {self.config.trading_pair}: {rejection_reason}"
+            )
+            self._failed_orders.append(order_candidate)
+            return
+
         if order_candidate.amount > 0:
             order_id = self.place_order(
                 connector_name=self.config.connector_name,
@@ -729,6 +737,59 @@ class GridExecutor(ExecutorBase):
             amount=amount,
             price=take_profit_price
         )
+
+    def _validate_open_order_candidate(self, order_candidate: Union[OrderCandidate, PerpetualOrderCandidate]) -> Optional[str]:
+        order_amount_quote = order_candidate.amount * order_candidate.price
+
+        max_position_size_quote = getattr(self.config, "max_position_size_quote", None)
+        if max_position_size_quote is not None and order_amount_quote > max_position_size_quote:
+            return (
+                f"order notional {order_amount_quote:.8f} exceeds configured max_position_size_quote "
+                f"{max_position_size_quote}"
+            )
+
+        trading_rule = getattr(self, "trading_rules", None)
+        if trading_rule is not None:
+            max_order_size = getattr(trading_rule, "max_order_size", None)
+            if max_order_size:
+                max_order_notional = Decimal(str(max_order_size)) * order_candidate.price
+                if order_amount_quote > max_order_notional:
+                    return (
+                        f"order notional {order_amount_quote:.8f} exceeds connector max order size "
+                        f"{max_order_notional:.8f}"
+                    )
+
+            max_notional_size = getattr(trading_rule, "max_notional_size", None)
+            if max_notional_size:
+                max_notional_size_decimal = Decimal(str(max_notional_size))
+                if order_amount_quote > max_notional_size_decimal:
+                    return (
+                        f"order notional {order_amount_quote:.8f} exceeds connector max notional size "
+                        f"{max_notional_size_decimal}"
+                    )
+
+        min_liquidation_distance_pct = getattr(self.config, "min_liquidation_distance_pct", None)
+        if self.is_perpetual and min_liquidation_distance_pct is not None and min_liquidation_distance_pct > 0:
+            liquidation_price = self._projected_liquidation_price(order_candidate.price)
+            if liquidation_price is not None and self.mid_price > 0:
+                distance_pct = abs((self.mid_price - liquidation_price) / self.mid_price) * Decimal("100")
+                if distance_pct < min_liquidation_distance_pct:
+                    return (
+                        f"projected liquidation price {liquidation_price:.8f} only {distance_pct:.4f}% away from mid price "
+                        f"{self.mid_price:.8f} (min required {min_liquidation_distance_pct}%)"
+                    )
+
+        return None
+
+    def _projected_liquidation_price(self, entry_price: Decimal) -> Optional[Decimal]:
+        leverage = Decimal(str(self.config.leverage)) if getattr(self.config, "leverage", None) else None
+        if leverage is None or leverage <= 0:
+            return None
+
+        distance_factor = Decimal("1") / leverage
+        if self.config.side == TradeType.BUY:
+            return entry_price * (Decimal("1") - distance_factor)
+        return entry_price * (Decimal("1") + distance_factor)
 
     def _get_price_with_fallback(self, price_type: PriceType, context: str) -> Decimal:
         try:

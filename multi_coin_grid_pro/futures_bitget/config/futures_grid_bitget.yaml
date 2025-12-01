@@ -11,6 +11,12 @@ min_order_amount_quote: 5
 derivative_leverage: 2             # verhoogd
 max_exposure_per_coin_pct: 0.2
 max_total_exposure_pct: 0.9
+max_position_size_per_symbol:
+  BTC-USDT: 50
+  ETH-USDT: 40
+min_liquidation_distance_pct_per_symbol:
+  BTC-USDT: 1.5
+  ETH-USDT: 1.5
 
 # Trading universe
 manual_trading_pairs:
