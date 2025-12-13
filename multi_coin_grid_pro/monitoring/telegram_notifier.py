@@ -1,10 +1,13 @@
 # integrations/telegram_notifier.py
 
+import logging
 from typing import Optional
 
 import requests
 
 from multi_coin_grid_pro.core.risk_scanner import RiskResult, TradeStatus
+
+LOGGER = logging.getLogger("monitor.telegram")
 
 
 class TelegramNotifier:
@@ -29,25 +32,58 @@ class TelegramNotifier:
             "parse_mode": "Markdown",
         }
         try:
-            requests.post(url, json=payload, timeout=5)
-        except Exception as e:
-            # hier kun je logging gebruiken ipv print
-            print(f"[TelegramNotifier] Failed to send message: {e}")
+            resp = requests.post(url, json=payload, timeout=10)
+            try:
+                resp.raise_for_status()
+            except Exception:
+                # Log HTTP-level failures with response body
+                LOGGER.error(
+                    "Telegram send failed (http=%s): %s",
+                    resp.status_code if resp is not None else "?",
+                    (resp.text[:1000] if resp is not None else ""),
+                )
+                return
+
+            # Check Telegram API-level result
+            try:
+                data = resp.json()
+            except Exception:
+                LOGGER.error("Telegram response is not JSON: %s", resp.text)
+                return
+
+            if not data.get("ok"):
+                LOGGER.error("Telegram API returned error: %s", data)
+            else:
+                LOGGER.debug("Telegram message sent successfully: %s", data)
+        except Exception:
+            LOGGER.exception("Failed to send Telegram message")
 
     def handle_risk_result(self, result: RiskResult) -> None:
         status = result.status
 
-        # Altijd bij DO_NOT_TRADE als enabled
+        # Build the message(s) and send via _send_message.
+        msg = self.format_risk_message(result)
+        if msg:
+            self._send_message(msg)
+            # Update last status according to what was sent
+            self._last_status = status
+
+    def format_risk_message(self, result: RiskResult) -> Optional[str]:
+        """Return the message text that would be sent for a given RiskResult.
+
+        This is useful for logging/preview without performing network I/O.
+        """
+        status = result.status
+
+        # Always on DO_NOT_TRADE if enabled
         if self.notify_on_do_not_trade and status == TradeStatus.DO_NOT_TRADE:
-            self._send_message(
+            return (
                 "⛔ *DO NOT TRADE*\n"
                 f"Score: {result.score}/100\n"
                 f"{result.explanation}"
             )
-            self._last_status = status
-            return
 
-        # Alleen bij status change
+        # Only on status change
         if (
             self.notify_on_status_change
             and self._last_status is not None
@@ -59,9 +95,9 @@ class TelegramNotifier:
                 TradeStatus.DO_NOT_TRADE: "⛔",
             }[status]
 
-            self._send_message(
+            return (
                 f"{emoji} Risk status changed to: *{status.value}*\n"
                 f"Score: {result.score}/100"
             )
 
-        self._last_status = status
+        return None

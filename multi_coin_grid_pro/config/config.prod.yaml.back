@@ -1,0 +1,153 @@
+# This configuration file defines the parameters for the multi-coin grid trading strategy.
+# The strategy automatically discovers and trades the best trending coins.
+
+# Logging Configuration
+log_level: INFO  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+                 # DEBUG: Detailed debugging information (very verbose)
+                 # INFO: Normal operation messages (recommended)
+                 # WARNING: Only warnings and errors
+                 # ERROR: Only errors
+                 # CRITICAL: Only critical errors
+
+# Exchange Configuration
+connector_name: kraken
+quote_asset: EUR
+
+paper_trading: false # Enable paper trading for testing
+
+# =============================================================================
+# DYNAMIC PAIR DISCOVERY
+# =============================================================================
+# When enabled, the bot scans ALL pairs on the exchange at startup and
+# automatically selects the best 25 based on volume, trend, and spread.
+# This is the PROFESSIONAL approach - no hardcoded lists!
+#
+# Options:
+#   true  = Scan all pairs at startup, select best 25 dynamically
+#   false = Use the static whitelisted_pairs list below
+use_dynamic_pair_discovery: true
+
+# Fallback whitelist (used if dynamic discovery fails or is disabled)
+# IMPORTANT: Kraken WebSocket limit is ~25-30 subscriptions!
+whitelisted_pairs:
+  - USDC-EUR
+  # - USDT-EUR  # DISABLED: Kraken blocks USDT trading for NL due to MiCA regulations!
+  - BTC-EUR
+  - ETH-EUR
+  - SOL-EUR
+  - ADA-EUR
+  - XRP-EUR
+  - DOGE-EUR
+  - LINK-EUR
+  - DOT-EUR
+  - SUI-EUR
+  - AVAX-EUR
+  - TRX-EUR
+  - LTC-EUR
+  - MATIC-EUR
+# Total: 15 fallback pairs (used only if dynamic discovery fails)
+
+# Coin Selection
+# Option 1: Manual trading pairs (if set, bot will ONLY trade these coins)
+# Format: ["COIN-QUOTE", "COIN-QUOTE", ...] or leave empty/null for auto-discovery
+manual_trading_pairs: null  # Example: ["XRP-EUR", "ADA-EUR", "SOL-EUR"] or null for auto-discovery
+
+# Multi-Coin Simultaneous Trading
+# Hoeveel coins tegelijk handelen? Kapitaal wordt gelijk verdeeld.
+# 1 = huidige gedrag (1 coin), 2-3 = meerdere coins tegelijk
+max_simultaneous_coins: 2  # 2 coins tegelijk = €80/2 = €40 per coin
+
+# Option 2: Auto-discovery (only used if manual_trading_pairs is null/empty)
+max_coins_to_monitor: 23
+min_24h_volume_eur: 300000  # Minimum €300k daily volume (verhoogd voor betere liquiditeit)
+exclude_expensive_coins: false  # Exclude BTC/ETH
+
+# Coin Rotation
+coin_rotation_threshold: 120  # Replace coin after X updates without trades (~20 min @ 10s interval)
+
+# Trend Detection
+trend_lookback_minutes: 1440  # Track 24 hours (1440 minutes) of price history for real trends
+trend_min_change_pct: 0.3  # LOWERED: 0.3% minimum (catch early trends, from 0.5%)
+price_update_interval: 30  # Update prices every 30 seconds
+
+# Phase 2.5: Multi-Timeframe Trend Engine
+use_multi_timeframe: true  # Enable multi-timeframe analysis (60m, 240m, 1440m)
+trend_lookback_short_minutes: 60  # 1-hour lookback
+trend_lookback_mid_minutes: 240  # 4-hour lookback
+trend_lookback_long_minutes: 1440  # 24-hour lookback
+switch_threshold_percent: 2.5  # INCREASED: Minimum 2.5% difference to switch (avoid chasing tops)
+exit_short_threshold: -0.8  # TIGHTENED: Exit if 60m trend < -0.8% (quick exit on reversal)
+exit_mid_threshold: -0.3  # TIGHTENED: Exit if 240m trend < -0.3% (early warning)
+trend_min_entry_strength: 0.3  # EARLY ENTRY: 0.3% = catch trends early, not at peak!
+
+# PRO EXIT SYSTEM - Layer 3: Price-Based Emergency Exits
+emergency_exit_pct: -1.5  # Exit immediately if price drops 1.5% below entry (STRENGTHENED from -2.0%)
+hard_stop_pct: -2.5  # Fail-safe exit if price drops 2.5% below entry (STRENGTHENED from -3.0%)
+
+# PRO EXIT SYSTEM - Layer 5: Grid Profit Exit
+min_grid_profit_pct: 1.5  # Exit if grid realized profit >= 1.5% (INCREASED - take profit before reversal)
+
+# Startup Delay
+min_startup_wait_seconds: 1800  # Wait 30 minutes before first trade
+
+# Switch Management
+min_switch_interval_seconds: 3600  # Minimum 60 minutes between coin switches (INCREASED from 30 min)
+min_hold_time_seconds: 1800  # Never switch <30 minutes (INCREASED from 15 min - stronger anti-whipsaw)
+smart_switch_k: 2.0  # Phase 3.1: INCREASED - more conservative switching (avoid chasing pumps)
+switch_cost_multiplier: 2.5  # Phase 3.2: INCREASED - only switch if profit is 2.5x costs (reduce trend-chasing)
+
+# Grid Configuration
+grid_range_pct_down: 1.5  # Place buy orders 1.5% below current price (REDUCED from 3.0% - prevents overbuying in downtrends)
+grid_range_pct_up: 8.0  # Place sell orders 8% above current price (fallback if ATR not available)
+num_grids: 3  # Number of grid levels (base, will be adjusted by volatility - Phase 4.2)
+use_atr_grid_ranges: true  # Phase 4.1: Use ATR-based dynamic grid ranges
+atr_multiplier_down: 1.5  # Phase 4.1: INCREASED - wider grid to catch more upswing (from 1.0)
+atr_multiplier_up: 2.0  # Phase 4.1: INCREASED - capture more profit before reversal (from 1.5)
+use_asymmetric_grids: true  # Phase 4.3: Adjust grid distribution based on trend direction
+smart_refill_threshold_pct: 3.0  # Phase 4.4: Rebuild grid if price moved >3% since last grid
+
+# Capital Management
+total_amount_quote: 80  # Total €80 per grid (testing with paper trading)
+min_order_amount_quote: 10  # Minimum €10 per order
+
+# Global Risk Manager Settings (BELANGRIJK!)
+# Deze settings bepalen hoeveel kapitaal de bot MAG gebruiken per trade
+risk_reference_balance_quote: 100  # Je totale kapitaal (~€85-100)
+risk_max_balance_per_trade_pct: 100  # 100% = gebruik volledige total_amount_quote (€80)
+risk_max_total_open_risk_pct: 100  # 100% = sta volledige kapitaal toe
+
+# Risk Management
+stop_loss_pct: 0.05  # Stop loss at -5% (TIGHTENED from -8% for better risk control)
+take_profit_pct: 0.02  # Take profit at +2% per grid level
+
+# Phase 1.4: Position Size Limits
+max_exposure_per_coin_pct: 0.20  # Max 20% of capital per coin
+max_total_exposure_pct: 0.90  # Max 90% of capital total
+
+# Order Management
+max_open_orders: 5  # Maximum 5 open orders at once
+order_frequency: 3  # Wait 3 seconds between order placements
+
+# PHASE 1: Slippage Protection (Fix #1)
+max_entry_spread_pct: 0.5  # Maximum acceptable bid-ask spread (0.5% = professional standard)
+
+# PHASE 1: Drawdown & Loss Limits (Fix #2 & #3)
+max_daily_loss_pct: 3.0    # Max daily loss percentage (TIGHTENED from 5.0%)
+max_weekly_loss_pct: 8.0  # Max weekly loss percentage (TIGHTENED from 10.0%)
+max_monthly_loss_pct: 12.0 # Max monthly loss percentage (TIGHTENED from 15.0%)
+max_daily_loss_eur: 30.0   # Max daily loss in EUR (REDUCED from €50 - 3% of €1000 capital)
+
+blacklist:
+  - CCD-EUR
+  - FARTCOIN-EUR
+  - 0G-EUR
+  - 1INCH-EUR
+  - 2Z-EUR
+  - AB-EUR
+  - ACA-EUR
+  - USELESS-EUR
+  - CC-EUR
+  - GIGA-EUR  # Blacklisted: Exchange rate oracle errors (CoinGecko has no data)
+  - XPL-EUR   # Blacklisted: No order book on Kraken (market not whitelisted)
+  - USDT-USD  # Blacklisted: Avoid USD pairs on EUR quote exchange
+  - USDT-EUR  # Blacklisted: Kraken blocks USDT for NL (MiCA regulation)

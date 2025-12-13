@@ -472,12 +472,19 @@ class KrakenExchange(ExchangePyBase):
             order: InFlightOrder):
         fee_asset = order.quote_asset
 
+        # FIX: Kraken returns fees in cents for fiat currencies (EUR, USD, etc)
+        # Need to divide by 100 to get the actual amount in base currency
+        fee_amount = Decimal(order_fill["fee"])
+        if fee_asset in ["EUR", "USD", "GBP", "CAD", "CHF", "AUD", "JPY"]:
+            fee_amount = fee_amount / Decimal("100")
+            self.logger().debug(f"Kraken fee conversion: {order_fill['fee']} cents -> {fee_amount} {fee_asset}")
+
         fee = TradeFeeBase.new_spot_fee(
             fee_schema=self.trade_fee_schema(),
             trade_type=order.trade_type,
             percent_token=fee_asset,
             flat_fees=[TokenAmount(
-                amount=Decimal(order_fill["fee"]),
+                amount=fee_amount,
                 token=fee_asset
             )]
         )

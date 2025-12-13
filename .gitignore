@@ -49,6 +49,23 @@ portfolio_value.csv
 debug.log
 /installation/docker-commands/hummingbot_files
 
+# Security: Never commit environment files with API keys!
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+credentials/
+
+# Trading bot specific
+logs/*.log
+logs/*.jsonl
+logs/*.csv
+*.db
+*.sqlite
+*.sqlite3
+
 # Distribution files
 /build
 /dist

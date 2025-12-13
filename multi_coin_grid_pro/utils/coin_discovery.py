@@ -57,35 +57,25 @@ class CoinDiscovery:
 
     async def discover_coins(self) -> List[str]:
         """
-        Discover tradeable coins on the exchange - SIMPLIFIED VERSION FOR DEBUGGING
+        Discover tradeable coins on the exchange
 
         Returns:
             List of trading pair symbols (e.g., ["XRP/EUR", "ADA/EUR"])
         """
-        # IMMEDIATE logging to verify this method is actually called
-        logger.error("=" * 80)
-        logger.error("🚨 DISCOVER_COINS CALLED - THIS SHOULD ALWAYS APPEAR!")
-        logger.error("=" * 80)
-
         try:
-            logger.error(f"Step 1: Getting trading_pair_symbol_map...")
             trading_pair_map = await self.connector.trading_pair_symbol_map()
-            logger.error(f"Step 2: Got {len(trading_pair_map)} pairs from map")
-
             all_markets = list(trading_pair_map.keys())
-            logger.error(f"Step 3: all_markets has {len(all_markets)} items")
 
-            # Filter EUR pairs
+            # Filter pairs by quote asset
             quote_pairs = [p for p in all_markets if f"-{self.quote_asset}" in p or f"/{self.quote_asset}" in p]
-            logger.error(f"Step 4: Found {len(quote_pairs)} {self.quote_asset} pairs")
+            logger.info(f"Discovered {len(quote_pairs)} {self.quote_asset} pairs")
 
             # Return first 20
             result = quote_pairs[:20]
-            logger.error(f"Step 5: Returning {len(result)} pairs: {result[:5]}...")
             return result
 
         except Exception as e:
-            logger.error(f"❌❌❌ EXCEPTION IN DISCOVER_COINS: {e}")
+            logger.error(f"Exception in discover_coins: {e}")
             import traceback
             logger.error(traceback.format_exc())
             # DO NOT RETURN FALLBACK - LET IT FAIL SO WE SEE THE ERROR!

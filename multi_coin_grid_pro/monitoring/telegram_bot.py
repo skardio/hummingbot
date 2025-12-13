@@ -5,6 +5,7 @@ Sends alerts for important events and handles commands.
 """
 
 import logging
+import time
 from typing import Optional
 
 import requests
@@ -31,13 +32,18 @@ class TelegramBot:
         self.base_url = f"https://api.telegram.org/bot{bot_token}"
         self.logger = logging.getLogger(__name__)
 
-    def send_message(self, text: str, parse_mode: str = "HTML") -> bool:
+        # Rate limiting: max 1 message per 5 seconds
+        self._last_message_time = 0
+        self._min_interval = 5.0  # seconds
+
+    def send_message(self, text: str, parse_mode: str = "HTML", skip_rate_limit: bool = False) -> bool:
         """
         Send a message to Telegram
 
         Args:
             text: Message text
             parse_mode: Parse mode (HTML or Markdown)
+            skip_rate_limit: Skip rate limiting (for commands)
 
         Returns:
             True if successful, False otherwise
@@ -45,6 +51,17 @@ class TelegramBot:
         if not self.bot_token or not self.chat_id:
             self.logger.warning("Telegram bot not configured - skipping message")
             return False
+
+        # Rate limiting for alerts (not commands)
+        if not skip_rate_limit:
+            current_time = time.time()
+            time_since_last = current_time - self._last_message_time
+
+            if time_since_last < self._min_interval:
+                self.logger.debug(f"Rate limit: skipping message (last message {time_since_last:.1f}s ago)")
+                return False
+
+            self._last_message_time = current_time
 
         try:
             url = f"{self.base_url}/sendMessage"
@@ -90,7 +107,7 @@ class TelegramBot:
         """Send current bot status"""
         status = self.db.get_latest_status()
         if not status:
-            return self.send_message("❌ No status data available")
+            return self.send_message("❌ No status data available", skip_rate_limit=True)
 
         status_text = f"""
 🤖 <b>Bot Status</b>
@@ -102,13 +119,13 @@ class TelegramBot:
 ⏱️ Latency: <b>{status.get('heartbeat_latency', 0):.0f}ms</b>
 🔌 Connection: <b>{status.get('connection_status', 'unknown')}</b>
 """
-        return self.send_message(status_text)
+        return self.send_message(status_text, skip_rate_limit=True)
 
     def send_recent_events(self, limit: int = 5) -> bool:
         """Send recent events"""
         events = self.db.get_recent_events(limit=limit)
         if not events:
-            return self.send_message("📋 No recent events")
+            return self.send_message("📋 No recent events", skip_rate_limit=True)
 
         events_text = f"📋 <b>Recent Events</b> (last {limit})\n\n"
         for event in events:
@@ -116,7 +133,7 @@ class TelegramBot:
             msg = event.get('message', '')[:50]
             events_text += f"• <b>{event.get('event_type', 'unknown')}</b> - {coin_str}{msg}...\n"
 
-        return self.send_message(events_text)
+        return self.send_message(events_text, skip_rate_limit=True)
 
     def check_and_alert(self, event_type: str, message: str, coin: Optional[str] = None):
         """
@@ -127,21 +144,22 @@ class TelegramBot:
             message: Event message
             coin: Coin symbol (optional)
         """
-        # Always alert for critical events
+        # Only alert for critical events (NO coin switches)
         critical_events = ["stop_loss", "circuit_breaker", "error", "api_error"]
 
         if event_type in critical_events:
             self.send_alert(event_type, message, coin)
 
-        # Alert for trend switches (only if coin is valid)
-        if event_type == "trend_switch" and coin:
-            self.send_alert(event_type, f"Switched to {coin}", coin)
+        # DISABLED: No alerts for trend switches (too spammy)
+        # if event_type == "trend_switch" and coin:
+        #     self.send_alert(event_type, f"Switched to {coin}", coin)
 
-        # Check P&L swings
+        # Check P&L swings (only large movements)
         if event_type == "status_update":
             status = self.db.get_latest_status()
             if status:
                 pnl = status.get('pnl', 0)
+                # Only alert for P&L above threshold
                 if abs(pnl) > MonitoringConfig.PNL_ALERT_THRESHOLD:
                     self.send_alert(
                         "pnl_swing",

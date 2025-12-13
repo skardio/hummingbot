@@ -57,6 +57,15 @@ max_total_exposure_pct: 0.80  # TEST: Max 80% of capital total (stricter)
 max_open_orders: 5  # TEST: Fewer orders for testing
 order_frequency: 3  # Wait 3 seconds between order placements
 
+# PHASE 1: Slippage Protection (Fix #1)
+max_entry_spread_pct: 1.0  # Higher tolerance for testing (1.0%)
+
+# PHASE 1: Drawdown & Loss Limits (Fix #2 & #3)
+max_daily_loss_pct: 3.0    # Stricter for testing
+max_weekly_loss_pct: 7.0
+max_monthly_loss_pct: 12.0
+max_daily_loss_eur: 5.0    # Lower for test env
+
 # Phase 1.2: Circuit Breaker
 circuit_breaker_volatility_pct: 0.05  # 5% volatility threshold
 circuit_breaker_time_window: 60  # 1 minute window

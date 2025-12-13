@@ -32,9 +32,20 @@ class DataCollector:
         """
         self.db = db
         self.log_file = Path(log_file)
-        self.last_position = 0  # Track last read position in log file
         self.logger = logging.getLogger(__name__)
         self.telegram_bot = telegram_bot
+
+        # Start from END of file to avoid processing old events
+        # Only monitor NEW events from this point forward
+        self.last_position = 0
+        if self.log_file.exists():
+            try:
+                with open(self.log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    f.seek(0, 2)  # Seek to end of file
+                    self.last_position = f.tell()
+                self.logger.info(f"📍 Starting from end of log file (position: {self.last_position})")
+            except Exception as e:
+                self.logger.warning(f"Could not seek to end of log file: {e}")
 
         # Event patterns to detect
         self.event_patterns = {

@@ -522,7 +522,16 @@ def main():
                 LOGGER.debug("Explanation:\n%s", result.explanation)
 
                 if telegram_notifier:
-                    telegram_notifier.handle_risk_result(result)
+                    # Preview the message text for logging/diagnostics
+                    try:
+                        preview = None
+                        if hasattr(telegram_notifier, "format_risk_message"):
+                            preview = telegram_notifier.format_risk_message(result)
+                        if preview:
+                            LOGGER.info("Telegram preview: %s", preview.replace("\n", " | "))
+                        telegram_notifier.handle_risk_result(result)
+                    except Exception as exc:
+                        LOGGER.exception("Telegram notifier failed: %s", exc)
             except Exception as exc:
                 LOGGER.error("Risk evaluation failed: %s", exc, exc_info=True)
 

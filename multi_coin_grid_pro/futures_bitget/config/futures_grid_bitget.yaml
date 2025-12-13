@@ -1,16 +1,19 @@
 controller_name: futures_grid_bitget
 log_level: INFO
 
-paper_trading: false
+paper_trading: true
 connector_name: bitget_perpetual
 quote_asset: USDT
 
-# Capital management
-total_amount_quote: 100
-min_order_amount_quote: 5
-derivative_leverage: 2             # verhoogd
-max_exposure_per_coin_pct: 0.2
-max_total_exposure_pct: 0.9
+# === CAPITAL MANAGEMENT ===
+total_amount_quote: 50           # Totaal capital in USDT
+min_order_amount_quote: 5          # Minimum order size
+derivative_leverage: 5            # Leverage 1-125x (START MET 5-10x!)
+max_exposure_per_coin_pct: 0.2     # Max 20% per coin
+max_total_exposure_pct: 0.9        # Max 90% totaal
+
+# === POSITION MODE ===
+position_mode: ONEWAY              # ONEWAY (simpel) of HEDGE (advanced)
 
 # Trading universe
 manual_trading_pairs:
@@ -60,7 +63,146 @@ take_profit_pct: 0.02
 max_open_orders: 6
 order_frequency: 3
 
+# PHASE 1: Slippage Protection (Fix #1)
+max_entry_spread_pct: 0.5            # reject if spread > 0.5%
+
+# PHASE 1: Drawdown & Loss Limits (Fix #2 & #3)
+max_daily_loss_pct: 5.0              # max daily loss %
+max_weekly_loss_pct: 10.0
+max_monthly_loss_pct: 15.0
+max_daily_loss_eur: 50.0             # USDT for futures
+
 # Discovery
 coin_rotation_threshold: 90
 trend_min_change_pct: 0.1  # Verlaagd van 0.5 naar 0.1 voor bear markets (futures)
 price_update_interval: 30
+
+# ============================================================
+# FUTURES-SPECIFIC RISK MANAGEMENT
+# ============================================================
+
+# === LIQUIDATION BEVEILIGING ===
+# Hoe dit werkt:
+# - Bij 10x leverage en -10% = liquidatie
+# - liquidation_buffer_pct (20%) = extra veiligheidsmarge
+# - liquidation_safety_distance_pct (50%) = stop bij halverwege naar liquidatie
+#
+# Voorbeeld met 10x leverage:
+#   Entry:     $100,000
+#   Liquidation: $90,000 (-10%)
+#   Warning:   $95,000 (-5%, halverwege)
+#   → Als prijs < $95,000 = EMERGENCY STOP!
+#
+liquidation_buffer_pct: 0.2                  # 20% veiligheidsmarge voor liquidatie
+liquidation_safety_distance_pct: 0.5         # Stop bij 50% van afstand tot liquidatie
+
+# === EMERGENCY EXITS (STRAKKER DAN SPOT) ===
+# Waarom strakker? Bij 10x leverage:
+# - -1.5% grid verlies = -15% op je capital!
+# - -2.5% grid verlies = -25% op je capital!
+#
+futures_emergency_exit_pct: -1.5             # Emergency exit bij -1.5% (ipv -2% spot)
+futures_hard_stop_pct: -2.5                  # Hard stop bij -2.5% (ipv -3% spot)
+
+# === ENTRY FILTERS (MULTI-TIMEFRAME) ===
+# Alleen traden in DUIDELIJKE UPTREND!
+# Futures grid in downtrend = liquidatie risico
+#
+# Normale trading (24h data beschikbaar):
+futures_min_entry_strength_24h: 1.5          # 24h trend > +1.5% VERPLICHT
+futures_min_entry_strength_4h: 1.0           # 4h trend > +1.0% VERPLICHT
+futures_min_entry_strength_1h: 0.0           # 1h trend ≥ 0.0% VERPLICHT
+#
+# Warmup mode (24h data nog niet compleet, eerste uur bot draait):
+warmup_min_4h_trend_pct: 1.0                 # 4h trend > +1.0%
+warmup_min_1h_trend_pct: 0.5                 # 1h trend ≥ +0.5%
+
+# ============================================================
+# RISKGUARD: AUTOMATISCHE KILL-SWITCHES
+# ============================================================
+# RiskGuard monitort 6 gevaren en stopt grid ONMIDDELLIJK bij trigger.
+# Dit beschermt tegen liquidatie en grote verliezen.
+#
+# BELANGRIJK: RiskGuard heeft VOORRANG op alles!
+# ============================================================
+
+risk_guard_enabled: true                     # Schakel RiskGuard in (AANBEVOLEN!)
+
+# --- GUARD 1: HARD LOSS ---
+# Stop grid bij maximaal verlies
+# Bij 10x leverage: -8% = -80% van je capital!
+#
+risk_guard_max_loss_pct: -8.0                # Stop bij -8% unrealized PnL
+#                                            # Conservatief: -5.0
+#                                            # Agressief: -10.0 (GEVAARLIJK!)
+
+# --- GUARD 2: MAX TIME ---
+# Stop grid als het te lang draait zonder winst
+# Futures grid moet SNEL profit maken (funding fees!)
+#
+risk_guard_max_grid_time_seconds: 3600       # Stop na 1 uur (3600s)
+#                                            # Conservatief: 1800s (30 min)
+#                                            # Agressief: 7200s (2 uur)
+
+# --- GUARD 3: GRID DEPTH ---
+# Stop als te veel buy orders gevuld zijn
+# Veel gevulde buys = prijs daalt = liquidatie gevaar!
+#
+risk_guard_max_grid_depth_pct: 0.65          # Stop als 65% van levels gevuld
+#                                            # Conservatief: 0.50 (50%)
+#                                            # Agressief: 0.80 (80%, gevaarlijk!)
+
+# --- GUARD 4: SELL STARVATION ---
+# Stop als geen sell orders gevuld worden
+# Geen sells = geen profit = alleen funding fees betalen
+#
+risk_guard_sell_starvation_seconds: 900      # Stop na 15 min zonder sell
+#                                            # Conservatief: 600s (10 min)
+#                                            # Agressief: 1800s (30 min)
+
+# --- GUARD 5: TREND BREAK ---
+# Stop als 1h trend negatief wordt
+# Uptrend voorbij = grid moet stoppen!
+#
+risk_guard_trend_break_pct: -1.5             # Stop als 1h trend < -1.5%
+#                                            # Conservatief: -1.0
+#                                            # Agressief: -2.5
+
+# --- GUARD 6: ATR EXPLOSION ---
+# Stop als volatiliteit explodeert
+# Hoge volatiliteit + leverage = gevaarlijk!
+#
+risk_guard_atr_explosion_multiplier: 2.2     # Stop als ATR > 2.2x baseline
+#                                            # Conservatief: 1.8x
+#                                            # Agressief: 3.0x
+
+# ============================================================
+# TUNING PROFILES (UNCOMMENT OM TE GEBRUIKEN)
+# ============================================================
+
+# === CONSERVATIEF PROFIEL (BEGINNERS) ===
+# Lage leverage, snelle stops, veilig
+#
+# derivative_leverage: 5
+# risk_guard_max_loss_pct: -5.0
+# risk_guard_max_grid_time_seconds: 1800       # 30 min
+# risk_guard_max_grid_depth_pct: 0.50          # 50%
+# risk_guard_sell_starvation_seconds: 600      # 10 min
+# risk_guard_trend_break_pct: -1.0
+# risk_guard_atr_explosion_multiplier: 1.8
+
+# === AGRESSIEF PROFIEL (EXPERTS, RISICOVOL!) ===
+# Hoge leverage, meer ruimte, gevaarlijk!
+#
+# derivative_leverage: 20                      # GEVAARLIJK!
+# risk_guard_max_loss_pct: -10.0
+# risk_guard_max_grid_time_seconds: 7200       # 2 uur
+# risk_guard_max_grid_depth_pct: 0.75          # 75%
+# risk_guard_sell_starvation_seconds: 1800     # 30 min
+# risk_guard_trend_break_pct: -2.5
+# risk_guard_atr_explosion_multiplier: 3.0
+
+# ============================================================
+# MEER INFO:
+# Lees RISK_MANAGEMENT.md voor volledige uitleg van alle parameters!
+# ============================================================

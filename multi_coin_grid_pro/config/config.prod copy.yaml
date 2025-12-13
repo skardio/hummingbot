@@ -1,0 +1,211 @@
+# ===============================================================================
+# HYBRID GRID CONFIG v1.0 - Smart Entry + Dynamic Grids + RiskGuard
+# ===============================================================================
+
+# ------------------------------------------------------------------------------
+# LOGGING & EXCHANGE
+# ------------------------------------------------------------------------------
+log_level: INFO          # Gebruik DEBUG als je wil tunen en veel logs wilt zien
+connector_name: kraken
+quote_asset: EUR
+paper_trading: false      # EERST op true laten tot je tevreden bent
+
+# ------------------------------------------------------------------------------
+# COIN SELECTION - HANDMATIGE WHITELIST VOOR GRID
+# ------------------------------------------------------------------------------
+use_dynamic_pair_discovery: false
+
+# Kern: alleen coins die goed werken voor grid / mean reversion
+manual_trading_pairs:
+  - SUI-EUR
+  - LINK-EUR     # ✅ 0.333% trend (working!)
+  - DOT-EUR
+  - NEAR-EUR
+  - AVAX-EUR
+  - BTC-EUR      # Added: grote volatiliteit
+  - ETH-EUR      # Added: goede liquiditeit
+  - ATOM-EUR
+  - SOL-EUR
+  - ADA-EUR
+  - POL-EUR
+  - BCH-EUR
+  # FTM-EUR removed: Kraken heeft geen FTM-EUR pair
+  # MATIC-EUR removed: Kraken heeft geen MATIC-EUR pair (POL-EUR wel, maar niet MATIC)
+  # XRP-EUR removed: krijgt geen prijsdata van Kraken API
+  # LTC-EUR removed: krijgt geen prijsdata van Kraken API
+
+# Max aantal coins tegelijk actief
+max_simultaneous_coins: 2  # Later bij groter kapitaal kun je dit naar 3 brengen
+
+# Fallback whitelist (als manual_trading_pairs ooit null is)
+whitelisted_pairs:
+  - USDC-EUR
+  - BTC-EUR
+  - ETH-EUR
+  - SOL-EUR
+  - ADA-EUR
+  - XRP-EUR
+  - DOGE-EUR
+  - LINK-EUR
+  - DOT-EUR
+  - SUI-EUR
+  - AVAX-EUR
+  - TRX-EUR
+  - LTC-EUR
+  - NEAR-EUR
+  - ATOM-EUR
+  - POL-EUR
+  - BCH-EUR
+
+max_coins_to_monitor: 23
+min_24h_volume_eur: 300000
+exclude_expensive_coins: false
+
+# ------------------------------------------------------------------------------
+# SMART ENTRY FILTER (ML-lite)
+# ------------------------------------------------------------------------------
+use_smart_entry_filter: true
+
+smart_entry_filter:
+  # RSI Regime
+  rsi_buy_max: 60.0            # Koop alleen onder RSI 60
+  rsi_extreme_low: 25.0        # Geen nieuwe buys bij extreme dips (falling knife)
+  rsi_block_min: 70.0          # Nooit kopen boven RSI 70 (overbought)
+
+  # VWAP Mean Reversion
+  vwap_max_deviation_pct: 3.0  # Max 3% van VWAP (crypto-style, niet te strak)
+
+  # Wick-structuur (chop vs. trending candles)
+  min_wick_ratio: 0.45         # >= 0.45 = ok; lager = te veel volle bodies
+
+  # Volatility Regime via ATR (ATR% = ATR/price*100)
+  max_atr_pct_for_grid: 6.0    # Boven 6% = te chaotisch / news → geen nieuwe entries
+  min_atr_pct_for_grid: 0.5    # Onder 0.5% = doodse markt → geen grid
+
+  # News/Chaos filter op 5m candle
+  max_5m_spike_pct: 2.5        # Geen nieuwe entries als 5m move > 2.5%
+
+  # Trend Acceleration
+  max_down_accel_pct: -1.0     # 1h-4h < -1% → falling knife, blokkeer buys
+  max_up_accel_pct: 1.5        # 1h-4h > +1.5% → mogelijke blow-off top
+
+  # 24h Trend sanity
+  max_trend_24h_pct: 8.0       # > +8% 24h → extended run, geen nieuwe buys
+  min_trend_24h_pct: -12.0     # < -12% 24h → capitulation zone, even niks
+
+# ------------------------------------------------------------------------------
+# DYNAMIC GRID SIZER (ATR-based, 3–7 grids)
+# ------------------------------------------------------------------------------
+use_dynamic_grid_sizer: true
+
+dynamic_grid_sizer:
+  min_grids: 3                 # Dead / low-vol market
+  max_grids: 7                 # Mooie choppy market
+  low_vol_atr_pct: 0.7         # <0.7% ATR → min grids
+  mid_vol_atr_pct: 2.0         # 0.7–2.0% ATR → 4–5 grids
+  high_vol_atr_pct: 4.0        # 2.0–4.0% ATR → max grids (7)
+
+# ------------------------------------------------------------------------------
+# MULTI-TIMEFRAME TREND ENGINE (alleen voor regime / exits)
+# ------------------------------------------------------------------------------
+use_multi_timeframe: true
+trend_lookback_short_minutes: 60     # 1h
+trend_lookback_mid_minutes: 240      # 4h
+trend_lookback_long_minutes: 1440    # 24h
+
+switch_threshold_percent: 3.0        # Min verschil om van coin te wisselen
+exit_short_threshold: -1.5           # Exit als 60m trend < -1.5%
+exit_mid_threshold: -1.2             # Exit als 240m trend < -1.2%
+trend_min_entry_strength: 0.05       # ~0.5% trend nodig voor entry (0.05 = 5%, check implementatie!)
+
+coin_rotation_threshold: 180         # 180 updates (30 min @10s) zonder trades → rotate
+
+trend_lookback_minutes: 1440         # Legacy
+trend_min_change_pct: 0.15           # 0.15% minimum trend-change (voor detectie)
+price_update_interval: 30            # Elke 30s prijzen bijwerken
+
+# ------------------------------------------------------------------------------
+# GRID CONFIG (HYBRID-OPTIMAL)
+# ------------------------------------------------------------------------------
+grid_range_pct_down: 1.5             # 1.5% onder huidige prijs → mooi in EUR market
+grid_range_pct_up: 8.0               # 8% boven (fallback)
+
+num_grids: 5                         # Default (DynamicGridSizer zal 3–7 kiezen)
+
+use_atr_grid_ranges: true
+atr_multiplier_down: 1.5
+atr_multiplier_up: 2.0
+
+use_asymmetric_grids: true           # Meer grids onder in uptrend, etc.
+smart_refill_threshold_pct: 3.0      # Grid opnieuw bouwen bij >3% move
+
+# ------------------------------------------------------------------------------
+# CAPITAL MANAGEMENT
+# ------------------------------------------------------------------------------
+total_amount_quote: 80               # Nu: ~€80 test; later bv. 800 / 2000 / 5000
+min_order_amount_quote: 10           # Min €10 per order
+
+risk_reference_balance_quote: 100    # "theoretical" full balance
+risk_max_balance_per_trade_pct: 40   # FIXED: max 40% per coin (was 50%, nu consistent met max_exposure_per_coin_pct)
+risk_max_total_open_risk_pct: 80     # max 80% in totaal in de markt
+
+max_exposure_per_coin_pct: 40        # FIXED: max 40% van capital in 1 coin (consistent met risk_max_balance_per_trade_pct)
+max_total_exposure_pct: 80           # FIXED: max 80% totaal = 2 coins * 40% (was 60%, nu consistent)
+
+# ------------------------------------------------------------------------------
+# PROFIT / SL / GRID EXIT
+# ------------------------------------------------------------------------------
+stop_loss_pct: 0.05                  # 5% totale SL per grid-structuur
+take_profit_pct: 0.02                # 2% per grid-level (indien gebruikt in je engine)
+
+min_grid_profit_pct: 1.5             # TP bij 1.5% grid-profit (≈0.4–0.6% per cycle netto)
+
+emergency_exit_pct: -1.5             # Emergency exit @ -1.5% price move
+hard_stop_pct: -2.5                  # Hard-stop @ -2.5% (fail-safe)
+
+# ------------------------------------------------------------------------------
+# DAILY / WEEKLY / MONTHLY LIMITS (KillSwitch)
+# ------------------------------------------------------------------------------
+max_daily_loss_pct: 3.0              # Stop bij -3% daily loss
+max_weekly_loss_pct: 8.0             # Stop bij -8% weekly loss
+max_monthly_loss_pct: 12.0           # Stop bij -12% monthly loss
+max_daily_loss_eur: 30.0             # Handig als je straks naar €1000+ gaat
+
+# ------------------------------------------------------------------------------
+# ORDER MANAGEMENT
+# ------------------------------------------------------------------------------
+max_open_orders: 6                   # Max open orders (per bot)
+order_frequency: 3                   # 3s tussen orders, voorkomt spam
+
+max_entry_spread_pct: 0.5            # Max 0.5% spread voor entry (slippage guard)
+
+# ------------------------------------------------------------------------------
+# SWITCH MANAGEMENT
+# ------------------------------------------------------------------------------
+min_switch_interval_seconds: 3600    # Min 60 min tussen coin switches
+min_hold_time_seconds: 1800          # Min 30 min hold-time
+min_startup_wait_seconds: 300        # 5 min warm-up (ipv 30 min)
+
+smart_switch_k: 2.0
+switch_cost_multiplier: 2.5          # Alleen switch als verwacht voordeel >= 2.5x kosten
+
+# ------------------------------------------------------------------------------
+# BLACKLIST (nooit traden, ook niet bij discovery)
+# ------------------------------------------------------------------------------
+blacklist:
+  - MON-EUR       # illiquid / rare behavior
+  - TRX-EUR       # weinig edge, rare spikes
+  - SOL-EUR       # stuck positions in historische data
+  - BCH-EUR       # stuck positions in historische data
+  - ADA-EUR       # stuck positions in historische data
+  - ALGO-EUR      # te traag / low vol
+  - XRP-EUR       # geen prijsdata van Kraken API
+  - LTC-EUR       # geen prijsdata van Kraken API
+  - FTM-EUR       # Kraken heeft geen FTM-EUR trading pair
+  - MATIC-EUR     # Kraken heeft geen MATIC-EUR (POL-EUR wel, maar niet MATIC)
+  - CCD-EUR
+  - FARTCOIN-EUR
+  - GIGA-EUR
+  - XPL-EUR
+  - USDT-USD
+  - USDT-EUR      # MiCA / NL restricties

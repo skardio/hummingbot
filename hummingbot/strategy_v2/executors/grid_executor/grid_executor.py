@@ -1230,12 +1230,14 @@ class GridExecutor(ExecutorBase):
                         limit_price = current_market_price * Decimal("0.9995")  # 0.05% below market
 
                     # Fallback to provided price if limit_price is invalid
-                    if limit_price.is_nan() or limit_price == Decimal("0"):
+                    # BUG FIX: Check if limit_price is None or invalid before calling .is_nan()
+                    if limit_price is None or limit_price.is_nan() or limit_price == Decimal("0"):
                         limit_price = price
 
                     # CRITICAL FIX: Check if LIMIT price is acceptable (within 0.1% of market)
                     # BUG FIX: Validate current_market_price is non-zero before division
-                    if current_market_price and current_market_price != Decimal("0") and not current_market_price.is_nan():
+                    # BUG FIX: Also ensure limit_price is not None before using it in calculation
+                    if limit_price and current_market_price and current_market_price != Decimal("0") and not current_market_price.is_nan():
                         price_diff_pct = abs(float((limit_price - current_market_price) / current_market_price * 100))
                     else:
                         # Invalid market price - cannot calculate diff, use MARKET order

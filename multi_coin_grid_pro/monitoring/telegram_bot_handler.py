@@ -3,6 +3,14 @@ Telegram Bot Command Handler
 
 Listens for incoming Telegram messages and handles commands.
 Runs as a separate service that polls Telegram for new messages.
+
+Commands:
+- /vertel - Full analysis report (Dutch: "tell me")
+- /status - Quick status
+- /trades - Recent trades
+- /trends - Current trends
+- /events - Recent events
+- /help - Show commands
 """
 
 import logging
@@ -14,22 +22,27 @@ import requests
 from .config import MonitoringConfig
 from .database import MonitoringDatabase
 from .telegram_bot import TelegramBot
+from .trade_analyzer import TradeAnalyzer
 
 
 class TelegramBotHandler:
     """Handles incoming Telegram commands via polling"""
 
-    def __init__(self, bot: TelegramBot):
+    def __init__(self, bot: TelegramBot, log_path: str = None):
         """
         Initialize command handler
 
         Args:
             bot: TelegramBot instance
+            log_path: Path to bot log file (optional)
         """
         self.bot = bot
         self.base_url = bot.base_url
         self.logger = logging.getLogger(__name__)
         self.last_update_id = 0
+
+        # Initialize analyzer
+        self.analyzer = TradeAnalyzer(log_path=log_path)
 
         # Command handlers
         self.commands = {
@@ -37,6 +50,13 @@ class TelegramBotHandler:
             "/status": self._handle_status,
             "/events": self._handle_events,
             "/help": self._handle_help,
+            "/vertel": self._handle_vertel,
+            "/analyse": self._handle_vertel,  # Alias
+            "/analyze": self._handle_vertel,  # English alias
+            "/trades": self._handle_trades,
+            "/trends": self._handle_trends,
+            "/quick": self._handle_quick,
+            "/pnl": self._handle_pnl,
         }
 
     def get_updates(self, timeout: int = 10) -> list:
@@ -101,18 +121,19 @@ class TelegramBotHandler:
     def _handle_start(self, message: Dict[str, Any]):
         """Handle /start command"""
         help_text = """
-🤖 <b>Bot Monitoring System</b>
+🤖 <b>Multi-Coin Grid Bot Monitor</b>
 
-Available commands:
-/status - Get current bot status
-/events - Get recent events
-/help - Show this help message
+<b>Belangrijkste commands:</b>
+/vertel - 📊 Uitgebreide analyse rapport
+/quick - ⚡ Snelle status
+/trades - 📈 Recente trades
+/trends - 📊 Top trending coins
+/pnl - 💰 P&L overzicht
 
-The bot will automatically alert you for:
-🛑 Stop-loss triggers
-⚡ Circuit breaker activations
-❌ Errors
-🔄 Coin switches
+Type /help voor alle commands.
+
+<b>Automatische alerts:</b>
+🛑 Stop-loss | ⚡ Circuit breaker | ❌ Errors
 """
         self.bot.send_message(help_text)
 
@@ -138,25 +159,187 @@ The bot will automatically alert you for:
     def _handle_help(self, message: Dict[str, Any]):
         """Handle /help command"""
         help_text = """
-📋 <b>Available Commands:</b>
+📋 <b>Beschikbare Commands:</b>
 
-/status - Get current bot status
-  Shows: active coin, P&L, exposure, mode, latency
+<b>📊 Analyse:</b>
+/vertel - Uitgebreide analyse (trades, P&L, trends)
+/quick - Snelle status samenvatting
+/pnl - Alleen P&L overzicht
 
-/events [N] - Get recent events
-  Example: /events 10
-  Default: 5 events
+<b>📈 Trading:</b>
+/trades [N] - Laatste N trades (default: 5)
+/trends - Huidige top trends
+/status - Bot status
 
-/help - Show this help message
+<b>📋 Logs:</b>
+/events [N] - Laatste N events (default: 5)
 
-<b>Automatic Alerts:</b>
-The bot automatically sends alerts for:
+<b>ℹ️ Info:</b>
+/help - Dit menu
+
+<b>Automatische Alerts:</b>
 🛑 Stop-loss triggers
-⚡ Circuit breaker activations
-❌ Critical errors
-🔄 Coin switches (with valid coin)
+⚡ Circuit breaker
+❌ Kritieke errors
+🔄 Coin switches
 """
         self.bot.send_message(help_text)
+
+    def _handle_vertel(self, message: Dict[str, Any]):
+        """Handle /vertel command - Full analysis report"""
+        self.bot.send_message("🔍 <i>Analyseren... even geduld...</i>")
+
+        try:
+            # Parse optional hours parameter
+            text = message.get("text", "")
+            parts = text.split()
+            hours = 24
+            if len(parts) > 1:
+                try:
+                    hours = int(parts[1])
+                    hours = min(hours, 72)  # Max 72 hours
+                except ValueError:
+                    pass
+
+            # Run analysis
+            report = self.analyzer.analyze(hours=hours)
+
+            # Format and send
+            formatted = self.analyzer.format_telegram_report(report)
+            self.bot.send_message(formatted)
+
+        except Exception as e:
+            self.logger.error(f"Error in /vertel: {e}")
+            self.bot.send_message(f"❌ Analyse fout: {e}")
+
+    def _handle_trades(self, message: Dict[str, Any]):
+        """Handle /trades command - Show recent trades"""
+        try:
+            text = message.get("text", "")
+            parts = text.split()
+            limit = 5
+            if len(parts) > 1:
+                try:
+                    limit = int(parts[1])
+                    limit = min(limit, 15)
+                except ValueError:
+                    pass
+
+            report = self.analyzer.analyze(hours=24)
+
+            if not report.trades:
+                self.bot.send_message("📭 Geen trades gevonden in de laatste 24 uur")
+                return
+
+            lines = [f"📈 <b>Laatste {min(limit, len(report.trades))} Trades:</b>", ""]
+
+            for i, trade in enumerate(report.trades[-limit:], 1):
+                if trade.is_closed:
+                    profit_emoji = "✅" if trade.profit > 0 else "❌"
+                    lines.append(
+                        f"{i}. <b>{trade.coin}</b> {profit_emoji}\n"
+                        f"   Buy: €{trade.buy_price:.5f} → Sell: €{trade.sell_price:.5f}\n"
+                        f"   P&L: <b>€{trade.profit:+.2f}</b> ({trade.profit_pct:+.1f}%)\n"
+                        f"   {trade.buy_time.strftime('%H:%M')} - {trade.sell_time.strftime('%H:%M')}"
+                    )
+                else:
+                    lines.append(
+                        f"{i}. <b>{trade.coin}</b> ⏳ OPEN\n"
+                        f"   Entry: €{trade.buy_price:.5f}\n"
+                        f"   Amount: {trade.buy_amount:.2f}\n"
+                        f"   Since: {trade.buy_time.strftime('%H:%M')}"
+                    )
+                lines.append("")
+
+            self.bot.send_message("\n".join(lines))
+
+        except Exception as e:
+            self.logger.error(f"Error in /trades: {e}")
+            self.bot.send_message(f"❌ Error: {e}")
+
+    def _handle_trends(self, message: Dict[str, Any]):
+        """Handle /trends command - Show current trends"""
+        try:
+            report = self.analyzer.analyze(hours=1)  # Just need current status
+
+            if not report.status.top_trends:
+                self.bot.send_message("📊 Geen trend data beschikbaar")
+                return
+
+            lines = ["📊 <b>Top Trends (24h)</b>", ""]
+
+            for i, (coin, trend) in enumerate(report.status.top_trends, 1):
+                if trend > 10:
+                    emoji = "🚀"
+                elif trend > 5:
+                    emoji = "📈"
+                elif trend > 0:
+                    emoji = "📊"
+                else:
+                    emoji = "📉"
+
+                lines.append(f"{i}. {emoji} <b>{coin}</b>: {trend:+.2f}%")
+
+            if report.status.best_trend_coin:
+                lines.append("")
+                lines.append(f"🏆 Best: <b>{report.status.best_trend_coin}</b> ({report.status.best_trend_pct:+.2f}%)")
+
+            if report.status.is_blocked:
+                lines.append("")
+                lines.append(f"🛑 <b>GEBLOKKEERD:</b> {report.status.block_reason}")
+
+            self.bot.send_message("\n".join(lines))
+
+        except Exception as e:
+            self.logger.error(f"Error in /trends: {e}")
+            self.bot.send_message(f"❌ Error: {e}")
+
+    def _handle_quick(self, message: Dict[str, Any]):
+        """Handle /quick command - Quick status summary"""
+        try:
+            report = self.analyzer.analyze(hours=24)
+            formatted = self.analyzer.format_short_report(report)
+            self.bot.send_message(formatted)
+        except Exception as e:
+            self.logger.error(f"Error in /quick: {e}")
+            self.bot.send_message(f"❌ Error: {e}")
+
+    def _handle_pnl(self, message: Dict[str, Any]):
+        """Handle /pnl command - P&L summary"""
+        try:
+            report = self.analyzer.analyze(hours=24)
+
+            pnl_emoji = "✅" if report.realized_pnl >= 0 else "❌"
+
+            lines = [
+                "💰 <b>P&L Overzicht (24h)</b>",
+                "",
+                f"{pnl_emoji} Gerealiseerd: <b>€{report.realized_pnl:.2f}</b>",
+                "",
+                f"📈 Winstgevende trades: {report.win_count}",
+                f"📉 Verliesgevende trades: {report.loss_count}",
+            ]
+
+            if report.win_count + report.loss_count > 0:
+                win_rate = report.win_count / (report.win_count + report.loss_count) * 100
+                lines.append(f"🎯 Win rate: <b>{win_rate:.0f}%</b>")
+
+                # Calculate average win/loss
+                wins = [t.profit for t in report.trades if t.is_closed and t.profit > 0]
+                losses = [t.profit for t in report.trades if t.is_closed and t.profit < 0]
+
+                if wins:
+                    avg_win = sum(wins) / len(wins)
+                    lines.append(f"📈 Gem. winst: €{avg_win:.2f}")
+                if losses:
+                    avg_loss = sum(losses) / len(losses)
+                    lines.append(f"📉 Gem. verlies: €{avg_loss:.2f}")
+
+            self.bot.send_message("\n".join(lines))
+
+        except Exception as e:
+            self.logger.error(f"Error in /pnl: {e}")
+            self.bot.send_message(f"❌ Error: {e}")
 
     def run_polling(self, poll_interval: int = 1):
         """
@@ -213,6 +396,12 @@ def main():
         help="Path to SQLite database (default: auto)"
     )
     parser.add_argument(
+        "--log-path",
+        type=str,
+        default=MonitoringConfig.LOG_FILE,
+        help="Path to bot log file for analysis"
+    )
+    parser.add_argument(
         "--poll-interval",
         type=int,
         default=1,
@@ -231,12 +420,29 @@ def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
+    print("=" * 50)
+    print("🤖 TELEGRAM BOT COMMAND HANDLER")
+    print("=" * 50)
+    print(f"📱 Chat ID: {args.chat_id}")
+    print(f"📁 Log file: {args.log_path}")
+    print("")
+    print("📋 Available commands:")
+    print("  /vertel  - Full analysis report")
+    print("  /quick   - Quick status")
+    print("  /trades  - Recent trades")
+    print("  /trends  - Top trends")
+    print("  /pnl     - P&L overview")
+    print("  /help    - All commands")
+    print("")
+    print("🚀 Starting polling...")
+    print("=" * 50)
+
     # Initialize database and bot
     db = MonitoringDatabase(db_path=args.db_path)
     bot = TelegramBot(args.token, args.chat_id, db)
 
-    # Initialize command handler
-    handler = TelegramBotHandler(bot)
+    # Initialize command handler with log path
+    handler = TelegramBotHandler(bot, log_path=args.log_path)
 
     # Run polling
     handler.run_polling(poll_interval=args.poll_interval)

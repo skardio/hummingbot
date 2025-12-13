@@ -69,7 +69,16 @@ class ScriptStrategyBase(StrategyPyBase):
             self.ready_to_trade = all(ex.ready for ex in self.connectors.values())
             if not self.ready_to_trade:
                 for con in [c for c in self.connectors.values() if not c.ready]:
-                    self.logger().warning(f"{con.name} is not ready. Please wait...")
+                    # Debug: log detailed ready status
+                    status_parts = []
+                    if hasattr(con, '_trading_required'):
+                        status_parts.append(f"trading_required={con._trading_required}")
+                    if hasattr(con, '_trading_pairs'):
+                        status_parts.append(f"pairs={len(con._trading_pairs) if con._trading_pairs else 0}")
+                    if hasattr(con, '_account_balances'):
+                        status_parts.append(f"balances={bool(con._account_balances)}")
+                    status_str = ", ".join(status_parts) if status_parts else "checking..."
+                    self.logger().warning(f"{con.name} is not ready. Please wait... ({status_str})")
                 return
         else:
             self.on_tick()

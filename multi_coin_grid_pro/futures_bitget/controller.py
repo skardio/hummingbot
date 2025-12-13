@@ -2,11 +2,14 @@
 Futures-specific extensions for the Bitget grid controller.
 """
 
-from typing import Optional
+from decimal import Decimal
+from typing import Dict, List, Optional
 
 from hummingbot.core.data_type.common import PositionMode
+from hummingbot.strategy_v2.models.executor_actions import ExecutorAction, StopExecutorAction
 from multi_coin_grid_pro.controllers.multi_coin_grid_controller import MultiCoinGridController
 from multi_coin_grid_pro.futures_bitget.config_schema import FuturesGridBitgetConfig, FuturesPositionMode
+from multi_coin_grid_pro.futures_bitget.risk_guard import FuturesGridRiskGuard
 
 
 class FuturesGridBitgetController(MultiCoinGridController):
@@ -20,6 +23,10 @@ class FuturesGridBitgetController(MultiCoinGridController):
     def __init__(self, *args, config: FuturesGridBitgetConfig, **kwargs):
         super().__init__(*args, config=config, **kwargs)
         self._position_mode_set = False
+        self.liquidation_prices: Dict[str, Dict[str, Decimal]] = {}
+
+        # Risk Guard: centralized kill-switch logic
+        self.risk_guard = FuturesGridRiskGuard(self)
 
     def _initialize_components(self):
         initialized = super()._initialize_components()
@@ -54,9 +61,15 @@ class FuturesGridBitgetController(MultiCoinGridController):
     def _create_grid_action(self, symbol: str):
         action = super()._create_grid_action(symbol)
         if action is None:
+            self.liquidation_prices.pop(symbol, None)
             return None
 
         self._apply_leverage(symbol)
+        self._calculate_liquidation_buffer(symbol)
+
+        # Notificeer RiskGuard: nieuwe grid gestart
+        self.risk_guard.notify_grid_started(symbol)
+
         return action
 
     def _apply_leverage(self, symbol: Optional[str]):
@@ -66,123 +79,222 @@ class FuturesGridBitgetController(MultiCoinGridController):
 
         if hasattr(self.connector, "set_leverage"):
             try:
-                self.connector.set_leverage(symbol, leverage)
-                self.logger().debug(f"🎚️  Leverage set to x{leverage} for {symbol}.")
+                buffer_pct = float(getattr(self.config, "liquidation_buffer_pct", 0.2))
+                safe_leverage = max(1, int(leverage * (1 - buffer_pct)))
+                if safe_leverage < leverage:
+                    self.logger().info(
+                        f"⚖️  Adjusting leverage from x{leverage} to x{safe_leverage} "
+                        f"to preserve {buffer_pct:.0%} liquidation buffer."
+                    )
+                self.connector.set_leverage(symbol, safe_leverage)
+                self.logger().debug(f"🎚️  Leverage set to x{safe_leverage} for {symbol}.")
             except Exception as e:
                 self.logger().warning(f"⚠️  Failed to set leverage x{leverage} for {symbol}: {e}")
 
+    def _calculate_liquidation_buffer(self, symbol: str) -> None:
+        """
+        Approximate liquidation distance for the active futures grid and
+        track a warning threshold that triggers a defensive exit.
+        """
+        leverage = getattr(self.config, "derivative_leverage", None)
+        entry_price = self.entry_prices.get(symbol)
+        if leverage in (None, 0) or entry_price is None:
+            self.liquidation_prices.pop(symbol, None)
+            return
+
+        entry_price_dec = Decimal(str(entry_price))
+        leverage_dec = Decimal(str(leverage))
+        if leverage_dec <= 1:
+            self.liquidation_prices.pop(symbol, None)
+            return
+
+        # Simple isolated-margin approximation where liquidation occurs when loss equals margin
+        baseline_liq = entry_price_dec * (Decimal("1") - (Decimal("1") / leverage_dec))
+        baseline_liq = max(baseline_liq, Decimal("0"))
+
+        buffer_pct = Decimal(str(getattr(self.config, "liquidation_buffer_pct", 0.2)))
+        buffer_price = entry_price_dec * (Decimal("1") - buffer_pct)
+
+        # Gebruik config: hoeveel % van de afstand tot liquidatie willen we veilig houden
+        safety_distance = Decimal(str(self.config.liquidation_safety_distance_pct))
+        safe_exit_price = entry_price_dec - (entry_price_dec - baseline_liq) * safety_distance
+        warning_price = max(buffer_price, safe_exit_price)
+
+        self.liquidation_prices[symbol] = {
+            "entry": entry_price_dec,
+            "liquidation": baseline_liq,
+            "warning": warning_price,
+        }
+
+        self.logger().info(
+            f"🛡️  {symbol} liquidation guard set: "
+            f"entry={entry_price_dec:.4f}, "
+            f"liquidation≈{baseline_liq:.4f}, "
+            f"warning_exit={warning_price:.4f}"
+        )
+
+    def _monitor_liquidation_risk(self) -> Optional[StopExecutorAction]:
+        if not self.active_coin or self.active_coin not in self.liquidation_prices:
+            return None
+
+        buffer = self.liquidation_prices[self.active_coin]
+        trend = self.trend_calculator.get_trend(self.active_coin)
+        if not trend or not trend.current_price:
+            return None
+
+        current_price = Decimal(str(trend.current_price))
+        warning_price = buffer["warning"]
+        liquidation_price = buffer["liquidation"]
+
+        if current_price <= warning_price:
+            self.logger().critical(
+                f"🚨 {self.active_coin} at {current_price:.4f} "
+                f"breached liquidation buffer ({warning_price:.4f}); "
+                f"liquidation≈{liquidation_price:.4f}. Initiating emergency stop."
+            )
+            self.liquidation_prices.pop(self.active_coin, None)
+            return self._create_stop_action()
+
+        return None
+
+    def determine_executor_actions(self) -> List[ExecutorAction]:
+        # PRIORITEIT 1: RiskGuard check (meest kritisch)
+        if self.active_coin:
+            risk_stop = self.risk_guard.evaluate(self.active_coin)
+            if risk_stop:
+                # Cleanup liquidation tracking
+                self.liquidation_prices.pop(self.active_coin, None)
+                self.risk_guard.notify_grid_stopped(self.active_coin)
+                return [risk_stop]
+
+        # PRIORITEIT 2: Liquidation risk monitoring
+        liquidation_action = self._monitor_liquidation_risk()
+        if liquidation_action:
+            if self.active_coin:
+                self.risk_guard.notify_grid_stopped(self.active_coin)
+            return [liquidation_action]
+
+        # PRIORITEIT 3: Normale grid logic
+        return super().determine_executor_actions()
+
+    def should_exit_position(self, coin: str) -> Optional[str]:
+        """
+        Tighten emergency and hard-stop thresholds for leveraged futures positions.
+        """
+        original_emergency = getattr(self.config, "emergency_exit_pct", -2.0)
+        original_hard = getattr(self.config, "hard_stop_pct", -3.0)
+        futures_emergency = getattr(self.config, "futures_emergency_exit_pct", -1.5)
+        futures_hard = getattr(self.config, "futures_hard_stop_pct", -2.5)
+
+        setattr(self.config, "emergency_exit_pct", futures_emergency)
+        setattr(self.config, "hard_stop_pct", futures_hard)
+        try:
+            return super().should_exit_position(coin)
+        finally:
+            setattr(self.config, "emergency_exit_pct", original_emergency)
+            setattr(self.config, "hard_stop_pct", original_hard)
+
     def _check_multi_timeframe_buy_conditions(self, coin: str) -> bool:
         """
-        Override parent method with less restrictive conditions for futures trading.
+        Tightened futures entry gating aligned with liquidation-aware risk rules.
 
-        Futures-specific adjustments:
-        - Lower thresholds for bear markets (0.1% instead of 1.0%)
-        - Less strict warm-up mode requirements
-        - Allow trading with weaker trends for futures volatility
-
-        Args:
-            coin: Coin symbol to check
-
-        Returns:
-            True if coin meets buy conditions
+        Requirements:
+        - Trend data must be fresh and produce a normalized strength above the configured minimum.
+        - Warm-up mode (still loading 24h signal) demands 4h > +1.0% and 1h ≥ +0.5%.
+        - Normal trading requires 24h > +1.5%, 4h > +1.0%, 1h ≥ 0.0%.
         """
         try:
             trend = self.trend_calculator.get_trend(coin)
             if not trend:
                 return False
 
-            # Check if multi-timeframe data is available
-            if not hasattr(trend, 'trend_60m'):
-                # Multi-timeframe fields don't exist - fallback to old logic
-                self.logger().debug(f"⚠️  Multi-timeframe fields not available for {coin} - allowing (fallback)")
-                return True
+            staleness_threshold = getattr(self.config, "price_update_interval", 30) * 4
+            data_age = self.market_data_provider.time() - trend.last_updated
+            if data_age > staleness_threshold:
+                self.logger().debug(
+                    f"⚠️  Futures entry rejected for {coin}: trend data stale "
+                    f"({data_age:.1f}s > {staleness_threshold}s)"
+                )
+                return False
 
-            # FUTURES-SPECIFIC: Less restrictive warm-up mode
-            if hasattr(trend, 'long_trend_warmup') and trend.long_trend_warmup:
-                # Reduced requirements for futures during warm-up:
-                # 1. 240m trend must be positive (> +0.3%) - was > +1.5% (further reduced)
-                # 2. 60m trend must be >= -0.1% - was >= 0% (allow slight negative)
-                # 3. Both must be positive (reject if both negative)
+            strength = self._compute_trend_strength(trend)
+            if strength < self.config.trend_min_entry_strength:
+                self.logger().debug(
+                    f"⚠️  Futures entry rejected for {coin}: strength "
+                    f"{strength:+.2f} < {self.config.trend_min_entry_strength:+.2f}"
+                )
+                return False
 
-                warmup_240m_ok = trend.trend_240m > 0.3  # Further reduced from 0.5% to 0.3%
-                warmup_60m_ok = trend.trend_60m >= -0.1  # Allow slight negative (-0.1%)
-                both_positive = trend.trend_240m > 0.0 and trend.trend_60m > 0.0
+            if not hasattr(trend, "trend_60m") or not hasattr(trend, "trend_240m"):
+                self.logger().warning(
+                    f"⚠️  Futures entry rejected for {coin}: multi-timeframe fields missing"
+                )
+                return False
 
-                if warmup_240m_ok and warmup_60m_ok and both_positive:
+            # Gebruik config parameters (geen hardcoded values meer)
+            min_24h = float(self.config.futures_min_entry_strength_24h)
+            min_4h = float(self.config.futures_min_entry_strength_4h)
+            min_1h = float(self.config.futures_min_entry_strength_1h)
+
+            if getattr(trend, "long_trend_warmup", False):
+                # Warmup thresholds uit config
+                warmup_240m_threshold = float(self.config.warmup_min_4h_trend_pct)
+                warmup_60m_threshold = float(self.config.warmup_min_1h_trend_pct)
+                warmup_240m_ok = trend.trend_240m > warmup_240m_threshold
+                warmup_60m_ok = trend.trend_60m >= warmup_60m_threshold
+                if warmup_240m_ok and warmup_60m_ok:
                     self.logger().info(
-                        f"[DECISION] ✅ {coin} BUY APPROVED (futures warm-up mode):\n"
-                        f"   [TREND] 24h: {trend.trend_1440m:+.2f}% (warm-up fallback) | 4h: {trend.trend_240m:+.2f}% | 1h: {trend.trend_60m:+.2f}%\n"
-                        f"   [SCORE] Composite: {trend.trend_score:+.2f}%\n"
-                        f"   [NOTE] Futures mode: Using relaxed thresholds for bear markets"
+                        f"[FUTURES] ✅ {coin} warm-up entry allowed: "
+                        f"4h={trend.trend_240m:+.2f}% (>{warmup_240m_threshold:+.2f}), "
+                        f"1h={trend.trend_60m:+.2f}% (≥{warmup_60m_threshold:+.2f})"
                     )
                     return True
-                else:
-                    reasons = []
-                    if not warmup_240m_ok:
-                        reasons.append(f"4h trend ({trend.trend_240m:+.2f}%) <= +0.3% (futures warm-up requires > +0.3%)")
-                    if not warmup_60m_ok:
-                        reasons.append(f"1h trend ({trend.trend_60m:+.2f}%) < -0.1% (futures warm-up requires >= -0.1%)")
-                    if not both_positive:
-                        reasons.append(f"Both trends negative (4h: {trend.trend_240m:+.2f}%, 1h: {trend.trend_60m:+.2f}%)")
 
-                    self.logger().warning(
-                        f"[DECISION] ❌ {coin} BUY REJECTED (futures warm-up mode):\n"
-                        f"   [TREND] 24h: {trend.trend_1440m:+.2f}% (warm-up fallback) | 4h: {trend.trend_240m:+.2f}% | 1h: {trend.trend_60m:+.2f}%\n"
-                        f"   [REASON] {' | '.join(reasons)}"
+                reasons = []
+                if not warmup_240m_ok:
+                    reasons.append(
+                        f"4h {trend.trend_240m:+.2f}% ≤ {warmup_240m_threshold:+.2f}% (warm-up min)"
                     )
-                    return False
-
-            # FUTURES-SPECIFIC: Lower thresholds for normal trading
-            # Reduced from 1.0% to 0.1% to allow trading in bear markets
-            trend_1440m_ok = trend.trend_1440m > 0.1  # Reduced from 1.0%
-            trend_240m_ok = trend.trend_240m > 0.1  # Reduced from 1.0%
-            trend_60m_ok = trend.trend_60m >= -0.2  # Allow slight negative (was >= 0%)
-
-            # Still reject if both short-term trends are strongly negative
-            declining_trend = trend.trend_60m < -1.0 and trend.trend_240m < -0.5
-
-            if declining_trend:
-                self.logger().warning(
-                    f"[DECISION] ❌ {coin} BUY REJECTED: Strong declining trend detected!\n"
-                    f"   [TREND] 24h: {trend.trend_1440m:+.2f}% | 4h: {trend.trend_240m:+.2f}% | 1h: {trend.trend_60m:+.2f}%\n"
-                    f"   [REASON] 1h trend ({trend.trend_60m:+.2f}%) < -1.0% AND 4h trend ({trend.trend_240m:+.2f}%) < -0.5%\n"
-                    f"   [NOTE] Avoiding trade during strong declining trends"
+                if not warmup_60m_ok:
+                    reasons.append(
+                        f"1h {trend.trend_60m:+.2f}% < {warmup_60m_threshold:+.2f}% (warm-up min)"
+                    )
+                self.logger().info(
+                    f"[FUTURES] ❌ {coin} warm-up entry blocked: {'; '.join(reasons)}"
                 )
                 return False
 
+            trend_1440m_ok = getattr(trend, "trend_1440m", 0.0) > min_24h
+            trend_240m_ok = trend.trend_240m > min_4h
+            trend_60m_ok = trend.trend_60m >= min_1h
+
+            if trend_1440m_ok and trend_240m_ok and trend_60m_ok:
+                self.logger().info(
+                    f"[FUTURES] ✅ {coin} entry confirmed: "
+                    f"24h={getattr(trend, 'trend_1440m', 0.0):+.2f}%, "
+                    f"4h={trend.trend_240m:+.2f}%, "
+                    f"1h={trend.trend_60m:+.2f}%"
+                )
+                return True
+
+            reasons = []
             if not trend_1440m_ok:
-                self.logger().debug(
-                    f"[DECISION] ❌ {coin} BUY REJECTED: 24h trend ({trend.trend_1440m:+.2f}%) <= +0.1% (futures threshold)"
-                )
-                return False
-
+                reasons.append(f"24h {getattr(trend, 'trend_1440m', 0.0):+.2f}% ≤ +1.5%")
             if not trend_240m_ok:
-                self.logger().debug(
-                    f"[DECISION] ❌ {coin} BUY REJECTED: 4h trend ({trend.trend_240m:+.2f}%) <= +0.1% (futures threshold)"
-                )
-                return False
-
+                reasons.append(f"4h {trend.trend_240m:+.2f}% ≤ +1.0%")
             if not trend_60m_ok:
-                self.logger().debug(
-                    f"[DECISION] ❌ {coin} BUY REJECTED: 1h trend ({trend.trend_60m:+.2f}%) < -0.2% (futures threshold)"
-                )
-                return False
-
-            # All conditions met
+                reasons.append(f"1h {trend.trend_60m:+.2f}% < 0.0%")
             self.logger().info(
-                f"[DECISION] ✅ {coin} BUY APPROVED (futures mode):\n"
-                f"   [TREND] 24h: {trend.trend_1440m:+.2f}% | 4h: {trend.trend_240m:+.2f}% | 1h: {trend.trend_60m:+.2f}%\n"
-                f"   [SCORE] Composite: {trend.trend_score:+.2f}%\n"
-                f"   [NOTE] Futures mode: Using relaxed thresholds"
+                f"[FUTURES] ❌ {coin} entry blocked: {'; '.join(reasons)}"
             )
-            return True
+            return False
 
         except Exception as e:
             self.logger().error(f"❌ Error checking multi-timeframe buy conditions for {coin}: {e}")
             import traceback
             self.logger().error(traceback.format_exc())
-            # On error, allow (fail open)
-            return True
+            # Fail closed on unexpected errors
+            return False
 
 
 def _convert_position_mode(mode: FuturesPositionMode) -> PositionMode:

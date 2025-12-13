@@ -10,8 +10,22 @@ Hummingbot is an open-source framework that helps you design and deploy automate
 
 The Hummingbot codebase is free and publicly available under the Apache 2.0 open-source license. Our mission is to **democratize high-frequency trading** by creating a global community of algorithmic traders and developers that share knowledge and contribute to the codebase.
 
-## Quick Links
+---
 
+## 🚀 **Multi-Coin Grid Bot v3.3**
+
+**Active Implementation:** Market Regime Filter + Time-Based Rules + Performance Tracking
+
+**Current Status:** ✅ Live Trading Ready
+**Bot Score:** 9.2/10
+**Capital Target:** €500-€1000
+
+**See:** `INTEGRATION_V3.3_COMPLETE.md` for detailed status
+
+---
+
+* [Multi-Coin Grid Bot Status](./INTEGRATION_V3.3_COMPLETE.md): Current bot implementation (v3.3 - Live!)
+* [Documentation](./docs/): Features, roadmap, and implementation guides
 * [Website and Docs](https://hummingbot.org): Official Hummingbot website and documentation
 * [Installation](https://hummingbot.org/installation/docker/): Install Hummingbot on various platforms
 * [Discord](https://discord.gg/hummingbot): The main gathering spot for the global Hummingbot community

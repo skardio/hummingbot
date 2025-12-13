@@ -17,13 +17,29 @@ connector_name: kraken
 quote_asset: EUR
 
 # Paper Trading Mode
-# Set to true to test without real money (uses simulated orders)
 paper_trading: true  # DEV: Enable paper trading for testing
+
+# =============================================================================
+# WHITELISTED TRADING PAIRS
+# =============================================================================
+# IMPORTANT: Kraken WebSocket limit is ~25-30 subscriptions!
+# DEV: Using fewer pairs for faster startup and testing
+whitelisted_pairs:
+  - USDC-EUR
+  - USDT-EUR
+  - BTC-EUR
+  - ETH-EUR
+  - SOL-EUR
+  - ADA-EUR
+  - XRP-EUR
+  - DOGE-EUR
+  - LINK-EUR
+  - DOT-EUR
+# Total: 10 pairs (minimal set for dev/testing)
 
 # Coin Selection
 # Option 1: Manual trading pairs (if set, bot will ONLY trade these coins)
-# Format: ["COIN-QUOTE", "COIN-QUOTE", ...] or leave empty/null for auto-discovery
-manual_trading_pairs: null  # Example: ["XRP-EUR", "ADA-EUR", "SOL-EUR"] or null for auto-discovery
+manual_trading_pairs: null  # Example: ["XRP-EUR", "ADA-EUR", "SOL-EUR"]
 
 # Option 2: Auto-discovery (only used if manual_trading_pairs is null/empty)
 max_coins_to_monitor: 5  # DEV: Monitor fewer coins for faster testing
@@ -75,6 +91,15 @@ max_total_exposure_pct: 0.90  # Max 90% of capital total
 # Order Management
 max_open_orders: 5  # Maximum 5 open orders at once
 order_frequency: 3  # Wait 3 seconds between order placements
+
+# PHASE 1: Slippage Protection (Fix #1)
+max_entry_spread_pct: 0.5  # Maximum acceptable bid-ask spread (0.5% = professional standard)
+
+# PHASE 1: Drawdown & Loss Limits (Fix #2 & #3)
+max_daily_loss_pct: 5.0    # Max daily loss percentage
+max_weekly_loss_pct: 10.0  # Max weekly loss percentage
+max_monthly_loss_pct: 15.0 # Max monthly loss percentage
+max_daily_loss_eur: 10.0   # Max daily loss in EUR (€10 for dev testing)
 
 # Phase 1.2: Circuit Breaker
 circuit_breaker_volatility_pct: 0.05  # 5% volatility threshold

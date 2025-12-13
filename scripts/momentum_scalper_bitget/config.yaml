@@ -1,0 +1,138 @@
+# ============================
+# B2 PRO SCALPER CONFIG
+# Bitget Spot – 1m Hybrid Orderflow + Momentum
+# ============================
+
+# --- EXCHANGE & MODE ---
+exchange: bitget
+trading_mode: spot          # spot of futures (code gebruikt nu alleen spot)
+execute_trades: false       # VEILIG: eerst simulatie, zet op true voor live
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - XRP/USDT
+  - DOGE/USDT
+
+# --- POSITION MANAGEMENT ---
+base_order_size_usdt: 20.0  # basispositie per trade
+max_positions: 2            # iets conservatiever dan 3
+position_timeout: 60        # ECHTE SCALPER: max 60 sec in een trade
+
+# --- FEES (Bitget spot) ---
+fee_per_trade_pct: 0.1      # 0.1% per side (0.2% round-trip)
+
+# ============================
+# SIGNAL DETECTION
+# ============================
+
+# --- RSI ---
+rsi_period: 14
+rsi_overbought: 70          # short pas boven 70
+rsi_oversold: 30            # long pas onder 30
+
+# --- VOLUME ---
+volume_spike_threshold: 2.0  # 2x gemiddelde volume = echte spike
+min_volume_ratio: 1.5        # minimaal 1.5x normaal volume voor trade
+
+# --- SIGNAL STRENGTH ---
+momentum_threshold: 70       # alleen sterke combo van signalen
+min_dominance: 30            # één kant moet duidelijk winnen (comment/legacy, code gebruikt 15 intern)
+
+# ============================
+# ORDERFLOW THRESHOLDS
+# ============================
+
+# Orderbook Imbalance (bid volume / total)
+min_imbalance_long: 0.58     # >58% bids = long bias
+min_imbalance_short: 0.42    # <42% bids = short bias
+
+# Taker Flow (buy volume / total trades)
+min_taker_buy_ratio_long: 0.58
+min_taker_buy_ratio_short: 0.42
+
+# Spread filter
+max_spread_bps: 20           # max 0.20% spread
+
+# Orderflow momentum score (0–100)
+min_orderflow_score: 40      # iets strenger dan default 30
+
+# ============================
+# ATR-BASED TP/SL (DYNAMIC)
+# ============================
+
+atr_period: 14
+atr_tp_multiplier: 1.3       # TP ≈ ATR * 1.3 (clamp in code: 1.0–2.0%)
+atr_sl_multiplier: 0.5       # SL ≈ ATR * 0.5 (clamp in code: 0.5–0.8%)
+
+# Clamps (documentair, echte clamp zit in code)
+min_take_profit_pct: 1.0     # min TP 1.0%
+max_take_profit_pct: 2.0     # max TP 2.0%
+min_stop_loss_pct: 0.5       # min SL 0.5%
+max_stop_loss_pct: 0.8       # max SL 0.8%
+
+# Fallback als ATR faalt
+fallback_take_profit_pct: 1.2
+fallback_stop_loss_pct: 0.5
+
+# --- TRAILING STOP ---
+trailing_activate_pct: 0.7   # trailing aan na ~0.7% in de plus
+trailing_stop_pct: 0.20      # trail 0.20% achter de top
+
+# ============================
+# AI-ADAPTIVE FEATURES
+# ============================
+
+# Adaptive ATR Threshold
+base_atr_threshold: 0.05     # alleen traden als 1m ATR ≳ 0.05% (geen dode markt)
+# bij of_score >= 65 mag ATR naar 60% van dit
+# bij of_score >= 80 naar 40% (zie code)
+
+# Adaptive Position Sizing
+enable_adaptive_sizing: true
+min_position_multiplier: 0.5   # min 0.5x base size
+max_position_multiplier: 3.0   # max 3x base size
+
+# Per-Symbol Cooldown
+enable_cooldown: true
+cooldown_duration_seconds: 3600   # 1 uur
+cooldown_trigger_losses: 3
+cooldown_trigger_hot_score: 0.3
+
+# Hot/Cold scoring
+hot_score_memory: 10
+
+# ============================
+# RISK MANAGEMENT
+# ============================
+
+max_daily_loss_pct: 3.0        # dag uit bij -3% van deployed capital
+max_trades_per_hour: 12        # max 12 trades per uur totaal
+
+# Daily P&L based sizing
+daily_loss_size_reduction_threshold_1: -20.0
+daily_loss_size_reduction_multiplier_1: 0.7
+daily_loss_size_reduction_threshold_2: -50.0
+daily_loss_size_reduction_multiplier_2: 0.5
+
+# ============================
+# EXECUTION
+# ============================
+
+use_market_orders: true
+candle_period: '1m'
+scan_interval: 5               # code verwacht 'scan_interval', niet *_seconds
+
+# ============================
+# LOGGING
+# ============================
+
+log_file: logs/momentum_scalper.log
+trade_log_file: logs/momentum_trades.json
+
+# ============================
+# TELEGRAM (ENV VARS)
+# ============================
+# TELEGRAM_BOT_TOKEN
+# TELEGRAM_CHAT_ID

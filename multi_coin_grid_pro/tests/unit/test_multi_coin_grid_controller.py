@@ -75,8 +75,16 @@ class TestMultiCoinGridController:
             max_coins_to_monitor=5,
             min_24h_volume_eur=Decimal("50000"),
             trend_min_change_pct=Decimal("0.5"),
-            max_exposure_per_coin_pct=Decimal("15"),
-            max_total_exposure_pct=Decimal("90"),
+            max_exposure_per_coin_pct=Decimal("0.15"),
+            max_total_exposure_pct=Decimal("0.80"),
+            # Risk management config (required for risk_manager initialization)
+            risk_reference_balance_quote=Decimal("10000"),
+            risk_max_daily_loss_pct=Decimal("2"),
+            risk_max_balance_per_trade_pct=Decimal("0.5"),
+            risk_max_total_open_risk_pct=Decimal("3"),
+            risk_exit_cooldown_minutes=30,
+            risk_symbol_switch_cooldown_minutes=45,
+            risk_consecutive_loss_cooldown_minutes=60,
         )
 
     @pytest.fixture
@@ -277,13 +285,19 @@ class TestMultiCoinGridController:
         # Mock trend calculator
         active_trend = MagicMock()
         active_trend.consensus_trend_pct = Decimal("-2.0")  # Negative trend
+        active_trend.trend_pct = Decimal("-2.0")  # Fallback value
         active_trend.current_price = Decimal("1.5")
         active_trend.has_sufficient_data = True
+        active_trend.volatility = Decimal("0.02")  # For switch threshold calculation
+        active_trend.trend_score = Decimal("-2.0")  # For trend strength calculation
 
         best_trend = MagicMock()
         best_trend.consensus_trend_pct = Decimal("3.0")  # Positive trend
+        best_trend.trend_pct = Decimal("3.0")  # Fallback value
         best_trend.current_price = Decimal("2.0")
         best_trend.has_sufficient_data = True
+        best_trend.volatility = Decimal("0.02")
+        best_trend.trend_score = Decimal("3.0")
 
         controller.trend_calculator.get_trend = Mock(side_effect=lambda s: {
             "XRP-EUR": active_trend,

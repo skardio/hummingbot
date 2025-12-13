@@ -21,6 +21,20 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class CandleData:
+    """
+    Single 5-minute OHLCV candle data.
+    Used for SmartEntryFilter indicator calculations.
+    """
+    timestamp: float      # Unix timestamp in seconds
+    open: Decimal         # Open price
+    high: Decimal         # High price
+    low: Decimal          # Low price
+    close: Decimal        # Close price
+    volume: Decimal       # Volume
+
+
+@dataclass
 class CoinTrend:
     """
     Data class for storing coin trend information
@@ -34,7 +48,8 @@ class CoinTrend:
         linreg_trend_pct: Linear regression trend (Phase 2.3)
         consensus_trend_pct: Multi-indicator consensus (Phase 2.4)
         volatility: Rolling standard deviation (Phase 2.1)
-        price_history: List of {price, timestamp} dicts
+        price_history: List of {price, timestamp} dicts (LEGACY - kept for compatibility)
+        candles: List of CandleData (NEW - full OHLCV for SmartEntry indicators)
         last_updated: Unix timestamp of last update
 
         Phase 2.5: Multi-Timeframe Trends
@@ -52,7 +67,8 @@ class CoinTrend:
     linreg_trend_pct: float = 0.0  # Phase 2.3: Linear regression trend
     consensus_trend_pct: float = 0.0  # Phase 2.4: Multi-indicator consensus
     volatility: float = 0.0  # Phase 2.1: Rolling std dev
-    price_history: List[Dict] = field(default_factory=list)
+    price_history: List[Dict] = field(default_factory=list)  # LEGACY compatibility
+    candles: List[CandleData] = field(default_factory=list)  # NEW: Full OHLCV
     last_updated: float = 0.0
 
     # Phase 2.5: Multi-Timeframe Trends
@@ -97,13 +113,152 @@ class TrendCalculator:
         """
         self.connector = connector
         self.base_connector = base_connector  # Base connector for price fetching in paper trading
-        self.lookback_seconds = lookback_minutes * 60
+
+        # CRITICAL FIX: FORCE CORRECT VALUE - This runs EVERY time __init__ is called!
+        # Even if old bytecode is cached, this will execute during object creation
+        _correct_lookback = 65 * 3600  # 234000 seconds = 65 hours
+        self.lookback_seconds = _correct_lookback
+
         self.trends: Dict[str, CoinTrend] = {}
         # Phase 2.5: Multi-timeframe support
         self.bot_start_time = bot_start_time if bot_start_time else time.time()
         self.trend_lookback_short_minutes = 60  # 1 hour
         self.trend_lookback_mid_minutes = 240  # 4 hours
         self.trend_lookback_long_minutes = 1440  # 24 hours
+        self._historical_data_loaded = False  # Track if we've loaded historical data
+
+    async def load_historical_data(self, symbols: List[str]) -> None:
+        """
+        Load historical OHLCV data from Kraken for all symbols.
+        This allows us to calculate accurate 24h trends from the start!
+
+        Args:
+            symbols: List of trading pairs to load historical data for (e.g., ["XRP-EUR", "SOL-EUR"])
+        """
+        if self._historical_data_loaded:
+            logger.info("📊 Historical data already loaded, skipping...")
+            return
+
+        try:
+            import ccxt
+
+            logger.info(f"📥 Loading historical data for {len(symbols)} coins from Kraken...")
+
+            # Create ccxt Kraken instance
+            kraken = ccxt.kraken()
+
+            # Calculate timeframe: get 30 hours of data (buffer for 5m candles)
+            since_ms = int((time.time() - (30 * 3600)) * 1000)  # 30 hours ago
+
+            successful_loads = 0
+            failed_loads = []
+
+            for symbol in symbols:
+                try:
+                    # Convert XRP-EUR to XRP/EUR format for ccxt
+                    ccxt_symbol = symbol.replace("-", "/")
+
+                    # Fetch 5-minute OHLCV data (Kraken limit = 720 candles max!)
+                    # Kraken supported timeframes: 1m, 5m, 15m, 30m, 1h, 4h, 1d (NO 2m!)
+                    # 720 candles × 5 min = 3600 min = 60 hours ✅ (covers 24h + buffer)
+                    logger.debug(f"  Fetching {ccxt_symbol} OHLCV data...")
+                    ohlcv = kraken.fetch_ohlcv(
+                        symbol=ccxt_symbol,
+                        timeframe='5m',  # 5-minute candles (Kraken supported, gives 60h coverage)
+                        since=since_ms,
+                        limit=720  # Max 720 candles = 60 hours of data
+                    )
+
+                    if not ohlcv:
+                        logger.warning(f"  ⚠️  No historical data for {symbol}")
+                        failed_loads.append(symbol)
+                        continue
+
+                    # Initialize trend object if not exists
+                    if symbol not in self.trends:
+                        self.trends[symbol] = CoinTrend(symbol=symbol)
+
+                    trend = self.trends[symbol]
+
+                    # Convert OHLCV to CandleData format (NEW: full OHLCV storage)
+                    # OHLCV format: [timestamp_ms, open, high, low, close, volume]
+                    candles = []
+                    price_history = []  # Keep legacy format for compatibility
+
+                    for candle in ohlcv:
+                        timestamp_ms = candle[0]
+                        timestamp_sec = timestamp_ms / 1000.0
+
+                        # NEW: Store full OHLCV in CandleData
+                        candle_data = CandleData(
+                            timestamp=timestamp_sec,
+                            open=Decimal(str(candle[1])),
+                            high=Decimal(str(candle[2])),
+                            low=Decimal(str(candle[3])),
+                            close=Decimal(str(candle[4])),
+                            volume=Decimal(str(candle[5]))
+                        )
+                        candles.append(candle_data)
+
+                        # LEGACY: Keep price_history for backward compatibility
+                        price_history.append({
+                            "price": candle_data.close,
+                            "timestamp": timestamp_sec
+                        })
+
+                    # Set both candles (new) and price_history (legacy)
+                    trend.candles = candles
+                    trend.price_history = price_history
+                    trend.current_price = candles[-1].close if candles else Decimal("0")
+                    trend.last_updated = time.time()
+
+                    successful_loads += 1
+                    logger.info(
+                        f"  ✅ {symbol}: Loaded {len(price_history)} historical prices "
+                        f"(oldest: {time.strftime('%H:%M', time.localtime(price_history[0]['timestamp']))} → "
+                        f"latest: {time.strftime('%H:%M', time.localtime(price_history[-1]['timestamp']))})"
+                    )
+
+                    # Small delay to avoid rate limits
+                    await asyncio.sleep(0.5)
+
+                except Exception as e:
+                    logger.warning(f"  ❌ Failed to load {symbol}: {e}")
+                    failed_loads.append(symbol)
+                    continue
+
+            self._historical_data_loaded = True
+
+            logger.info(
+                f"📊 Historical data loading complete: "
+                f"{successful_loads}/{len(symbols)} successful"
+            )
+
+            if failed_loads:
+                logger.warning(f"⚠️  Failed to load: {', '.join(failed_loads)}")
+
+            # DEBUG: Log actual data loaded for verification
+            for symbol in symbols[:3]:  # First 3 coins for debugging
+                if symbol in self.trends:
+                    trend = self.trends[symbol]
+                    if len(trend.price_history) > 1:
+                        first_price = float(trend.price_history[0]['price'])
+                        last_price = float(trend.price_history[-1]['price'])
+                        change = ((last_price - first_price) / first_price) * 100 if first_price > 0 else 0
+                        logger.info(
+                            f"  🔍 {symbol}: {len(trend.price_history)} points, "
+                            f"first=€{first_price:.4f}, last=€{last_price:.4f}, change={change:+.2f}%"
+                        )
+
+            # Log summary
+            logger.info(
+                f"🎯 Ready for accurate 24h trends! No more warm-up mode needed! ✅"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error loading historical data: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
     async def update_coin_trend(self, symbol: str) -> Optional[CoinTrend]:
         """
@@ -171,13 +326,47 @@ class TrendCalculator:
             trend.current_price = price
             trend.last_updated = current_time
 
-            # Add to price history
+            # Update OHLCV candles (new)
+            if trend.candles:
+                # Get last candle timestamp (5-minute aligned)
+                last_candle = trend.candles[-1]
+                last_candle_start = int(last_candle.timestamp / 300) * 300  # Floor to 5-min boundary
+                current_candle_start = int(current_time / 300) * 300
+
+                # If same 5-minute window, update last candle (update high/low/close)
+                if current_candle_start == last_candle_start:
+                    last_candle.high = max(last_candle.high, price)
+                    last_candle.low = min(last_candle.low, price)
+                    last_candle.close = price
+                    # Volume update not possible (no real-time volume from ticker)
+                else:
+                    # New 5-minute candle - create new one
+                    new_candle = CandleData(
+                        timestamp=current_candle_start,
+                        open=price,
+                        high=price,
+                        low=price,
+                        close=price,
+                        volume=Decimal("0")  # Unknown volume from ticker
+                    )
+                    trend.candles.append(new_candle)
+
+                    # Remove old candles (keep last 720 = 60 hours)
+                    if len(trend.candles) > 720:
+                        trend.candles = trend.candles[-720:]
+
+            # Add to price history (LEGACY)
+            prev_price_value = Decimal(str(trend.price_history[-1]['price'])) if trend.price_history else price
+            high = max(price, prev_price_value)
+            low = min(price, prev_price_value)
             trend.price_history.append({
                 'price': price,
-                'timestamp': current_time
+                'timestamp': current_time,
+                'high': high,
+                'low': low,
             })
 
-            # Remove old data points
+            # Remove old data points (LEGACY)
             cutoff_time = current_time - self.lookback_seconds
             trend.price_history = [
                 p for p in trend.price_history
@@ -186,9 +375,9 @@ class TrendCalculator:
 
             # Calculate trend if we have enough data
             if len(trend.price_history) >= 2:
-                oldest_price = trend.price_history[0]['price']
+                oldest_price = Decimal(str(trend.price_history[0]['price']))  # Keep as Decimal
                 price_change = price - oldest_price
-                trend.trend_pct = float(price_change / oldest_price * 100)
+                trend.trend_pct = float(price_change / oldest_price * Decimal("100")) if oldest_price > 0 else 0.0
 
                 # Phase 2: Enhanced trend detection
                 if len(trend.price_history) >= 10:  # Minimum data for advanced indicators
@@ -263,6 +452,8 @@ class TrendCalculator:
                 return None
 
             current_time = time.time()
+            # Convert price to Decimal for consistent arithmetic
+            price = Decimal(str(price))
 
             # Initialize trend if doesn't exist
             if symbol not in self.trends:
@@ -280,13 +471,47 @@ class TrendCalculator:
             trend.current_price = price
             trend.last_updated = current_time
 
-            # Add to price history
+            # Update OHLCV candles (new)
+            if trend.candles:
+                # Get last candle timestamp (5-minute aligned)
+                last_candle = trend.candles[-1]
+                last_candle_start = int(last_candle.timestamp / 300) * 300  # Floor to 5-min boundary
+                current_candle_start = int(current_time / 300) * 300
+
+                # If same 5-minute window, update last candle (update high/low/close)
+                if current_candle_start == last_candle_start:
+                    last_candle.high = max(last_candle.high, price)
+                    last_candle.low = min(last_candle.low, price)
+                    last_candle.close = price
+                    # Volume update not possible (no real-time volume from ticker)
+                else:
+                    # New 5-minute candle - create new one
+                    new_candle = CandleData(
+                        timestamp=current_candle_start,
+                        open=price,
+                        high=price,
+                        low=price,
+                        close=price,
+                        volume=Decimal("0")  # Unknown volume from ticker
+                    )
+                    trend.candles.append(new_candle)
+
+                    # Remove old candles (keep last 720 = 60 hours)
+                    if len(trend.candles) > 720:
+                        trend.candles = trend.candles[-720:]
+
+            # Add to price history (LEGACY)
+            prev_price_value = Decimal(str(trend.price_history[-1]['price'])) if trend.price_history else price
+            high = max(price, prev_price_value)
+            low = min(price, prev_price_value)
             trend.price_history.append({
                 'price': price,
-                'timestamp': current_time
+                'timestamp': current_time,
+                'high': high,
+                'low': low,
             })
 
-            # Remove old data points
+            # Remove old data points (LEGACY)
             cutoff_time = current_time - self.lookback_seconds
             trend.price_history = [
                 p for p in trend.price_history
@@ -295,9 +520,9 @@ class TrendCalculator:
 
             # Calculate trend if we have enough data
             if len(trend.price_history) >= 2:
-                oldest_price = trend.price_history[0]['price']
+                oldest_price = Decimal(str(trend.price_history[0]['price']))  # Keep as Decimal
                 price_change = price - oldest_price
-                trend.trend_pct = float(price_change / oldest_price * 100)
+                trend.trend_pct = float(price_change / oldest_price * Decimal("100")) if oldest_price > 0 else 0.0
 
                 # Phase 2: Enhanced trend detection
                 if len(trend.price_history) >= 10:  # Minimum data for advanced indicators
@@ -331,15 +556,16 @@ class TrendCalculator:
             logger.error(f"❌ Error updating trend for {symbol} with price {price}: {e}")
             return None
 
-    async def update_all_trends_v2(self, symbols: List[str]) -> None:
+    async def update_all_trends_v2(self, symbols: List[str], retry_on_failure: bool = True) -> None:
         """
-        Update trends for all monitored coins - V2 with batch API calls for optimal performance
+        Update trends for all monitored coins - V2 with batch API calls and retry logic
 
         CRITICAL: Rate limiting is built-in to prevent API rate limit errors.
         This method will wait if called too frequently (Kraken: 1 call/second).
 
         Args:
             symbols: List of trading pair symbols
+            retry_on_failure: If True, retry once on complete failure
         """
         # Convert all symbols from / to - format (Kraken uses - format)
         converted_symbols = [s.replace("/", "-") if "/" in s else s for s in symbols]
@@ -422,6 +648,10 @@ class TrendCalculator:
 
             # CRITICAL: Add delay BEFORE first call to avoid hitting rate limit immediately
             await asyncio.sleep(RATE_LIMIT_DELAY)
+
+            successful_updates = 0
+            failed_updates = []
+
             for i, symbol in enumerate(converted_symbols):
                 if i > 0:
                     await asyncio.sleep(RATE_LIMIT_DELAY)
@@ -447,24 +677,68 @@ class TrendCalculator:
                         trend = await self._update_coin_trend_with_price(symbol, float(price))
                         if trend:
                             self._log_trend_update(trend)
+                            successful_updates += 1
+                        else:
+                            failed_updates.append(f"{symbol}:no_trend")
                     else:
-                        logger.debug(f"⚠️  No price data for {symbol} in fallback mode")
+                        logger.warning(f"⚠️  No price data for {symbol} in fallback mode (price={price})")
+                        failed_updates.append(f"{symbol}:no_price")
                 except Exception as e:
-                    logger.debug(f"⚠️  Failed to fetch price for {symbol} in fallback: {e}")
+                    logger.warning(f"⚠️  Failed to fetch price for {symbol} in fallback: {e}")
+                    failed_updates.append(f"{symbol}:{type(e).__name__}")
                     continue
+            # Log fallback results
+            logger.info(f"✅ Fallback complete: {successful_updates}/{len(converted_symbols)} trends updated successfully")
+            if failed_updates:
+                logger.warning(f"❌ Failed updates: {', '.join(failed_updates[:10])}" + (f" (+{len(failed_updates) - 10} more)" if len(failed_updates) > 10 else ""))
         else:
             # Batch mode: update all trends using fetched prices
             logger.info(f"✅ Batch mode: updating {len(prices_dict)} trends using batch-fetched prices")
+
+            successful_updates = 0
+            failed_updates = []
+
+            # DEBUG: Log which coins got prices vs which didn't
+            debug_coins = ['MON-EUR', 'AVAX-EUR', 'TAO-EUR', 'TRX-EUR']
+            for dc in debug_coins:
+                if dc in converted_symbols:
+                    price = prices_dict.get(dc)
+                    logger.warning(f"🔍 DEBUG {dc}: price_in_dict={price}, dict_keys_sample={list(prices_dict.keys())[:5]}")
+
             for symbol in converted_symbols:
                 price = prices_dict.get(symbol)
                 if price is None or price == 0:
-                    logger.debug(f"⚠️  No price data for {symbol} in batch response")
+                    logger.debug(f"No price data for {symbol} in batch response")
+                    failed_updates.append(f"{symbol}:no_price_in_batch")
                     continue
 
                 # Update trend using the batch-fetched price
-                trend = await self._update_coin_trend_with_price(symbol, float(price))
-                if trend:
-                    self._log_trend_update(trend)
+                try:
+                    trend = await self._update_coin_trend_with_price(symbol, float(price))
+                    if trend:
+                        self._log_trend_update(trend)
+                        successful_updates += 1
+                    else:
+                        failed_updates.append(f"{symbol}:no_trend")
+                except Exception as e:
+                    logger.warning(f"⚠️  Failed to update trend for {symbol}: {e}")
+                    failed_updates.append(f"{symbol}:{type(e).__name__}")
+
+            # Log batch results summary
+            logger.info(f"✅ Batch update complete: {successful_updates}/{len(converted_symbols)} trends updated successfully")
+            if failed_updates:
+                logger.warning(f"❌ Failed batch updates ({len(failed_updates)}): {', '.join(failed_updates[:5])}" + (f" (+{len(failed_updates) - 5} more)" if len(failed_updates) > 5 else ""))
+
+                # If most updates failed and retry is enabled, try one more time after a delay
+                failure_rate = len(failed_updates) / len(converted_symbols)
+                if retry_on_failure and failure_rate > 0.5 and successful_updates < 5:
+                    logger.warning(f"⚠️ High failure rate ({failure_rate:.0%}), retrying after 2s delay...")
+                    await asyncio.sleep(2.0)
+                    # Retry only the failed symbols (without retry flag to prevent infinite loop)
+                    failed_symbols = [f.split(':')[0] for f in failed_updates if ':' in f]
+                    if failed_symbols:
+                        logger.info(f"🔄 Retrying {len(failed_symbols)} failed symbols...")
+                        await self.update_all_trends_v2(failed_symbols, retry_on_failure=False)
 
     def get_best_coin(self, min_trend_pct: float, exclude_coins: Optional[List[str]] = None) -> Optional[str]:
         """
@@ -515,13 +789,9 @@ class TrendCalculator:
             if not trend.has_sufficient_data:
                 continue
 
-            # Phase 2.5: Use multi-timeframe trend_score if available, otherwise fallback to consensus
-            # Check if multi-timeframe is enabled (trend_score != 0.0 means it was calculated)
-            if hasattr(trend, 'trend_score') and trend.trend_score != 0.0:
-                trend_value = trend.trend_score
-            else:
-                # Phase 2: Use consensus trend for comparison (more robust)
-                trend_value = trend.consensus_trend_pct if trend.consensus_trend_pct != 0.0 else trend.trend_pct
+            # SIMPLIFIED: Just use consensus_trend_pct directly (always in percentage format like 7.98 for 7.98%)
+            # No need for complex multi-timeframe checks - consensus is already the best metric
+            trend_value = trend.consensus_trend_pct
 
             all_trends.append((symbol, trend_value))
 
@@ -560,6 +830,71 @@ class TrendCalculator:
                 )
 
         return best_symbol
+
+    def get_top_n_coins(self, n: int, min_trend_pct: float, exclude_coins: Optional[List[str]] = None) -> List[str]:
+        """
+        Find top N coins with best (highest) trends
+
+        Args:
+            n: Number of top coins to return
+            min_trend_pct: Minimum trend percentage required
+            exclude_coins: Optional list of coin symbols to exclude from selection
+
+        Returns:
+            List of symbols for top N coins, or empty list if no coins meet criteria
+        """
+        # Set of coins to exclude (for fast lookup)
+        exclude_set = set(exclude_coins) if exclude_coins else set()
+
+        # Collect all qualifying coins with their trends
+        qualifying_coins = []
+
+        for symbol, trend in self.trends.items():
+            # Skip excluded coins (e.g., coins in cooldown or already active)
+            if symbol in exclude_set:
+                continue
+
+            # Skip coins without sufficient data
+            if not trend.has_sufficient_data:
+                continue
+
+            # SIMPLIFIED: Just use consensus_trend_pct directly (always in percentage format like 7.98 for 7.98%)
+            # No need for complex multi-timeframe checks - consensus is already the best metric
+            trend_value = trend.consensus_trend_pct
+
+            # DEBUG: Log first 5 coins to see what's happening
+            if len(qualifying_coins) < 5:
+                logger.info(
+                    f"🔍 DEBUG {symbol}: consensus={trend.consensus_trend_pct:.4f}%, "
+                    f"min_req={min_trend_pct:.4f}%, passes={trend_value >= min_trend_pct}"
+                )
+
+            # Only include coins that meet minimum trend requirement
+            if trend_value >= min_trend_pct:
+                qualifying_coins.append((symbol, trend_value))
+
+        # Sort by trend strength (descending) and take top N
+        qualifying_coins.sort(key=lambda x: x[1], reverse=True)
+        top_n = qualifying_coins[:n]
+
+        # Log selection
+        if top_n:
+            logger.info(f"\n🔝 TOP {len(top_n)} COINS (requested {n}):")
+            for idx, (symbol, trend) in enumerate(top_n, 1):
+                logger.info(f"  {idx}. {symbol}: {trend:+.3f}%")
+        else:
+            logger.info(f"\n⚠️  NO COINS MEET MINIMUM TREND ({min_trend_pct}%)")
+
+        # Store debug info (compatible with existing controller logging)
+        self._debug_info = {
+            'total': len(self.trends),
+            'sufficient': sum(1 for t in self.trends.values() if t.has_sufficient_data),
+            'min_trend': min_trend_pct,
+            'all_count': len(qualifying_coins),
+            'top_10': qualifying_coins[:10]
+        }
+
+        return [symbol for symbol, _ in top_n]
 
     def get_trend(self, symbol: str) -> Optional[CoinTrend]:
         """Get trend data for a specific coin"""
@@ -800,16 +1135,22 @@ class TrendCalculator:
             warmup_period_seconds = self.trend_lookback_long_minutes * 60  # 24 hours
 
             if time_since_bot_start < warmup_period_seconds:
-                # Warm-up mode: use 240m * 2 as fallback
+                # BUGFIX: In warm-up mode, use conservative averaging instead of aggressive extrapolation
+                # Old behavior: trend_1440m = trend_240m * 2.0 (WRONG! Could be 10x off!)
+                # New behavior: Use average of 4h and 1h trends (MUCH safer!)
                 trend.long_trend_warmup = True
-                trend.trend_1440m = trend_240m * 2.0
+
+                # Use conservative fallback = average of 4h and 1h trends
+                # This is MUCH safer than 4h * 2 (which was causing 10x errors!)
+                trend.trend_1440m = (trend_240m + trend_60m) / 2.0
+
                 logger.debug(
-                    f"🔥 Warm-up mode for {trend.symbol}: "
-                    f"24h trend = {trend.trend_240m:.2f}% * 2 = {trend.trend_1440m:.2f}% "
+                    f"Warm-up mode for {trend.symbol}: "
+                    f"24h trend = avg({trend.trend_240m:.2f}%, {trend.trend_60m:.2f}%) = {trend.trend_1440m:.2f}% "
                     f"(bot running for {time_since_bot_start / 3600:.1f}h, need {warmup_period_seconds / 3600:.1f}h)"
                 )
             else:
-                # Normal mode: calculate real 24h trend
+                # Normal mode: calculate real 24h trend from price history
                 trend.long_trend_warmup = False
                 trend_1440m = self._calculate_timeframe_trend(
                     trend.price_history,
@@ -870,6 +1211,11 @@ class TrendCalculator:
 
             if len(relevant_history) < 2:
                 # Not enough data for this timeframe
+                logger.debug(
+                    f"⚠️ TF calc: Not enough data! lookback={lookback_seconds / 60:.0f}m, "
+                    f"total_points={len(price_history)}, relevant={len(relevant_history)}, "
+                    f"cutoff={time.strftime('%H:%M:%S', time.localtime(cutoff_time))}"
+                )
                 return 0.0
 
             # Get oldest price in the timeframe

@@ -14,7 +14,7 @@ connector_name: kraken
 quote_asset: EUR
 
 
-paper_trading: false # Enable paper trading for testing
+paper_trading: true # Enable paper trading for testing
                      # FIXED: Now initializes order books for common trading pairs
 
 # Coin Selection
@@ -23,16 +23,16 @@ paper_trading: false # Enable paper trading for testing
 manual_trading_pairs: null  # Example: ["XRP-EUR", "ADA-EUR", "SOL-EUR"] or null for auto-discovery
 
 # Option 2: Auto-discovery (only used if manual_trading_pairs is null/empty)
-max_coins_to_monitor: 20
-min_24h_volume_eur: 250000  # Minimum €250k daily volume (verhoogd voor betere liquiditeit)
+max_coins_to_monitor: 15
+min_24h_volume_eur: 500000  # Minimum €500k daily volume (verhoogd voor betere liquiditeit)
 exclude_expensive_coins: true  # Exclude BTC/ETH
 
 # Coin Rotation
-coin_rotation_threshold: 90  # Replace coin after X updates without trades (~15 min @ 10s interval)
+coin_rotation_threshold: 120  # Replace coin after X updates without trades (~20 min @ 10s interval)
 
 # Trend Detection
 trend_lookback_minutes: 1440  # Track 24 hours (1440 minutes) of price history for real trends
-trend_min_change_pct: 0.15  # Minimum 0.15% trend to trade (lowered from 0.5% to find more opportunities)
+trend_min_change_pct: 0.5  # Minimum 0.5% trend to trade
 price_update_interval: 30  # Update prices every 30 seconds
 
 # Phase 2.5: Multi-Timeframe Trend Engine
@@ -41,22 +41,22 @@ trend_lookback_short_minutes: 60  # 1-hour lookback
 trend_lookback_mid_minutes: 240  # 4-hour lookback
 trend_lookback_long_minutes: 1440  # 24-hour lookback
 switch_threshold_percent: 1.5  # Minimum 1.5% trend_score difference to switch
-exit_short_threshold: -2.5  # Exit if 60m trend < -2.5% (RELAXED - voorkomt paniek exits bij kleine dips)
-exit_mid_threshold: -1.0  # Exit if 240m trend < -1.0% (RELAXED - alleen bij echte negatieve 4h trend)
+exit_short_threshold: -1.5  # Exit if 60m trend < -1.5%
+exit_mid_threshold: -0.5  # Exit if 240m trend < -0.5%
 
 # PRO EXIT SYSTEM - Layer 3: Price-Based Emergency Exits
-emergency_exit_pct: -4.5  # Exit immediately if price drops 4.5% below entry (RELAXED - alleen bij echte crashes)
-hard_stop_pct: -6.0  # Fail-safe exit if price drops 6.0% below entry (RELAXED - last resort protection)
+emergency_exit_pct: -2.0  # Exit immediately if price drops 2.0% below entry
+hard_stop_pct: -3.0  # Fail-safe exit if price drops 3.0% below entry
 
 # PRO EXIT SYSTEM - Layer 5: Grid Profit Exit
-min_grid_profit_pct: 0.6  # Exit if grid realized profit >= 0.6% (guarantees profit)
+min_grid_profit_pct: 1.0  # Exit if grid realized profit >= 1.0% (covers fees + spread)
 
 # Startup Delay
-min_startup_wait_seconds: 3600  # Wait 1 hour (3600 seconds) before first trade
+min_startup_wait_seconds: 1800  # Wait 30 minutes before first trade
 
 # Switch Management
-min_switch_interval_seconds: 900  # Minimum 15 minutes between coin switches (Phase 3.3)
-min_hold_time_seconds: 3600  # Phase 3.3: Never switch <1 hour (anti-whipsaw + voorkomt paniek exits)
+min_switch_interval_seconds: 1800  # Minimum 30 minutes between coin switches
+min_hold_time_seconds: 900  # Never switch <15 minutes (anti-whipsaw)
 smart_switch_k: 1.75  # Phase 3.1: Volatility multiplier for smart switch threshold (default 1.5-2.0)
 switch_cost_multiplier: 2.0  # Phase 3.2: Only switch if expected_profit > switch_cost * multiplier
 

@@ -11,8 +11,25 @@ from pydantic import Field, field_validator
 
 from hummingbot.client.config.config_data_types import ClientFieldData
 from hummingbot.core.data_type.common import OrderType
+from hummingbot.core.global_risk_manager import RiskLimits
 from hummingbot.strategy_v2.controllers.controller_base import ControllerConfigBase
 from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
+
+
+class MultiCoinGridConfig(ControllerConfigBase):
+    """
+    Configuration for Multi-Coin Grid Trading Strategy
+
+    This strategy monitors multiple coins and automatically switches to trade
+    the coin with the best trend using grid trading.
+    """
+
+    def load_controller_configs(self):
+        """
+        Override base method - we don't use separate controller config files.
+        Return self as single controller config.
+        """
+        return [self]
 
 
 class MultiCoinGridConfig(ControllerConfigBase):
@@ -72,6 +89,27 @@ class MultiCoinGridConfig(ControllerConfigBase):
         )
     )
 
+    # Whitelisted Trading Pairs (loaded at startup for order book subscriptions)
+    # IMPORTANT: Kraken WebSocket limit is ~25-30 subscriptions
+    whitelisted_pairs: Optional[List[str]] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Whitelisted trading pairs for order books (leave empty for defaults): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False}  # Can't change at runtime (requires restart)
+    )
+
+    # Dynamic Pair Discovery (scan all pairs via REST API at startup)
+    use_dynamic_pair_discovery: bool = Field(
+        default=False,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable dynamic pair discovery at startup? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False}  # Can't change at runtime (requires restart)
+    )
+
     # Coin Selection Parameters
     manual_trading_pairs: Optional[List[str]] = Field(
         default=None,
@@ -98,6 +136,19 @@ class MultiCoinGridConfig(ControllerConfigBase):
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
+    )
+
+    # Multi-Coin Simultaneous Trading
+    max_simultaneous_coins: int = Field(
+        default=1,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum simultaneous coins to trade (1-5, capital divided equally): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        ge=1,
+        le=5,
+        description="Number of coins to trade simultaneously. Capital is divided equally among coins."
     )
 
     exclude_expensive_coins: bool = Field(
@@ -167,7 +218,7 @@ class MultiCoinGridConfig(ControllerConfigBase):
     )
 
     exit_short_threshold: float = Field(
-        default=-0.5,  # Exit if 60m trend < -0.5% (aangescherpt voor snellere exit)
+        default=-1.5,  # Exit if 60m trend < -1.5% (tighter crash protection)
         client_data=ClientFieldData(
             prompt=lambda mi: "Exit short-term threshold (default -0.5%): ",
             prompt_on_new=False,
@@ -176,7 +227,7 @@ class MultiCoinGridConfig(ControllerConfigBase):
     )
 
     exit_mid_threshold: float = Field(
-        default=0.5,  # Exit if 240m trend < +0.5%
+        default=-0.5,  # Exit if 240m trend < -0.5%
         client_data=ClientFieldData(
             prompt=lambda mi: "Exit mid-term threshold (default 0.5%): ",
             prompt_on_new=False,
@@ -186,7 +237,7 @@ class MultiCoinGridConfig(ControllerConfigBase):
 
     # PRO EXIT SYSTEM - Layer 3: Price-Based Emergency Exits
     emergency_exit_pct: float = Field(
-        default=-2.5,  # Exit immediately if price drops 2.5% below entry (prevents crash losses)
+        default=-2.0,  # Exit immediately if price drops 2.0% below entry (prevents crash losses)
         client_data=ClientFieldData(
             prompt=lambda mi: "Emergency exit percentage (default -2.5%): ",
             prompt_on_new=False,
@@ -195,7 +246,7 @@ class MultiCoinGridConfig(ControllerConfigBase):
     )
 
     hard_stop_pct: float = Field(
-        default=-4.0,  # Fail-safe exit if price drops 4.0% below entry (last resort protection)
+        default=-3.0,  # Fail-safe exit if price drops 3.0% below entry (last resort protection)
         client_data=ClientFieldData(
             prompt=lambda mi: "Hard stop percentage (default -4.0%): ",
             prompt_on_new=False,
@@ -205,7 +256,7 @@ class MultiCoinGridConfig(ControllerConfigBase):
 
     # PRO EXIT SYSTEM - Layer 5: Grid Profit Exit
     min_grid_profit_pct: float = Field(
-        default=0.6,  # Exit if grid realized profit >= 0.6% (guarantees profit)
+        default=1.0,  # Exit if grid realized profit >= 1.0% (covers fees + spread)
         client_data=ClientFieldData(
             prompt=lambda mi: "Minimum grid profit percentage to exit (default 0.6%): ",
             prompt_on_new=False,
@@ -215,7 +266,7 @@ class MultiCoinGridConfig(ControllerConfigBase):
 
     # Startup delay - wait before first trade
     min_startup_wait_seconds: int = Field(
-        default=3600,  # Wait 1 hour (3600 seconds) before first trade
+        default=1800,  # Wait 30 minutes before first trade
         client_data=ClientFieldData(
             prompt=lambda mi: "Minimum startup wait time in seconds before first trade (default 3600 = 1 hour): ",
             prompt_on_new=False,
@@ -250,9 +301,28 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # Monitoring & Rotation Settings
+    max_coin_monitoring_seconds: int = Field(
+        default=300,  # 5 minutes
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum time to monitor a coin without execution (seconds): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    session_blacklist_duration_seconds: int = Field(
+        default=7200,  # 2 hours
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Duration to blacklist non-executing coins (seconds): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     # Switch Management
     min_switch_interval_seconds: int = Field(
-        default=900,  # 15 minutes default (Phase 3.3)
+        default=1800,  # 30 minutes default switch cooldown
         client_data=ClientFieldData(
             prompt=lambda mi: "Minimum time between coin switches (seconds): ",
             prompt_on_new=True,
@@ -312,6 +382,74 @@ class MultiCoinGridConfig(ControllerConfigBase):
         client_data=ClientFieldData(
             prompt=lambda mi: "Number of grid levels (base, adjusted by volatility): ",
             prompt_on_new=True,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Hybrid Grid: SmartEntryFilter Configuration
+    use_smart_entry_filter: bool = Field(
+        default=False,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable SmartEntryFilter (blocks bad entries)? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    smart_entry_filter: dict = Field(
+        default_factory=dict,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "SmartEntryFilter config (dict, leave empty for defaults): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Hybrid Grid v2.0: Core Universe (manual trading pairs for v2.0)
+    core_universe: Optional[List[str]] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Core universe for SmartEntry v2.0 (comma separated pairs): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Hybrid Grid v2.0: Coin Profiles (per-coin SmartEntry overrides)
+    coin_profiles: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Coin profiles for SmartEntry v2.0 (dict of overrides): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Hybrid Grid v2.0: Telegram Alerts
+    telegram: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Telegram config (dict with bot_token and chat_id): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Hybrid Grid: DynamicGridSizer Configuration
+    use_dynamic_grid_sizer: bool = Field(
+        default=False,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable DynamicGridSizer (ATR-based grid count)? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    dynamic_grid_sizer: dict = Field(
+        default_factory=dict,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "DynamicGridSizer config (dict, leave empty for defaults): ",
+            prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
     )
@@ -418,6 +556,50 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # PHASE 1: Slippage Protection (Fix #1)
+    max_entry_spread_pct: float = Field(
+        default=0.5,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum entry spread % (e.g., 0.5 for 0.5%, rejects wide spreads): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # PHASE 1: Drawdown & Loss Limits (Fix #2 & #3)
+    max_daily_loss_pct: float = Field(
+        default=5.0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Max daily loss % (trading pauses if exceeded): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+    max_weekly_loss_pct: float = Field(
+        default=10.0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Max weekly loss %: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+    max_monthly_loss_pct: float = Field(
+        default=15.0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Max monthly loss %: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+    max_daily_loss_eur: Optional[float] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Max daily loss in EUR/quote (optional, press enter to skip): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     # Phase 1.4: Position Size Limits
     max_exposure_per_coin_pct: Decimal = Field(
         default=Decimal("0.15"),  # Max 15% of capital per coin
@@ -429,12 +611,127 @@ class MultiCoinGridConfig(ControllerConfigBase):
     )
 
     max_total_exposure_pct: Decimal = Field(
-        default=Decimal("0.90"),  # Max 90% of capital total
+        default=Decimal("0.80"),  # Max 80% of capital total
         client_data=ClientFieldData(
-            prompt=lambda mi: "Max total exposure (% of capital, e.g., 0.90 for 90%): ",
+            prompt=lambda mi: "Max total exposure (% of capital, e.g., 0.80 for 80%): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
+    )
+
+    # Global risk governance
+    risk_reference_balance_quote: Decimal = Field(
+        default=Decimal("1000"),
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Reference account balance in quote asset for risk sizing: ",
+            prompt_on_new=True,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    risk_max_daily_loss_pct: Decimal = Field(
+        default=Decimal("2"),
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum daily loss before halting trading (% of balance, default 2): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    risk_max_balance_per_trade_pct: Decimal = Field(
+        default=Decimal("0.5"),
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum balance risk per trade (% of balance, default 0.5): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    risk_max_total_open_risk_pct: Decimal = Field(
+        default=Decimal("3"),
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum total simultaneous risk (% of balance, default 3): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    risk_exit_cooldown_minutes: int = Field(
+        default=0,  # TESTING: was 30, now 0 for fast retrying of same symbol
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Exit cooldown in minutes before the same symbol can be retraded: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    risk_symbol_switch_cooldown_minutes: int = Field(
+        default=0,  # TESTING: was 45 minutes
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Global symbol switch cooldown in minutes (default 45): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    risk_consecutive_loss_cooldown_minutes: int = Field(
+        default=60,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Cooldown (minutes) after consecutive losses, default 60: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+
+    # Trend strength controls
+    trend_min_entry_strength: float = Field(
+        default=0.10,  # LOWERED from 0.7 - allow entries in weaker trends (crypto rarely has +70% strength)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum normalized trend strength to allow entries (0-1): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    trend_min_exit_strength: float = Field(
+        default=-0.10,  # LOWERED from -0.7 - more responsive exits
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Trend strength threshold to force exits (negative values): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    trend_confirmation_timeframes: int = Field(
+        default=1,  # LOWERED: was 2, now 1 for testing (accept single timeframe confirmation)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum number of agreeing timeframes required for trend confirmation: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+
+    # Warmup Override (Professional Pullback Buying)
+    warmup_override_enabled: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable warmup 4H override (allow 1H dips in strong uptrends)? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Allow negative 1H trend if 4H trend is very strong (pullback buying strategy)"
+    )
+
+    warmup_4h_strong_min: float = Field(
+        default=1.0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Warmup override: minimum 4H trend % to allow 1H dips (default 1.0%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Minimum 4H trend required to override negative 1H trend"
+    )
+
+    warmup_1h_min_if_4h_strong: float = Field(
+        default=-0.6,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Warmup override: minimum 1H trend % allowed when 4H strong (default -0.6%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Minimum 1H trend allowed when 4H override is active (negative = pullback zone)"
     )
 
     # Phase 1.2: Circuit Breaker
@@ -470,6 +767,58 @@ class MultiCoinGridConfig(ControllerConfigBase):
         default=60,  # Wait 60 seconds before retry
         client_data=ClientFieldData(
             prompt=lambda mi: "API error backoff time (seconds): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ==============================================================================
+    # FEATURE 1.1: MARKET REGIME FILTER (v3.3)
+    # ==============================================================================
+
+    market_regime: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Market regime filter config (dict): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ==============================================================================
+    # FEATURE 1.2: TIME-BASED TRADING RULES (v3.3)
+    # ==============================================================================
+
+    time_based_rules: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Time-based trading rules config (dict): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ==============================================================================
+    # FEATURE 1.3: PERFORMANCE TRACKING (v3.3)
+    # ==============================================================================
+
+    performance_tracking: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Performance tracking config (dict): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ==============================================================================
+    # FEATURE 1.2b: LIQUIDITY-AWARE SMART SIZING (v3.4)
+    # ==============================================================================
+
+    liquidity_aware_sizing: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Liquidity-aware sizing config (dict): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
@@ -515,6 +864,26 @@ class MultiCoinGridConfig(ControllerConfigBase):
             raise ValueError("Trend lookback should not exceed 1440 minutes (24 hours)")
         return v
 
+    @property
+    def risk_limits(self) -> RiskLimits:
+        """
+        Convert configuration values into a RiskLimits instance usable
+        by the global risk manager.
+        """
+        return RiskLimits(
+            max_daily_loss_pct=self.risk_max_daily_loss_pct,
+            max_balance_risk_per_trade_pct=self.risk_max_balance_per_trade_pct,
+            max_total_open_risk_pct=self.risk_max_total_open_risk_pct,
+            min_hold_seconds=self.min_hold_time_seconds,
+            exit_cooldown_seconds=self.risk_exit_cooldown_minutes * 60,
+            symbol_switch_cooldown_seconds=self.risk_symbol_switch_cooldown_minutes * 60,
+            consecutive_loss_cooldown_seconds=self.risk_consecutive_loss_cooldown_minutes * 60,
+        )
+
+    @property
+    def risk_reference_balance(self) -> Decimal:
+        return self.risk_reference_balance_quote
+
     @field_validator('num_grids')
     @classmethod
     def validate_num_grids(cls, v: int) -> int:
@@ -533,4 +902,52 @@ class MultiCoinGridConfig(ControllerConfigBase):
             raise ValueError("Stop loss must be positive")
         if v > Decimal("0.5"):
             raise ValueError("Stop loss should not exceed 50%")
+        return v
+
+    @field_validator('smart_entry_filter')
+    @classmethod
+    def validate_smart_entry_filter(cls, v: dict) -> dict:
+        """Validate SmartEntryFilter config dict"""
+        if not v:  # Empty dict is OK (uses defaults)
+            return v
+
+        # Validate known keys
+        valid_keys = {
+            'rsi_buy_max', 'rsi_extreme_low', 'rsi_block_min',
+            'vwap_max_deviation_pct', 'min_wick_ratio',
+            'max_atr_pct_for_grid', 'min_atr_pct_for_grid',
+            'max_5m_spike_pct', 'max_down_accel_pct', 'max_up_accel_pct',
+            'max_trend_24h_pct', 'min_trend_24h_pct',
+            # Phase 2: Slippage Protection
+            'slippage_check_enabled', 'max_entry_spread_pct',
+            # Phase 2: Order Book Depth
+            'depth_check_enabled', 'min_depth_multiplier'
+        }
+        invalid_keys = set(v.keys()) - valid_keys
+        if invalid_keys:
+            raise ValueError(f"Invalid SmartEntryFilter keys: {invalid_keys}")
+
+        return v
+
+    @field_validator('dynamic_grid_sizer')
+    @classmethod
+    def validate_dynamic_grid_sizer(cls, v: dict) -> dict:
+        """Validate DynamicGridSizer config dict"""
+        if not v:  # Empty dict is OK (uses defaults)
+            return v
+
+        # Validate known keys
+        valid_keys = {'min_grids', 'max_grids', 'low_vol_atr_pct', 'mid_vol_atr_pct', 'high_vol_atr_pct'}
+        invalid_keys = set(v.keys()) - valid_keys
+        if invalid_keys:
+            raise ValueError(f"Invalid DynamicGridSizer keys: {invalid_keys}")
+
+        # Validate grid counts
+        if 'min_grids' in v and v['min_grids'] < 2:
+            raise ValueError("min_grids must be at least 2")
+        if 'max_grids' in v and v['max_grids'] > 10:
+            raise ValueError("max_grids should not exceed 10")
+        if 'min_grids' in v and 'max_grids' in v and v['min_grids'] >= v['max_grids']:
+            raise ValueError("min_grids must be less than max_grids")
+
         return v

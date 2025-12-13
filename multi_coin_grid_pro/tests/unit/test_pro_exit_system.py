@@ -46,6 +46,14 @@ def controller():
         min_grid_profit_pct=0.6,  # Grid profit exit at 0.6%
         exit_short_threshold=-1.0,  # Trend exit thresholds
         exit_mid_threshold=0.0,
+        # Risk management config (required for risk_manager initialization)
+        risk_reference_balance_quote=Decimal("10000"),
+        risk_max_daily_loss_pct=Decimal("2"),
+        risk_max_balance_per_trade_pct=Decimal("0.5"),
+        risk_max_total_open_risk_pct=Decimal("3"),
+        risk_exit_cooldown_minutes=30,
+        risk_symbol_switch_cooldown_minutes=45,
+        risk_consecutive_loss_cooldown_minutes=60,
     )
 
     market_data_provider = MagicMock()
@@ -82,6 +90,10 @@ def mock_trend():
     trend.trend_60m = 0.5  # Positive 1h trend
     trend.trend_240m = 1.0  # Positive 4h trend
     trend.trend_1440m = 2.0  # Positive 24h trend
+    trend.last_updated = 1000000.0 - 10  # Recent update (10 seconds ago)
+    trend.consensus_trend_pct = Decimal("1.5")  # For trend strength calculation
+    trend.trend_pct = Decimal("1.5")  # Fallback value
+    trend.trend_score = Decimal("1.5")  # For trend strength calculation
     return trend
 
 
@@ -167,6 +179,10 @@ class TestLayer3PriceBasedExit:
 
         # Set entry price
         controller.entry_prices[coin] = entry_price
+        controller.active_coin = coin  # Set active coin
+
+        # Set last switch time to 2 hours ago (hold time passed)
+        controller.last_switch_time = controller.market_data_provider.time() - 7200.0
 
         # Mock trend with current price
         mock_trend.current_price = current_price
@@ -201,6 +217,10 @@ class TestLayer3PriceBasedExit:
 
         # Set entry price
         controller.entry_prices[coin] = entry_price
+        controller.active_coin = coin  # Set active coin
+
+        # Set last switch time to 2 hours ago (hold time passed)
+        controller.last_switch_time = controller.market_data_provider.time() - 7200.0
 
         # Mock trend with current price
         mock_trend.current_price = current_price
@@ -224,6 +244,10 @@ class TestLayer3PriceBasedExit:
 
         # Set entry price
         controller.entry_prices[coin] = entry_price
+        controller.active_coin = coin  # Set active coin
+
+        # Set last switch time to 2 hours ago (hold time passed)
+        controller.last_switch_time = controller.market_data_provider.time() - 7200.0
 
         # Mock trend with negative trends (would trigger trend exit)
         mock_trend.current_price = current_price
@@ -246,12 +270,18 @@ class TestLayer5GridProfitExit:
 
         # Set entry price
         controller.entry_prices[coin] = entry_price
+        controller.active_coin = coin  # Set active coin
+
+        # Set last switch time to 2 hours ago (hold time passed)
+        controller.last_switch_time = controller.market_data_provider.time() - 7200.0
 
         # Set active executor ID
         controller.active_executor_id = "test_executor_123"
 
-        # Create mock executor info with realized profit >= 0.6%
+        # Create mock executor info with realized profit >= 0.6% NET (after 0.31% fees)
         # BUG FIX: Use custom_info for realized_pnl_quote and position_size_quote
+        # BUG FIX: realized_pnl_quote must be high enough to cover 0.6% net after 0.31% fees
+        # 0.6% net + 0.31% fees = 0.91% gross -> 0.91% of 5000 = 45.5
         executor_info = ExecutorInfo(
             id="test_executor_123",
             timestamp=1000000.0,
@@ -265,7 +295,7 @@ class TestLayer5GridProfitExit:
             is_active=True,
             is_trading=True,
             custom_info={
-                "realized_pnl_quote": Decimal("30.0"),  # 0.6% of 5000 = 30
+                "realized_pnl_quote": Decimal("45.5"),  # 0.91% of 5000 = 45.5 (net: 0.6% after fees)
                 "position_size_quote": Decimal("5000.0")
             },
             controller_id="test_controller"
@@ -353,12 +383,17 @@ class TestLayer5GridProfitExit:
 
         # Set entry price
         controller.entry_prices[coin] = entry_price
+        controller.active_coin = coin  # Set active coin
+
+        # Set last switch time to 2 hours ago (hold time passed)
+        controller.last_switch_time = controller.market_data_provider.time() - 7200.0
 
         # Set active executor ID
         controller.active_executor_id = "test_executor_123"
 
-        # Create mock executor info with realized profit >= 0.6%
+        # Create mock executor info with realized profit >= 0.6% NET (after fees)
         # BUG FIX: Use custom_info for realized_pnl_quote and position_size_quote
+        # BUG FIX: realized_pnl_quote must be high enough to cover 0.6% net after 0.31% fees
         executor_info = ExecutorInfo(
             id="test_executor_123",
             timestamp=1000000.0,
@@ -372,7 +407,7 @@ class TestLayer5GridProfitExit:
             is_active=True,
             is_trading=True,
             custom_info={
-                "realized_pnl_quote": Decimal("30.0"),  # 0.6% of 5000 = 30
+                "realized_pnl_quote": Decimal("45.5"),  # 0.91% of 5000 = 45.5 (net: 0.6% after fees)
                 "position_size_quote": Decimal("5000.0")
             },
             controller_id="test_controller"
@@ -405,6 +440,10 @@ class TestLayer2TrendExit:
 
         # Set entry price
         controller.entry_prices[coin] = entry_price
+        controller.active_coin = coin  # Set active coin
+
+        # Set last switch time to 2 hours ago (hold time passed)
+        controller.last_switch_time = controller.market_data_provider.time() - 7200.0
 
         # Mock trend with negative trends
         mock_trend.current_price = current_price  # BUG FIX: Set current price
@@ -445,6 +484,10 @@ class TestExitPriority:
 
         # Set entry price
         controller.entry_prices[coin] = entry_price
+        controller.active_coin = coin  # Set active coin
+
+        # Set last switch time to 2 hours ago (hold time passed)
+        controller.last_switch_time = controller.market_data_provider.time() - 7200.0
 
         # Set active executor ID with high profit (would trigger grid profit exit)
         controller.active_executor_id = "test_executor_123"
@@ -486,10 +529,15 @@ class TestExitPriority:
 
         # Set entry price
         controller.entry_prices[coin] = entry_price
+        controller.active_coin = coin  # Set active coin
+
+        # Set last switch time to 2 hours ago (hold time passed)
+        controller.last_switch_time = controller.market_data_provider.time() - 7200.0
 
         # Set active executor ID with high profit
         controller.active_executor_id = "test_executor_123"
         # BUG FIX: Use custom_info for realized_pnl_quote and position_size_quote
+        # BUG FIX: realized_pnl_quote must be high enough to cover 0.6% net after 0.31% fees
         executor_info = ExecutorInfo(
             id="test_executor_123",
             timestamp=1000000.0,
@@ -503,7 +551,7 @@ class TestExitPriority:
             is_active=True,
             is_trading=True,
             custom_info={
-                "realized_pnl_quote": Decimal("30.0"),  # 0.6% of 5000 = 30
+                "realized_pnl_quote": Decimal("45.5"),  # 0.91% of 5000 = 45.5 (net: 0.6% after fees)
                 "position_size_quote": Decimal("5000.0")
             },
             controller_id="test_controller"

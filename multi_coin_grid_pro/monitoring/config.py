@@ -2,6 +2,7 @@
 Configuration for Monitoring Module
 """
 
+import glob
 import os
 from pathlib import Path
 from typing import Optional
@@ -16,12 +17,27 @@ class MonitoringConfig:
     # Collector settings
     COLLECTOR_INTERVAL: int = 10  # seconds
 
-    # Log file to monitor
-    LOG_FILE: str = "/home/mo/repos/hummingbot/logs/logs_multi_coin_grid_v2.log"
+    # Log file to monitor - automatically finds the most recent timestamped log
+    @staticmethod
+    def get_latest_log_file() -> str:
+        """Find the most recent logs_multi_coin_grid_v2*.log file"""
+        log_dir = "/home/mo/repos/hummingbot/logs"
+        pattern = f"{log_dir}/logs_multi_coin_grid_v2*.log"
 
-    # Telegram Bot
-    TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN", "8310424124:AAGc--tOZvhucvyfJnoKeIucm6aD9L9N1Jk")
-    TELEGRAM_CHAT_ID: Optional[str] = os.getenv("TELEGRAM_CHAT_ID", "8586283471")
+        log_files = glob.glob(pattern)
+        if not log_files:
+            # Fallback to base name if no timestamped files found
+            return f"{log_dir}/logs_multi_coin_grid_v2.log"
+
+        # Sort by modification time (most recent first)
+        log_files.sort(key=os.path.getmtime, reverse=True)
+        return log_files[0]
+
+    LOG_FILE: str = get_latest_log_file.__func__()
+
+    # Telegram Bot - Always use environment variables (set in .env file)
+    TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID: Optional[str] = os.getenv("TELEGRAM_CHAT_ID")
 
     # Alert thresholds
     PNL_ALERT_THRESHOLD: float = 5.0  # Alert if P&L swing > 5%
