@@ -273,6 +273,133 @@ pytest multi_coin_grid_pro/tests/integration/ -v
 
 ---
 
+## 📊 Phase 11: Bot Monitoring & Scheduling (NEW FEATURE)
+
+### **Create Monitoring Script**
+
+- [ ] **Create `bot_monitor.py`** with CLI parameters
+  ```bash
+  touch multi_coin_grid_pro/monitoring/bot_monitor.py
+  ```
+  - [ ] `--bot` parameter: `eur` or `usd`
+  - [ ] `--status`: Current bot status (alive? CPU? memory?)
+  - [ ] `--trades`: Show trade history (last 1h, 24h, 7d)
+  - [ ] `--performance`: Show win rate, avg loss, profit factor
+  - [ ] `--health`: System health check (disk, API, clock sync)
+  - [ ] `--alert`: Send Telegram alert if issues detected
+  - [ ] `--json`: JSON output for automation
+  - [ ] `--last N`: Filter results (e.g., `--last 10h`)
+
+### **Usage Examples**
+
+- [ ] Test all parameters:
+  ```bash
+  # Check EUR bot status
+  python3 bot_monitor.py --bot eur --status
+
+  # Show last 24h trades
+  python3 bot_monitor.py --bot usd --trades --last 24h
+
+  # Get performance metrics
+  python3 bot_monitor.py --bot eur --performance --json
+
+  # System health check with Telegram alert
+  python3 bot_monitor.py --health --alert
+
+  # Combined: status + trades + alert if issues
+  python3 bot_monitor.py --bot eur --status --trades --alert
+  ```
+
+### **Telegram Integration**
+
+- [ ] Add Telegram notifications:
+  - [ ] Parse `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from `.env`
+  - [ ] Send alerts on:
+    - [ ] Bot not responding (no log update >30 min)
+    - [ ] High CPU/Memory usage (>80%)
+    - [ ] Low disk space (<10%)
+    - [ ] API authentication errors
+    - [ ] System clock out of sync (>5 sec)
+    - [ ] Loss threshold exceeded (daily loss >limit)
+
+- [ ] Alert Format:
+  ```
+  🚨 ALERT - EUR Bot Issue
+
+  Issue: Bot not responding (last log: 45 min ago)
+  Status: CRITICAL
+  Action: Check process, restart if needed
+  Timestamp: 2025-12-13 23:15:00
+  ```
+
+### **Scheduling with Cron**
+
+- [ ] Setup cron jobs:
+  ```bash
+  # Check bot health every 15 minutes
+  */15 * * * * cd /home/mo/repos/hummingbot && python3 multi_coin_grid_pro/monitoring/bot_monitor.py --bot eur --health --alert >> /var/log/hummingbot/monitor_eur.log 2>&1
+
+  # Daily performance report (9 AM CET)
+  0 9 * * * cd /home/mo/repos/hummingbot && python3 multi_coin_grid_pro/monitoring/bot_monitor.py --bot eur --performance --trades --last 24h --alert
+
+  # Weekly comparison (Monday 10 AM)
+  0 10 * * 1 cd /home/mo/repos/hummingbot && python3 multi_coin_grid_pro/monitoring/bot_monitor.py --performance --json > /var/log/hummingbot/weekly_report.json
+  ```
+
+- [ ] Create crontab:
+  ```bash
+  crontab -e
+  # Add the above lines
+  ```
+
+### **JSON Output Format**
+
+- [ ] Example output:
+  ```json
+  {
+    "timestamp": "2025-12-13T23:15:00Z",
+    "bot": "eur",
+    "status": "healthy",
+    "is_alive": true,
+    "last_log_update": "2025-12-13T23:14:30Z",
+    "cpu_percent": 15.3,
+    "memory_mb": 412,
+    "trades_last_24h": 12,
+    "win_rate": 58.3,
+    "avg_loss": -1.8,
+    "daily_pnl": 2.45,
+    "alerts": []
+  }
+  ```
+
+### **Testing Monitoring Features**
+
+- [ ] Test status check:
+  ```bash
+  python3 bot_monitor.py --bot eur --status
+  ```
+  Expected output: Bot uptime, last activity, active coin
+
+- [ ] Test trades:
+  ```bash
+  python3 bot_monitor.py --bot usd --trades --last 1h
+  ```
+  Expected output: List of recent trades with P&L
+
+- [ ] Test Telegram alert:
+  ```bash
+  python3 bot_monitor.py --health --alert
+  ```
+  Expected: Message sent to Telegram if issues found
+
+- [ ] Test JSON output:
+  ```bash
+  python3 bot_monitor.py --bot eur --performance --json | jq .
+  ```
+  Expected: Valid JSON output
+
+---
+
 ## ✅ Final Verification
 
 Before marking as COMPLETE, verify:

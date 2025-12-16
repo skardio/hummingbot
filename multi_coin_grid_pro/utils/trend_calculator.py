@@ -3,6 +3,7 @@ Trend Calculator
 
 Calculates and tracks price trends for multiple coins.
 Phase 2: Enhanced trend detection with volatility normalization, EMA, and linear regression.
+Phase 3: Production-ready validation with OHLCV candles and output contract.
 """
 
 import asyncio
@@ -10,6 +11,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal
+from enum import Enum
 from statistics import stdev
 from typing import Dict, List, Optional
 
@@ -18,6 +20,27 @@ import numpy as np
 from hummingbot.connector.connector_base import ConnectorBase
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# CONSTANTS - Production-Ready Thresholds
+# ============================================================================
+
+MIN_TREND_THRESHOLD = 0.5  # Minimum +0.5% trend_score required for selection
+MIN_CANDLES_FOR_WARMUP = 360  # Minimum 360 candles (30h × 60/5m) for valid trends
+TARGET_HISTORICAL_CANDLES = 720  # Target 720 candles (60h) for full history
+
+
+# ============================================================================
+# ENUMS - Trend Status
+# ============================================================================
+
+class TrendStatus(str, Enum):
+    """Trend validation status"""
+    WARMUP = "WARMUP"  # Insufficient data (< 360 candles)
+    BEARISH = "BEARISH"  # Trend score < MIN_TREND_THRESHOLD
+    SIDEWAYS = "SIDEWAYS"  # Trend score between -0.5% and +0.5%
+    BULLISH = "BULLISH"  # Trend score >= MIN_TREND_THRESHOLD
 
 
 @dataclass
@@ -32,6 +55,35 @@ class CandleData:
     low: Decimal          # Low price
     close: Decimal        # Close price
     volume: Decimal       # Volume
+
+
+@dataclass
+class TrendSelection:
+    """
+    Output contract for trend validation and selection.
+
+    Attributes:
+        symbol: Trading pair symbol
+        trend_1h: 1-hour trend percentage
+        trend_4h: 4-hour trend percentage
+        trend_24h: 24-hour trend percentage
+        trend_score_pct: Composite trend score (weighted average)
+        passes: True if trend passes MIN_TREND_THRESHOLD
+        status: Trend status (WARMUP, BEARISH, SIDEWAYS, BULLISH)
+        candle_count: Number of candles available
+        consensus_pct: Multi-indicator consensus trend
+        volatility: Current volatility (std dev)
+    """
+    symbol: str
+    trend_1h: float
+    trend_4h: float
+    trend_24h: float
+    trend_score_pct: float
+    passes: bool
+    status: TrendStatus
+    candle_count: int
+    consensus_pct: float = 0.0
+    volatility: float = 0.0
 
 
 @dataclass
@@ -86,6 +138,16 @@ class CoinTrend:
         # This allows coin selection after ~10 minutes instead of ~25 minutes
         # Multi-timeframe trends will still work with less data (using warm-up mode)
         return len(self.price_history) >= 20
+
+    @property
+    def candle_count(self) -> int:
+        """Get number of OHLCV candles available"""
+        return len(self.candles)
+
+    @property
+    def is_warmup(self) -> bool:
+        """Check if coin is in warmup mode (< 360 candles)"""
+        return self.candle_count < MIN_CANDLES_FOR_WARMUP
 
 
 class TrendCalculator:
@@ -903,6 +965,160 @@ class TrendCalculator:
     def clear_trends(self) -> None:
         """Clear all trend data"""
         self.trends.clear()
+
+    # ========================================================================
+    # Phase 3: Validation & Output Contract
+    # ========================================================================
+
+    def validate_trend(self, symbol: str) -> Optional[TrendSelection]:
+        """
+        Validate trend and return structured output contract.
+
+        This method implements the production-ready validation logic:
+        1. Check candle count (minimum 360 for valid trends)
+        2. Check trend threshold (minimum +0.5% for bullish)
+        3. Return structured output with passes/status fields
+
+        Args:
+            symbol: Trading pair symbol (e.g., "BTC-EUR")
+
+        Returns:
+            TrendSelection object with validation results, or None if symbol not found
+        """
+        trend = self.trends.get(symbol)
+        if not trend:
+            return None
+
+        # Get candle count
+        candle_count = trend.candle_count
+
+        # Check warmup status (< 360 candles)
+        if candle_count < MIN_CANDLES_FOR_WARMUP:
+            return TrendSelection(
+                symbol=symbol,
+                trend_1h=trend.trend_60m,
+                trend_4h=trend.trend_240m,
+                trend_24h=trend.trend_1440m,
+                trend_score_pct=trend.trend_score,
+                passes=False,
+                status=TrendStatus.WARMUP,
+                candle_count=candle_count,
+                consensus_pct=trend.consensus_trend_pct,
+                volatility=trend.volatility
+            )
+
+        # Get trend score (composite multi-timeframe score)
+        trend_score = trend.trend_score
+
+        # Determine status and passes flag
+        if trend_score < -MIN_TREND_THRESHOLD:
+            # Strong bearish trend
+            status = TrendStatus.BEARISH
+            passes = False
+        elif trend_score < MIN_TREND_THRESHOLD:
+            # Sideways or weak trend
+            status = TrendStatus.SIDEWAYS
+            passes = False
+        else:
+            # Bullish trend (>= +0.5%)
+            status = TrendStatus.BULLISH
+            passes = True
+
+        return TrendSelection(
+            symbol=symbol,
+            trend_1h=trend.trend_60m,
+            trend_4h=trend.trend_240m,
+            trend_24h=trend.trend_1440m,
+            trend_score_pct=trend_score,
+            passes=passes,
+            status=status,
+            candle_count=candle_count,
+            consensus_pct=trend.consensus_trend_pct,
+            volatility=trend.volatility
+        )
+
+    def get_all_selections(self) -> List[TrendSelection]:
+        """
+        Get validation output for all tracked coins.
+
+        Returns:
+            List of TrendSelection objects sorted by trend_score (descending)
+        """
+        selections = []
+        for symbol in self.trends.keys():
+            selection = self.validate_trend(symbol)
+            if selection:
+                selections.append(selection)
+
+        # Sort by trend score (best first)
+        selections.sort(key=lambda x: x.trend_score_pct, reverse=True)
+        return selections
+
+    def print_selection_report(self) -> None:
+        """
+        Print formatted selection report for all coins.
+
+        Example output:
+        {
+          "symbol": "BTC/EUR",
+          "trend_1h": -0.8,
+          "trend_4h": -1.4,
+          "trend_24h": -2.9,
+          "trend_score_pct": -1.96,
+          "passes": false,
+          "status": "BEARISH"
+        }
+        """
+        selections = self.get_all_selections()
+
+        logger.info("\n" + "=" * 80)
+        logger.info("📊 TREND SELECTION REPORT")
+        logger.info("=" * 80)
+        logger.info(f"Total coins tracked: {len(selections)}")
+        logger.info(f"Minimum threshold: {MIN_TREND_THRESHOLD:+.2f}%")
+        logger.info(f"Minimum candles: {MIN_CANDLES_FOR_WARMUP}")
+        logger.info("")
+
+        # Count by status
+        status_counts = {
+            TrendStatus.WARMUP: 0,
+            TrendStatus.BEARISH: 0,
+            TrendStatus.SIDEWAYS: 0,
+            TrendStatus.BULLISH: 0
+        }
+
+        for sel in selections:
+            status_counts[sel.status] += 1
+
+        logger.info(f"Status Distribution:")
+        logger.info(f"  WARMUP:   {status_counts[TrendStatus.WARMUP]} coins (insufficient data)")
+        logger.info(f"  BEARISH:  {status_counts[TrendStatus.BEARISH]} coins (< {-MIN_TREND_THRESHOLD:+.2f}%)")
+        logger.info(f"  SIDEWAYS: {status_counts[TrendStatus.SIDEWAYS]} coins ({-MIN_TREND_THRESHOLD:+.2f}% to {MIN_TREND_THRESHOLD:+.2f}%)")
+        logger.info(f"  BULLISH:  {status_counts[TrendStatus.BULLISH]} coins (>= {MIN_TREND_THRESHOLD:+.2f}%)")
+        logger.info("")
+
+        # Print each selection
+        for idx, sel in enumerate(selections, 1):
+            status_emoji = {
+                TrendStatus.WARMUP: "⏳",
+                TrendStatus.BEARISH: "📉",
+                TrendStatus.SIDEWAYS: "➡️",
+                TrendStatus.BULLISH: "📈"
+            }[sel.status]
+
+            passes_emoji = "✅" if sel.passes else "❌"
+
+            logger.info(
+                f"{idx:2}. {status_emoji} {sel.symbol:12} | "
+                f"Score: {sel.trend_score_pct:+6.2f}% | "
+                f"1h: {sel.trend_1h:+6.2f}% | "
+                f"4h: {sel.trend_4h:+6.2f}% | "
+                f"24h: {sel.trend_24h:+6.2f}% | "
+                f"Candles: {sel.candle_count:3} | "
+                f"{passes_emoji} {sel.status.value}"
+            )
+
+        logger.info("=" * 80 + "\n")
 
     # Phase 2.1: Volatility Normalization
     def _calculate_volatility(self, price_history: List[Dict]) -> float:

@@ -6,12 +6,12 @@ Functionaliteit:
 - Monitort meerdere cryptos: XRP, ADA, DOT, SOL, LINK
 - Berekent 30min trend voor elke coin
 - Switcht automatisch naar de coin met de beste trend
-- Gebruikt alleen EUR als base (geen crypto-to-crypto conversies!)
+- Ondersteunt EUR/USD via BOT_ENV (prod=EUR, usd=USD)
 - Cancelt oude orders en plaatst nieuwe grid op beste coin
 - Minimum 1 uur tussen switches (vermijd fee churning)
 - Trade alleen coins met positieve trend (>0.5%)
 
-Capital: €133.18
+Capital: €133.18 (EUR) / $110 (USD)
 Fees: 0.25% maker, 0.40% taker
 """
 
@@ -25,16 +25,21 @@ from typing import Dict, List, Optional, Tuple
 
 import ccxt
 
-# Logging setup
+# Logging setup - dynamic log file based on BOT_ENV
+bot_env = os.getenv('BOT_ENV', 'prod').lower()
+log_suffix = f"_{bot_env}" if bot_env != 'prod' else ""
+log_file = f'/home/mo/repos/hummingbot/logs/multi_coin_grid{log_suffix}.log'
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/home/mo/repos/hummingbot/logs/multi_coin_grid.log'),
-        logging.StreamHandler()
+        logging.FileHandler(log_file)
+        # StreamHandler removed for performance - use tail -f to view logs
     ]
 )
 logger = logging.getLogger(__name__)
+logger.info(f"📝 Logging to: {log_file}")
 
 
 @dataclass
@@ -53,10 +58,21 @@ class MultiCoinGridBot:
     """
 
     def __init__(self):
+        # Detect quote currency from BOT_ENV (prod=EUR, usd=USD)
+        bot_env = os.getenv('BOT_ENV', 'prod').lower()
+        self.quote_currency = 'USD' if bot_env == 'usd' else 'EUR'
+
+        # MONITORING MODE for USD bot (no trading)
+        self.monitoring_only = bot_env == 'usd'
+        mode_text = "📊 MONITORING MODE (trends only)" if self.monitoring_only else "🤖 TRADING MODE"
+
+        logger.info(f"🌍 Bot Environment: {bot_env} → Quote Currency: {self.quote_currency}")
+        logger.info(f"{mode_text}")
+
         self.config = {
             # Coins worden automatisch opgehaald!
             'coins': [],  # Wordt gevuld door discover_tradeable_coins()
-            'min_24h_volume_eur': 50000,  # Minimaal €50k daily volume (verlaagd!)
+            'min_24h_volume': 50000,  # Minimaal €50k/50k$ daily volume (verlaagd!)
             'max_coins_to_monitor': 20,  # Top 20 coins (verhoogd!)
             'exclude_expensive_coins': True,  # Exclude BTC/ETH (te duur, weinig volatiliteit)
 
@@ -78,7 +94,7 @@ class MultiCoinGridBot:
             'taker_fee': 0.0040,    # 0.40% taker fee
 
             # Minimum order sizes (wordt per coin opgehaald)
-            'min_order_eur': {}  # Wordt gevuld door discover_tradeable_coins()
+            'min_order_quote': {}  # Wordt gevuld door discover_tradeable_coins()
         }
 
         # Kraken exchange setup
@@ -119,20 +135,25 @@ class MultiCoinGridBot:
 
     def discover_tradeable_coins(self):
         """
-        Ontdek automatisch alle tradeable EUR pairs op Kraken
+        Ontdek automatisch alle tradeable pairs op Kraken (EUR of USD)
         Sorteer op 24h volume en selecteer top coins
         """
         try:
-            logger.info("\n🔍 Discovering tradeable EUR pairs...")
+            logger.info(f"\n🔍 Discovering tradeable {self.quote_currency} pairs...")
 
-            # Bekende populaire coins om te checken (sneller dan alle 539!)
-            # Focus op top crypto's met goede liquiditeit
-            priority_coins = [
-                'BTC/EUR', 'ETH/EUR', 'SOL/EUR', 'XRP/EUR', 'ADA/EUR',
-                'DOT/EUR', 'AVAX/EUR', 'LINK/EUR', 'MATIC/EUR', 'UNI/EUR',
-                'ATOM/EUR', 'LTC/EUR', 'BCH/EUR', 'NEAR/EUR', 'APT/EUR',
-                'ARB/EUR', 'OP/EUR', 'SUI/EUR', 'ALGO/EUR', 'FIL/EUR'
+            # Haal populaire coins dynamisch op van de exchange
+            # Dit zijn de top cryptos op Kraken - meer coins voor betere diversiteit
+            base_coins = [
+                'BTC', 'ETH', 'SOL', 'XRP', 'ADA',
+                'DOGE', 'DOT', 'AVAX', 'LINK', 'MATIC',
+                'UNI', 'ATOM', 'LTC', 'BCH', 'NEAR',
+                'APT', 'ARB', 'OP', 'SUI', 'ALGO',
+                'FIL', 'AAVE', 'ICP', 'POLKADOT', 'RIPPLE',
+                'SHIB', 'PEPE', 'MEME', 'GALA', 'ENS',
+                'BNB', 'CRO', 'LINA', 'XLM', 'JUP',
+                'BLUR', 'PYTH', 'WLD', 'RENDER', 'CYBER'
             ]
+            priority_coins = [f"{coin}/{self.quote_currency}" for coin in base_coins]
 
             # Load markets
             markets = self.exchange.load_markets()
@@ -143,7 +164,7 @@ class MultiCoinGridBot:
                 if symbol in markets and markets[symbol]['active'] and markets[symbol]['spot']:
                     available_pairs.append(symbol)
 
-            logger.info(f"   Checking {len(available_pairs)} populaire EUR pairs...")
+            logger.info(f"   Checking {len(available_pairs)} populaire {self.quote_currency} pairs...")
 
             # Haal 24h ticker data op voor volume filtering
             coin_volumes = []
@@ -152,16 +173,17 @@ class MultiCoinGridBot:
             for symbol in available_pairs:
                 try:
                     ticker = self.exchange.fetch_ticker(symbol)
-                    volume_eur = float(ticker.get('quoteVolume', 0))
+                    volume_quote = float(ticker.get('quoteVolume', 0))
 
                     # Check minimum volume
-                    if volume_eur >= self.config['min_24h_volume_eur']:
+                    if volume_quote >= self.config['min_24h_volume']:
                         coin_volumes.append({
                             'symbol': symbol,
-                            'volume': volume_eur,
+                            'volume': volume_quote,
                             'price': ticker['last']
                         })
-                        logger.info(f"      ✓ {symbol:12} | Volume: €{volume_eur:,.0f}")
+                        currency_symbol = '€' if self.quote_currency == 'EUR' else '$'
+                        logger.info(f"      ✓ {symbol:12} | Volume: {currency_symbol}{volume_quote:,.0f}")
 
                     time.sleep(0.2)  # Rate limit respect
 
@@ -171,7 +193,8 @@ class MultiCoinGridBot:
 
             # Filter dure coins (BTC/ETH) eruit als optie enabled is
             if self.config.get('exclude_expensive_coins', False):
-                coin_volumes = [c for c in coin_volumes if c['symbol'] not in ['BTC/EUR', 'ETH/EUR']]
+                excluded = [f'BTC/{self.quote_currency}', f'ETH/{self.quote_currency}']
+                coin_volumes = [c for c in coin_volumes if c['symbol'] not in excluded]
                 logger.info(f"   🚫 Excluded BTC/ETH (te duur, weinig beweging)")
 
             # Sorteer op PRIJS (laagste eerst) - goedkope coins = meer volatiliteit!
@@ -184,35 +207,38 @@ class MultiCoinGridBot:
             # Set minimum order sizes (gebruik markets info)
             for symbol in self.config['coins']:
                 market = markets[symbol]
-                # Kraken minimum is meestal 5 EUR, maar check limits
+                # Kraken minimum is meestal 5 EUR/USD, maar check limits
                 min_cost = market.get('limits', {}).get('cost', {}).get('min', 5.0)
-                self.config['min_order_eur'][symbol] = float(min_cost)
+                self.config['min_order_quote'][symbol] = float(min_cost)
 
             logger.info(f"\n✅ Selected top {len(self.config['coins'])} coins:")
+            currency_symbol = '€' if self.quote_currency == 'EUR' else '$'
             for i, coin in enumerate(top_coins, 1):
                 logger.info(
                     f"   {i}. {coin['symbol']:12} | "
-                    f"Volume: €{coin['volume']:>12,.0f} | "
-                    f"Price: €{coin['price']:.4f}"
+                    f"Volume: {currency_symbol}{coin['volume']:>12,.0f} | "
+                    f"Price: {currency_symbol}{coin['price']:.4f}"
                 )
 
         except Exception as e:
             logger.error(f"❌ Fout bij discovering coins: {e}")
             # Fallback naar handmatige lijst
             logger.warning("⚠️  Fallback naar standaard coin lijst")
-            self.config['coins'] = ['XRP/EUR', 'ADA/EUR', 'DOT/EUR', 'SOL/EUR', 'LINK/EUR']
+            base_coins = ['XRP', 'ADA', 'DOT', 'SOL', 'LINK']
+            self.config['coins'] = [f"{coin}/{self.quote_currency}" for coin in base_coins]
             for symbol in self.config['coins']:
-                self.config['min_order_eur'][symbol] = 5.0
+                self.config['min_order_quote'][symbol] = 5.0
 
-    def get_available_eur(self) -> Decimal:
-        """Haal beschikbare EUR balance op"""
+    def get_available_quote(self) -> Decimal:
+        """Haal beschikbare quote currency balance op (EUR/USD)"""
         try:
             balance = self.exchange.fetch_balance()
-            eur_free = Decimal(str(balance.get('EUR', {}).get('free', 0)))
-            logger.info(f"💶 Beschikbare EUR: €{eur_free:.2f}")
-            return eur_free
+            quote_free = Decimal(str(balance.get(self.quote_currency, {}).get('free', 0)))
+            currency_symbol = '€' if self.quote_currency == 'EUR' else '$'
+            logger.info(f"💶 Beschikbare {self.quote_currency}: {currency_symbol}{quote_free:.2f}")
+            return quote_free
         except Exception as e:
-            logger.error(f"❌ Fout bij ophalen EUR balance: {e}")
+            logger.error(f"❌ Fout bij ophalen {self.quote_currency} balance: {e}")
             return Decimal('0')
 
     def update_coin_price(self, symbol: str) -> Optional[Decimal]:
@@ -275,9 +301,10 @@ class MultiCoinGridBot:
             if symbol in self.coin_trends:
                 trend = self.coin_trends[symbol]
                 trend_emoji = "📈" if trend.trend_pct >= 0 else "📉"
+                currency_symbol = '€' if self.quote_currency == 'EUR' else '$'
                 logger.info(
                     f"{trend_emoji} {symbol:12} | "
-                    f"€{trend.current_price:8.4f} | "
+                    f"{currency_symbol}{trend.current_price:8.4f} | "
                     f"Trend: {trend.trend_pct:+6.2f}% | "
                     f"History: {len(trend.price_history)} prijzen"
                 )
@@ -364,10 +391,11 @@ class MultiCoinGridBot:
 
             # Cancel elke order
             cancelled_count = 0
+            currency_symbol = '€' if self.quote_currency == 'EUR' else '$'
             for order in open_orders:
                 try:
                     self.exchange.cancel_order(order['id'], self.active_coin)
-                    logger.info(f"   ✓ Cancelled {order['side']} order @ €{order['price']:.4f}")
+                    logger.info(f"   ✓ Cancelled {order['side']} order @ {currency_symbol}{order['price']:.4f}")
                     cancelled_count += 1
                 except Exception as e:
                     logger.error(f"   ✗ Fout bij cancelen order {order['id']}: {e}")
@@ -385,13 +413,19 @@ class MultiCoinGridBot:
         lower = current_price * (Decimal('1') - Decimal(str(self.config['range_pct_down'] / 100)))
         upper = current_price * (Decimal('1') + Decimal(str(self.config['range_pct_up'] / 100)))
 
-        logger.info(f"📏 Grid range: €{lower:.4f} - €{upper:.4f} (huidig: €{current_price:.4f})")
+        currency_symbol = '€' if self.quote_currency == 'EUR' else '$'
+        logger.info(f"📏 Grid range: {currency_symbol}{lower:.4f} - {currency_symbol}{upper:.4f} (huidig: {currency_symbol}{current_price:.4f})")
         return lower, upper
 
     def place_grid_orders(self):
         """
         Plaats grid orders voor actieve coin
         """
+        # Skip if in monitoring mode
+        if self.monitoring_only:
+            logger.info(f"📊 MONITORING MODE: Skipping grid orders for {self.active_coin}")
+            return
+
         if not self.active_coin:
             logger.warning("⚠️  Geen actieve coin - kan geen orders plaatsen")
             return
@@ -408,40 +442,41 @@ class MultiCoinGridBot:
                 self.last_range_update = current_time
 
             # Check of prijs nog binnen range is
+            currency_symbol = '€' if self.quote_currency == 'EUR' else '$'
             if current_price <= self.grid_lower or current_price >= self.grid_upper:
                 logger.warning(
-                    f"⚠️  Prijs €{current_price:.4f} buiten range "
-                    f"€{self.grid_lower:.4f}-€{self.grid_upper:.4f} - herbereken range"
+                    f"⚠️  Prijs {currency_symbol}{current_price:.4f} buiten range "
+                    f"{currency_symbol}{self.grid_lower:.4f}-{currency_symbol}{self.grid_upper:.4f} - herbereken range"
                 )
                 self.grid_lower, self.grid_upper = self.calculate_grid_range(current_price)
                 self.last_range_update = current_time
 
-            # Haal beschikbare EUR op
-            available_eur = self.get_available_eur()
-            if available_eur < Decimal('20'):  # Minimaal €20 voor 4 orders
-                logger.warning(f"⚠️  Onvoldoende EUR (€{available_eur:.2f}) - minimaal €20 vereist")
+            # Haal beschikbare quote currency op
+            available_quote = self.get_available_quote()
+            if available_quote < Decimal('20'):  # Minimaal €20/$20 voor 4 orders
+                logger.warning(f"⚠️  Onvoldoende {self.quote_currency} ({currency_symbol}{available_quote:.2f}) - minimaal {currency_symbol}20 vereist")
                 return
 
-            # Gebruik maximaal €80 (of minder als niet beschikbaar)
-            max_capital = Decimal('80')
-            usable_eur = min(available_eur, max_capital)
+            # Gebruik maximaal €80/$85 (of minder als niet beschikbaar)
+            max_capital = Decimal('85') if self.quote_currency == 'USD' else Decimal('80')
+            usable_quote = min(available_quote, max_capital)
 
-            # Verdeel capital over buy orders (helft van beschikbare EUR)
-            capital_per_side = usable_eur / Decimal('2')
+            # Verdeel capital over buy orders (helft van beschikbare quote)
+            capital_per_side = usable_quote / Decimal('2')
             capital_per_order = capital_per_side / Decimal(str(self.config['num_grids']))
 
             # Check minimum order size
-            min_order = Decimal(str(self.config['min_order_eur'][self.active_coin]))
+            min_order = Decimal(str(self.config['min_order_quote'][self.active_coin]))
             if capital_per_order < min_order:
                 logger.warning(
-                    f"⚠️  Order size te klein (€{capital_per_order:.2f}) - "
-                    f"minimaal €{min_order:.2f} vereist. Verhoog capital of verlaag num_grids!"
+                    f"⚠️  Order size te klein ({currency_symbol}{capital_per_order:.2f}) - "
+                    f"minimaal {currency_symbol}{min_order:.2f} vereist. Verhoog capital of verlaag num_grids!"
                 )
                 return
 
             logger.info(f"\n📝 PLAATS GRID ORDERS voor {self.active_coin}")
-            logger.info(f"   Capital per order: €{capital_per_order:.2f}")
-            logger.info(f"   Range: €{self.grid_lower:.4f} - €{self.grid_upper:.4f}")
+            logger.info(f"   Capital per order: {currency_symbol}{capital_per_order:.2f}")
+            logger.info(f"   Range: {currency_symbol}{self.grid_lower:.4f} - {currency_symbol}{self.grid_upper:.4f}")
 
             # Bereken buy levels (onder current price)
             buy_range = current_price - self.grid_lower
@@ -453,7 +488,7 @@ class MultiCoinGridBot:
 
             orders_placed = 0
 
-            # Plaats BUY orders
+            # Plaats BUY orders (lagere prijzen)
             logger.info("\n   🟢 BUY ORDERS:")
             for i in range(1, self.config['num_grids'] + 1):
                 price = current_price - (buy_step * Decimal(str(i)))
@@ -465,12 +500,12 @@ class MultiCoinGridBot:
                         float(amount),
                         float(price)
                     )
-                    logger.info(f"   ✓ BUY  {float(amount):.4f} @ €{float(price):.4f} (ID: {order['id']})")
+                    logger.info(f"   ✓ BUY  {float(amount):.4f} @ {currency_symbol}{float(price):.4f} (ID: {order['id']})")
                     self.open_orders.append(order)
                     orders_placed += 1
                     time.sleep(0.5)  # Rate limit respect
                 except Exception as e:
-                    logger.error(f"   ✗ Fout bij plaatsen buy order @ €{float(price):.4f}: {e}")
+                    logger.error(f"   ✗ Fout bij plaatsen buy order @ {currency_symbol}{float(price):.4f}: {e}")
 
             # Plaats SELL orders (we hebben nog geen positie, maar bereid voor)
             logger.info("\n   🔴 SELL ORDERS:")
@@ -484,12 +519,12 @@ class MultiCoinGridBot:
                         float(amount),
                         float(price)
                     )
-                    logger.info(f"   ✓ SELL {float(amount):.4f} @ €{float(price):.4f} (ID: {order['id']})")
+                    logger.info(f"   ✓ SELL {float(amount):.4f} @ {currency_symbol}{float(price):.4f} (ID: {order['id']})")
                     self.open_orders.append(order)
                     orders_placed += 1
                     time.sleep(0.5)  # Rate limit respect
                 except Exception as e:
-                    logger.error(f"   ✗ Fout bij plaatsen sell order @ €{float(price):.4f}: {e}")
+                    logger.error(f"   ✗ Fout bij plaatsen sell order @ {currency_symbol}{float(price):.4f}: {e}")
 
             logger.info(f"\n✅ {orders_placed} orders geplaatst voor {self.active_coin}")
 
@@ -519,8 +554,11 @@ class MultiCoinGridBot:
         self.grid_lower = None
         self.grid_upper = None
 
-        # Plaats nieuwe grid orders
-        self.place_grid_orders()
+        # Plaats nieuwe grid orders (skip if monitoring only)
+        if not self.monitoring_only:
+            self.place_grid_orders()
+        else:
+            logger.info(f"📊 MONITORING: Selected {new_coin} (no orders - monitoring mode)")
 
         logger.info("=" * 80)
         logger.info(f"✅ SWITCH COMPLEET - Nu actief op {new_coin}")

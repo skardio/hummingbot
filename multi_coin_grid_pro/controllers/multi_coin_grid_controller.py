@@ -51,7 +51,7 @@ from multi_coin_grid_pro.risk.risk_guard import RiskGuardV2
 from multi_coin_grid_pro.utils.candle_indicators import CandleIndicatorsCalculator
 from multi_coin_grid_pro.utils.coin_discovery import CoinDiscovery
 from multi_coin_grid_pro.utils.dynamic_grid_sizer import DynamicGridSizer
-from multi_coin_grid_pro.utils.trend_calculator import CandleData, TrendCalculator
+from multi_coin_grid_pro.utils.trend_calculator import TrendCalculator, TrendStatus
 
 from .multi_coin_grid_config import MultiCoinGridConfig
 
@@ -1779,8 +1779,61 @@ class MultiCoinGridController(ControllerBase):
                 else:
                     self.logger().info(f"❌ No coin >= {info['min_trend']}% threshold")
 
+                # MONITORING: Show validation summary for top coins
+                try:
+                    top_symbols = [sym for sym, _ in info.get('top_10', [])[:5]]  # Top 5 only
+                    if top_symbols:
+                        self.logger().info("📊 VALIDATION STATUS (Top 5):")
+                        for sym in top_symbols:
+                            validation = self.trend_calculator.validate_trend(sym)
+                            if validation:
+                                status_icon = "✅" if validation.passes else "❌"
+                                self.logger().info(
+                                    f"   {status_icon} {sym:12s} | {validation.status.value:8s} | "
+                                    f"Score: {validation.trend_score_pct:+6.2f}% | Candles: {validation.candle_count:3d}"
+                                )
+                except Exception as e:
+                    self.logger().debug(f"Could not generate validation summary: {e}")
+
             # Only log selected coin if one was found
             if best_coin:
+                # MONITORING: Log trend validation status using new validate_trend() framework
+                try:
+                    validation = self.trend_calculator.validate_trend(best_coin)
+                    if validation:
+                        status_emoji = {
+                            TrendStatus.BULLISH: "📈",
+                            TrendStatus.SIDEWAYS: "➡️",
+                            TrendStatus.BEARISH: "📉",
+                            TrendStatus.WARMUP: "⏳"
+                        }.get(validation.status, "❓")
+
+                        self.logger().info(
+                            f"📊 TREND VALIDATION: {best_coin} | "
+                            f"Status: {status_emoji} {validation.status.value} | "
+                            f"Score: {validation.trend_score_pct:+.2f}% | "
+                            f"Passes: {'✅' if validation.passes else '❌'} | "
+                            f"Candles: {validation.candle_count} | "
+                            f"Timeframes (1h/4h/24h): {validation.trend_1h:+.2f}% / {validation.trend_4h:+.2f}% / {validation.trend_24h:+.2f}%"
+                        )
+
+                        # Optional: Log warning if passes=False but coin was still selected
+                        if not validation.passes:
+                            if validation.status == TrendStatus.WARMUP:
+                                self.logger().debug(
+                                    f"ℹ️  Note: {best_coin} in WARMUP mode (only {validation.candle_count} candles, need 360+)"
+                                )
+                            elif validation.status == TrendStatus.SIDEWAYS:
+                                self.logger().debug(
+                                    f"ℹ️  Note: {best_coin} in SIDEWAYS trend ({validation.trend_score_pct:+.2f}% < +0.5% threshold)"
+                                )
+                            elif validation.status == TrendStatus.BEARISH:
+                                self.logger().warning(
+                                    f"⚠️  Warning: {best_coin} has BEARISH trend ({validation.trend_score_pct:+.2f}% < -0.5%)"
+                                )
+                except Exception as e:
+                    self.logger().debug(f"Could not validate trend for {best_coin}: {e}")
+
                 # NEW: Check if we've been monitoring this coin too long without execution
                 current_time = self.market_data_provider.time()
                 max_monitoring_seconds = getattr(self.config, 'max_coin_monitoring_seconds', 300)  # Default 5 min
@@ -3720,7 +3773,8 @@ class MultiCoinGridController(ControllerBase):
         """
         try:
             # Get ATR and current price
-            atr = self._calculate_atr(symbol, periods=14)
+            trend = self.trends.get(symbol)
+            atr = self._calculate_atr(symbol, trend)
             current_price = self.connector.get_mid_price(symbol)
 
             if not atr or not current_price or atr <= 0 or current_price <= 0:
@@ -4677,6 +4731,10 @@ class MultiCoinGridController(ControllerBase):
         """
         Phase 2.5: Check if coin meets multi-timeframe buy conditions
 
+        Two-layer validation:
+        1. Quick filter: validate_trend() checks 360 candles + MIN_TREND_THRESHOLD
+        2. Detailed checks: staleness, consensus, multi-timeframe confirmation
+
         Buy conditions:
         - trend_1440m > +1% (24h trend positive)
         - trend_240m > +1% (4h trend positive)
@@ -4689,6 +4747,35 @@ class MultiCoinGridController(ControllerBase):
             True if coin meets buy conditions
         """
         try:
+            # ============================================================
+            # PHASE 1: Quick validation with new framework
+            # ============================================================
+            validation = self.trend_calculator.validate_trend(coin)
+            if not validation:
+                self.logger().debug(f"⚠️  {coin}: No validation data available")
+                return False
+
+            # Reject if basic validation fails
+            if not validation.passes:
+                reason_map = {
+                    TrendStatus.WARMUP: f"insufficient data ({validation.candle_count} candles < 360)",
+                    TrendStatus.BEARISH: f"bearish trend ({validation.trend_score_pct:+.2f}% < -0.5%)",
+                    TrendStatus.SIDEWAYS: f"sideways trend ({validation.trend_score_pct:+.2f}% < +0.5%)",
+                }
+                reason = reason_map.get(validation.status, "unknown reason")
+                self.logger().info(
+                    f"[DECISION] ❌ {coin} BUY REJECTED (Phase 1 - Quick Filter): {reason}"
+                )
+                return False
+
+            self.logger().debug(
+                f"✅ {coin} passed Phase 1 validation: {validation.status.value} "
+                f"({validation.trend_score_pct:+.2f}%, {validation.candle_count} candles)"
+            )
+
+            # ============================================================
+            # PHASE 2: Detailed checks (existing logic)
+            # ============================================================
             trend = self.trend_calculator.get_trend(coin)
             if not trend:
                 return False
@@ -4696,8 +4783,9 @@ class MultiCoinGridController(ControllerBase):
             # Reject stale trend data (90s = 3x refresh interval = reasonable for real-time trading)
             staleness_threshold = getattr(self.config, "price_update_interval", 30) * 3  # 90s with 30s interval
             if self.market_data_provider.time() - trend.last_updated > staleness_threshold:
-                self.logger().debug(
-                    f"⚠️  Skipping {coin}: trend data stale ({self.market_data_provider.time() - trend.last_updated:.1f}s old)"
+                self.logger().info(
+                    f"[DECISION] ❌ {coin} BUY REJECTED (Phase 2 - Staleness): "
+                    f"data {self.market_data_provider.time() - trend.last_updated:.1f}s old (max {staleness_threshold}s)"
                 )
                 return False
 
@@ -4716,8 +4804,8 @@ class MultiCoinGridController(ControllerBase):
             epsilon = 0.001  # 0.001 tolerance
             if trend_strength < (self.config.trend_min_entry_strength - epsilon):
                 self.logger().info(
-                    f"[DECISION] ❌ {coin} BUY REJECTED: strength {trend_strength:+.2f} < "
-                    f"{self.config.trend_min_entry_strength:+.2f}"
+                    f"[DECISION] ❌ {coin} BUY REJECTED (Phase 2 - Strength): "
+                    f"strength {trend_strength:+.2f} < {self.config.trend_min_entry_strength:+.2f}"
                 )
                 return False
 
@@ -4744,13 +4832,13 @@ class MultiCoinGridController(ControllerBase):
             if confirmations < self.config.trend_confirmation_timeframes:
                 if has_strong_consensus:
                     self.logger().info(
-                        f"[DECISION] ✅ {coin} APPROVED despite {confirmations} timeframes "
-                        f"(strong consensus {trend_strength * 100:.2f}% >= {strong_consensus_threshold * 100:.0f}%)"
+                        f"[DECISION] ✅ {coin} BUY APPROVED (Phase 2 - Strong Consensus Override): "
+                        f"{confirmations} timeframes but consensus {trend_strength * 100:.2f}% >= {strong_consensus_threshold * 100:.0f}%"
                     )
                 else:
                     self.logger().info(
-                        f"[DECISION] ❌ {coin} BUY REJECTED: only {confirmations} confirming timeframes "
-                        f"(requires {self.config.trend_confirmation_timeframes}, or {strong_consensus_threshold * 100:.0f}% consensus)"
+                        f"[DECISION] ❌ {coin} BUY REJECTED (Phase 2 - Confirmation): "
+                        f"only {confirmations} confirming timeframes (requires {self.config.trend_confirmation_timeframes}, or {strong_consensus_threshold * 100:.0f}% consensus)"
                     )
                     return False
 
@@ -4845,11 +4933,12 @@ class MultiCoinGridController(ControllerBase):
                 )
                 return False
 
-            # All conditions met
+            # All conditions met - both Phase 1 and Phase 2 passed!
             self.logger().info(
-                f"[DECISION] ✅ {coin} BUY APPROVED:\n"
-                f"   [TREND] 24h: {trend.trend_1440m:+.2f}% | 4h: {trend.trend_240m:+.2f}% | 1h: {trend.trend_60m:+.2f}%\n"
-                f"   [SCORE] Composite: {trend.trend_score:+.2f}%"
+                f"[DECISION] ✅ {coin} BUY APPROVED (All Phases Passed):\n"
+                f"   [PHASE 1] Validation: {validation.status.value} | Score: {validation.trend_score_pct:+.2f}% | Candles: {validation.candle_count}\n"
+                f"   [PHASE 2] Timeframes - 24h: {trend.trend_1440m:+.2f}% | 4h: {trend.trend_240m:+.2f}% | 1h: {trend.trend_60m:+.2f}%\n"
+                f"   [SCORE] Composite: {trend.trend_score:+.2f}% | Strength: {trend_strength * 100:+.2f}%"
             )
             return True
 

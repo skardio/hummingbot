@@ -1,0 +1,475 @@
+# ==============================================================================
+# HYBRID GRID CONFIG v3.4 - USD RESEARCH VERSION (OPTION C)
+# Market Regime Filter + Time-Based Rules + Performance Tracking
+# Created: 2025-12-13
+# Purpose: Parallel USD testing to compare with EUR bot performance
+# Same trading logic, different quote currency for liquidity comparison
+# ==============================================================================
+
+log_level: INFO       #WARNING
+connector_name: kraken
+quote_asset: USD  # USD RESEARCH CONFIG for parallel comparison
+paper_trading: false
+
+# ==============================================================================
+# DYNAMIC PAIR DISCOVERY
+# ==============================================================================
+
+use_dynamic_pair_discovery: true
+max_coins_to_monitor: 40
+min_24h_volume_usd: 50000          # USD equivalent volume threshold
+exclude_expensive_coins: false
+
+blacklist:
+  - USDT-USD
+  - USDT-USD
+  - MON-USD
+  - CCD-USD
+  - FARTCOIN-USD
+  - GIGA-USD
+  - XPL-USD
+  - NIGHT-USD
+  - AB-USD
+  - XT-USD
+  - USDC-USD
+  - USDE-USD
+  - EURC-USD
+  - TRX-USD
+  - PAXG-USD
+  - SPX-USD
+  - FET-USD        # tijdelijk uitzetten als gewenst
+  - CH-USD         # Fix: Invalid pair on Kraken
+  - SAPIEN-USD
+  - USELESS-USD
+  - PUMP-USD
+  - SEI-USD
+  - PENGU-USD
+  - WIF-USD
+  - VIRTUAL-USD
+  - WLFI-USD
+  - BAT-USD
+  - SHIB-USD
+  - TON-USD
+  - IMX-USD
+  - CRV-USD
+
+# REMOVED: manual_trading_pairs - now fully dynamic like EUR
+# Dynamic discovery will pick all pairs that meet volume thresholds
+
+max_simultaneous_coins: 1          # Eén coin tegelijk → rustiger risico
+
+# ==============================================================================
+# WARMUP TREND OVERRIDE – PRO PULLBACK MODE
+# ==============================================================================
+
+warmup_override_enabled: true
+warmup_4h_strong_min: 0.5          # 4H moet duidelijk bullish zijn
+warmup_1h_min_if_4h_strong: -0.3   # 1H mag licht rood zijn (pullback), geen free fall
+
+# ==============================================================================
+# FEATURE 1.1: MARKET REGIME FILTER - BTC Trend Following (v3.3)
+# ==============================================================================
+
+market_regime:
+  enabled: true
+  btc_symbol: "BTC-USD"
+
+  # BTC trend thresholds (blokkeer entries als BTC trends te zwak zijn)
+  btc_trend_1h_min_pct: -2.0         # BTC mag max -2% in 1h
+  btc_trend_4h_min_pct: 0.0          # BTC 4h moet minimaal flat zijn
+  btc_trend_24h_min_pct: -5.0        # BTC 24h mag -5% (normale correctie)
+
+  # BTC dump detection (pauzeert trading bij crashes)
+  dump_threshold_pct: -5.0           # BTC -5% in 1h = dump detected
+  dump_pause_minutes: 60             # Wacht 1h na dump
+
+  # Altcoin market breadth (hoeveel % coins is bullish?)
+  altcoin_breadth_min_pct: 30.0      # Min 30% altcoins moet bullish zijn
+  altcoin_breadth_sample_pairs:      # Sample coins om te checken
+    - ETH-USD
+    - SOL-USD
+    - BNB-USD
+    - AVAX-USD
+    - LINK-USD
+
+  # Recovery detection (hervat trading na herstel)
+  recovery_threshold_pct: 2.0        # BTC +2% = recovery signal
+
+# ==============================================================================
+# FEATURE 1.2: TIME-BASED TRADING RULES (v3.3) – HARDENED
+# ==============================================================================
+
+time_based_rules:
+  enabled: false                                    # Tijdelijk uit voor tests
+
+  # 🌙 Low liquidity hours (UTC) – Azië-focus
+  low_liquidity_hours: [0, 1, 2]                   # 00:00-03:00 UTC (echt dun)
+  low_liquidity_action: "monitor_only"              # Block entries during low liquidity
+
+  # 📈 High liquidity window (UTC) – US/EU overlap
+  high_liquidity_hours: [13, 14, 15, 16, 17, 18]   # 13:00-19:00 UTC (dicht orderboek)
+  high_liquidity_bonus_pct: 10.0                    # +10% position size bonus
+
+  # 🔐 NEW: Size multiplier cap (prevents stacking bonuses)
+  max_total_size_multiplier: 1.2                    # Max 1.2x base size (even with all bonuses)
+
+  # 🌅 Weekend behavior (dun orderboek, fake moves)
+  weekend_trading_enabled: true                     # Handel op weekends, maar risico omlaag
+  weekend_risk_multiplier: 0.5                      # 50% position size on Sat/Sun
+
+  # 🔁 NEW: Conflict resolution (explicit priority)
+  low_liquidity_overrides_weekend: true             # Nachtelijke lage liquidity blokkeert weekend bonus
+
+  # 📅 Holidays (lage liquidity, spreads breder)
+  holidays: ["2025-12-25", "2026-01-01"]            # Kerst + Nieuwjaar
+  holiday_action: "reduce_size"                     # Reduce size op feestdagen
+  holiday_risk_multiplier: 0.5                      # 50% position size on holidays
+
+# ==============================================================================
+# FEATURE 1.2b: LIQUIDITY-AWARE SMART SIZING (NEW - v3.4)
+# ==============================================================================
+# Intelligent position sizing based on market microstructure
+# Prevents oversizing when multiple bonuses stack
+# Ensures EUR-canonical risk limits are never exceeded
+# ==============================================================================
+
+liquidity_aware_sizing:
+  enabled: true                                     # NEW FEATURE - enabled by default
+
+  # Core principle: apply sizing rules in this order (to avoid stacking)
+  sizing_priority: ["low_liquidity", "holiday", "weekend", "time_bonus", "regime_bonus", "volatility_bonus"]
+
+  # Size calculation rules (applied sequentially, capped at max_total_size_multiplier)
+  base_size_calculation: "capital_pct_daily"        # 2% of daily risk budget
+
+  # Cumulative multiplier safety checks
+  cumulative_check_enabled: true
+  cumulative_log_level: "WARNING"                   # Warn if near cap
+
+  # Time-based component (separate from low_liquidity blocking)
+  time_bonus_scalar:
+    high_liquidity: 1.10                            # +10% during 13:00-19:00 UTC
+    normal_hours: 1.00                              # Baseline
+    low_liquidity: 0.70                             # 30% reduction during [0-2] UTC
+
+  # Market regime bonus (from BTC trend following)
+  regime_bonus_scalar:
+    strong_bull: 1.15                               # +15% if BTC trend strong
+    neutral: 1.00                                   # Baseline if mixed
+    weak_bear: 0.60                                 # 40% reduction if BTC weak
+
+  # Volatility-based sizing (from ATR analysis)
+  volatility_bonus_scalar:
+    high_vol: 0.85                                  # Reduce 15% in high volatility
+    normal_vol: 1.00                                # Baseline
+    low_vol: 1.10                                   # +10% in calm markets
+
+  # Final cap: prevents all bonuses from stacking beyond limit
+  max_cumulative_multiplier: 1.20                   # Absolute cap = 1.2x
+
+  # Logging
+  log_sizing_calc: true                             # Log each sizing decision
+  log_format: "JSON"                                # Machine-readable for audit trail
+
+  # Example: size = base * min(time_bonus × regime_bonus × vol_bonus, 1.2)
+  # This prevents 1.10 × 1.15 × 1.10 = 1.39x (OVERKILL!)
+  # Instead: min(1.39, 1.2) = 1.2x (SAFE!)
+
+# ==============================================================================
+# FEATURE 1.3: PERFORMANCE TRACKING (v3.3)
+# ==============================================================================
+
+performance_tracking:
+  enabled: true
+
+  # Performance thresholds (waarschuwingen als hieronder)
+  min_win_rate_pct: 45.0             # Min 45% win rate
+  min_profit_factor: 1.2             # Min 1.2 profit factor
+  min_sharpe_ratio: 0.5              # Min 0.5 Sharpe ratio
+  max_drawdown_pct: 5.0              # Max 5% drawdown
+
+  # Analysis windows
+  lookback_trades: 20                # Laatste 20 trades analyseren
+  lookback_days: 7                   # Laatste 7 dagen analyseren
+
+  # Reporting
+  report_interval_hours: 4           # Report elke 4 uur
+  save_to_database: true             # Save metrics naar DB
+
+  # Per-symbol breakdown
+  track_per_symbol: true             # Track metrics per coin
+  min_trades_per_symbol: 3           # Min 3 trades voor betrouwbare stats
+
+# ==============================================================================
+# SMART ENTRY FILTER v2
+# ==============================================================================
+
+use_smart_entry_filter: true       # BELANGRIJK: AAN
+
+smart_entry_filter:
+  # RSI: koop niet in overbought, maar durf dips te pakken
+  rsi_buy_max: 65.0
+  rsi_extreme_low: 25.0            # iets minder extreem dan 25 → meer entries
+  rsi_block_min: 75.0              # OPTION B TEST: 75.0 (was 70.0) - less blocking
+
+  # VWAP / candles
+  vwap_max_deviation_pct: 3.0
+  min_wick_ratio: 0.05             # VERLAAGD: 0.25 → 0.05 (accepteer body-dominant candles)
+
+  # Volatiliteit / ATR – geschikt voor grids
+  max_atr_pct_for_grid: 6.0
+  min_atr_pct_for_grid: 0.2        # 0.1 → 0.2, ultrastille markt vermijden
+
+  # Short-term spikes
+  max_5m_spike_pct: 2.5
+  max_down_accel_pct: -1.2         # iets strenger: te harde dump = geen nieuwe buys
+  max_up_accel_pct: 1.8            # pomp → niet er middenin springen
+
+  # 24h trend bounds (geen extreme parabolische coins)
+  max_trend_24h_pct: 10.0
+  min_trend_24h_pct: -10.0         # -8 → -10: allow normale correcties
+
+  # Slippage Protection (Phase 2 - NEW)
+  max_entry_spread_pct: 0.5        # Reject entry if bid-ask spread > 0.5%
+  slippage_check_enabled: true     # Enable spread validation
+
+  # Order Book Depth Protection (Phase 2 - NEW)
+  min_depth_multiplier: 3.0        # Require 3x order size on each side
+  depth_check_enabled: true        # Enable depth validation
+
+# ==============================================================================
+# COIN PROFILES (per-coin overrides)
+# ==============================================================================
+
+coin_profiles:
+
+  FET-USD:
+    rsi_extreme_low: 20.0
+    rsi_block_min: 76.0
+    min_wick_ratio: 0.35
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 4.5
+    max_trend_24h_pct: 20.0
+
+  SUI-USD:
+    min_wick_ratio: 0.40
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 3.0
+    rsi_extreme_low: 18.0
+    rsi_block_min: 75.0
+    max_trend_24h_pct: 18.0
+
+  TAO-USD:
+    rsi_extreme_low: 20.0
+    rsi_block_min: 73.0
+    max_trend_24h_pct: 16.0
+
+  PEPE-USD:
+    rsi_extreme_low: 18.0
+    rsi_block_min: 80.0
+    min_wick_ratio: 0.50
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 4.0
+    max_trend_24h_pct: 25.0
+
+  AVAX-USD:
+    min_wick_ratio: 0.35
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 4.0
+    rsi_extreme_low: 22.0
+    rsi_block_min: 74.0
+
+  LINK-USD:
+    min_wick_ratio: 0.30
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 2.5
+    rsi_extreme_low: 23.0
+    rsi_block_min: 72.0
+
+  DOT-USD:
+    min_wick_ratio: 0.25
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 2.5
+    rsi_block_min: 72.0
+
+  NEAR-USD:
+    min_wick_ratio: 0.35
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 3.5
+    rsi_block_min: 74.0
+
+  ATOM-USD:
+    min_wick_ratio: 0.20
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 3.0
+    rsi_block_min: 71.0
+
+  FTM-USD:
+    min_wick_ratio: 0.30
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 4.0
+    rsi_block_min: 75.0
+
+  SOL-USD:
+    min_wick_ratio: 0.45
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 2.0
+    max_5m_spike_pct: 1.8
+    rsi_block_min: 71.0
+
+  ADA-USD:
+    min_wick_ratio: 0.20
+    max_atr_pct_for_grid: 4
+    vwap_max_deviation_pct: 3.0
+    rsi_block_min: 72.0
+
+  XRP-USD:
+    min_wick_ratio: 0.25
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 2.5
+    rsi_block_min: 71.0
+
+  POL-USD:
+    min_wick_ratio: 0.30
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 2.5
+    rsi_block_min: 70.0
+
+  LTC-USD:
+    min_wick_ratio: 0.25
+    max_atr_pct_for_grid: 4
+    vwap_max_deviation_pct: 2.0
+    rsi_block_min: 70.0
+
+  BCH-USD:
+    min_wick_ratio: 0.40
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 2.0
+    rsi_block_min: 70.0
+
+  PUMP-USD:
+    min_wick_ratio: 0.60
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 5.0
+    rsi_extreme_low: 17.0
+    rsi_block_min: 82.0
+
+  DYDX-USD:
+    min_wick_ratio: 0.35
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 3.5
+    rsi_extreme_low: 22.0
+    rsi_block_min: 76.0
+
+  XDC-USD:
+    min_wick_ratio: 0.25
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 3.0
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+
+# ==============================================================================
+# GRID CONFIGURATION (Hybrid Grid Engine)
+# ==============================================================================
+
+grid_range_pct_down: 1.5
+grid_range_pct_up: 10.0           # 8 → 10: iets meer ruimte voor swings
+
+num_grids: 7                      # 5 → 7: smoother fills
+
+use_dynamic_grid_sizer: true
+
+dynamic_grid_sizer:
+  min_grids: 4                    # 3 → 4
+  max_grids: 7                    # Keep at 7 for safety (€80/7 = €11.43/grid)
+  low_vol_atr_pct: 0.7
+  mid_vol_atr_pct: 2.0
+  high_vol_atr_pct: 4.0
+
+use_atr_grid_ranges: true
+atr_multiplier_down: 1.5
+atr_multiplier_up: 2.0
+
+use_asymmetric_grids: true
+smart_refill_threshold_pct: 3.0
+
+# ==============================================================================
+# TREND ENGINE (voor coin selectie)
+# ==============================================================================
+
+use_multi_timeframe: true
+trend_lookback_short_minutes: 60
+trend_lookback_mid_minutes: 240
+trend_lookback_long_minutes: 1440
+
+switch_threshold_percent: 3.0
+exit_short_threshold: -1.5
+exit_mid_threshold: -1.2
+
+trend_min_entry_strength: 0.010    # OPTION B TEST: 1.0% (was 1.5%) - lower threshold for testing
+
+# ==============================================================================
+# COIN ROTATION & MONITORING
+# ==============================================================================
+
+coin_rotation_threshold: 180
+price_update_interval: 30
+
+# MAX MONITORING TIME: Als geen coin voldoet, roteer na X seconden
+max_coin_monitoring_seconds: 300   # 5 minuten max per coin voordat volgende geprobeerd wordt
+session_blacklist_duration_seconds: 7200  # 2 uur blacklist, dan weer proberen
+
+# ==============================================================================
+# CAPITAL & RISK MANAGEMENT (USD RESEARCH CONFIG)
+# ==============================================================================
+
+total_amount_quote: 85             # ~€80 * 1.08 = $86 → rounded to $85
+min_order_amount_quote: 11         # ~€10 * 1.08 = $10.80 → $11
+
+risk_reference_balance_quote: 110  # ~€100 * 1.08 = $108 → $110
+risk_max_balance_per_trade_pct: 80
+risk_max_total_open_risk_pct: 85
+
+max_exposure_per_coin_pct: 25
+max_total_exposure_pct: 60
+
+stop_loss_pct: 0.05                # 5% globale SL per positie
+take_profit_pct: 0.02              # 2% globale TP
+
+min_grid_profit_pct: 2.0           # Verhoogd: 1.5 → 2.0 voor fee overhead ($0.04/trade)
+
+emergency_exit_pct: -1.5
+hard_stop_pct: -2.5
+
+# ==============================================================================
+# DRAWDOWN / KILL SWITCH (USD EQUIVALENT)
+# ==============================================================================
+
+max_daily_loss_pct: 3.0
+max_weekly_loss_pct: 8.0
+max_monthly_loss_pct: 12.0
+max_daily_loss_usd: 32.0           # ~€30 * 1.08 = $32.40 → $32
+
+# ==============================================================================
+# TELEGRAM ALERTS (v2.0)
+# ==============================================================================
+
+telegram:
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+
+# ==============================================================================
+# ORDER MANAGEMENT
+# ==============================================================================
+
+max_open_orders: 5
+order_frequency: 3
+max_entry_spread_pct: 0.5
+
+min_switch_interval_seconds: 1800   # 3600 → 1800: sneller roteren indien nodig
+min_hold_time_seconds: 1200        # 1800 → 1200: niet té lang vastzitten
+
+min_startup_wait_seconds: 90       # 60 → 90: net iets meer data voor eerste entry
+
+smart_switch_k: 2.0
+switch_cost_multiplier: 2.5

@@ -65,7 +65,8 @@ class MarketRegimeIntegration:
         # Get BTC trend data
         btc_data = self.btc_fetcher.get_btc_trend_data()
         if not btc_data:
-            logger.warning("⚠️ BTC data not available for regime check")
+            # BTC warmup - detailed logging happens in btc_data_fetcher.py
+            # Don't spam logs here, just return None silently
             return None
 
         # Get altcoin trends for breadth calculation

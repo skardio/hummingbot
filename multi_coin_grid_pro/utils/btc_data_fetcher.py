@@ -47,19 +47,28 @@ class BTCDataFetcher:
         if not btc_trend:
             # Only log warning once during startup
             if not self._data_unavailable_logged:
-                logger.info(f"⏳ Waiting for BTC trend data ({self.btc_symbol})... (collecting history)")
+                logger.warning(f"⏳ BTC trend warmup: Waiting for {self.btc_symbol} data initialization...")
                 self._data_unavailable_logged = True
             return None
 
         if not btc_trend.has_sufficient_data:
+            current_points = len(getattr(btc_trend, 'price_history', []))
+            required_points = 20  # Minimum required by has_sufficient_data property
             if not self._data_unavailable_logged:
-                logger.info(f"⏳ Collecting BTC history... ({len(getattr(btc_trend, 'price_history', []))} points)")
+                logger.warning(
+                    f"⏳ BTC trend warmup: {current_points}/{required_points} candles "
+                    f"({self.btc_symbol}) - waiting for sufficient data..."
+                )
                 self._data_unavailable_logged = True
             return None
 
         # Data available now - reset flag for next time it's unavailable
         if self._data_unavailable_logged:
-            logger.info(f"✅ BTC trend data now available ({self.btc_symbol})")
+            current_points = len(getattr(btc_trend, 'price_history', []))
+            logger.info(
+                f"✅ BTC trend warmup complete: {current_points} candles collected ({self.btc_symbol}) "
+                f"- Market regime filter now active!"
+            )
             self._data_unavailable_logged = False
 
         # Extract trend data
@@ -90,8 +99,14 @@ class BTCDataFetcher:
         # Verify data is available
         btc_trend = self.trend_calculator.trends.get(self.btc_symbol)
         if btc_trend and btc_trend.has_sufficient_data:
-            logger.info(f"✅ BTC data loaded: {len(btc_trend.price_history)} data points")
+            current_points = len(btc_trend.price_history)
+            logger.info(
+                f"✅ BTC data loaded: {current_points}/20 candles (sufficient for market regime filter)"
+            )
             return True
         else:
-            logger.error(f"❌ Failed to load BTC data")
+            current_points = len(getattr(btc_trend, 'price_history', [])) if btc_trend else 0
+            logger.warning(
+                f"⏳ BTC trend warmup: {current_points}/20 candles - still collecting data for {self.btc_symbol}"
+            )
             return False

@@ -108,7 +108,7 @@ pip install -r multi_coin_grid_pro/requirements.txt
 
 ```bash
 # Set environment
-export BOT_ENV=dev  # or test, prod
+export BOT_ENV=prod  # or test, prod
 
 # Override config via environment variables (optional)
 export BOT_RISK_STOP_LOSS_PCT=0.08
