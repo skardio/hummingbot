@@ -955,7 +955,7 @@ class MultiCoinGridController(ControllerBase):
             use_dynamic = getattr(self.config, 'use_dynamic_pair_discovery', True)
             manual_pairs = getattr(self.config, 'manual_trading_pairs', None)
 
-            if not use_dynamic and manual_pairs and len(manual_pairs) > 0:
+            if not use_dynamic and manual_pairs and isinstance(manual_pairs, list) and len(manual_pairs) > 0:
                 # Use manual trading pairs - validate and set them
                 self.logger().info("=" * 80)
                 self.logger().info("🎯 Using MANUAL trading pairs from config (use_dynamic_pair_discovery=False)...")
@@ -1163,35 +1163,48 @@ class MultiCoinGridController(ControllerBase):
                     self.pair_spreads = pair_spreads
 
                     # Sort pairs by 24h EUR volume (descending)
-                    sorted_pairs = sorted(pair_volumes.items(), key=lambda x: x[1], reverse=True)
+                    # If no volume data available (empty pair_volumes), use all pairs sorted alphabetically
+                    if pair_volumes:
+                        sorted_pairs = sorted(pair_volumes.items(), key=lambda x: x[1], reverse=True)
+                    else:
+                        # No volume data - use all pairs with volume=0
+                        sorted_pairs = [(pair, 0) for pair in eur_pairs]
+                        self.logger().warning("⚠️  No volume data available - using all pairs")
 
                     # Take top N by volume that meet minimum threshold and not blacklisted
-                    min_volume = self.config.min_24h_volume_eur
+                    min_volume = self.config.min_24h_volume_eur if pair_volumes else 0  # Skip volume filter if no data
                     blacklist = set(getattr(self.config, 'blacklist', []) or [])
                     filtered_pairs = [(pair, vol) for pair, vol in sorted_pairs if vol >= min_volume and pair not in blacklist]
 
                     # Spread check: only include coins with spread < 0.5% using ticker bid/ask
                     spread_limit = 0.005  # 0.5%
                     spread_checked_pairs = []
-                    for pair, vol in filtered_pairs[:100]:
-                        # Find kraken_symbol for this pair
-                        kraken_symbol = None
-                        for k, v in trading_pair_map.items():
-                            if v == pair:
-                                kraken_symbol = k
-                                break
-                        if kraken_symbol and kraken_symbol in ticker_data:
-                            ticker = ticker_data[kraken_symbol]
-                            # Kraken ticker: 'a' = ask [price, whole lot volume, lot volume], 'b' = bid [...]
-                            try:
-                                best_ask = float(ticker["a"][0]) if "a" in ticker and ticker["a"] else None
-                                best_bid = float(ticker["b"][0]) if "b" in ticker and ticker["b"] else None
-                                if best_bid and best_ask and best_ask > 0:
-                                    spread = (best_ask - best_bid) / best_ask
-                                    if spread <= spread_limit:
-                                        spread_checked_pairs.append((pair, vol, spread))
-                            except Exception as e:
-                                self.logger().warning(f"Spread calc failed for {pair}: {e}")
+
+                    # If no ticker data available, skip spread check and use all filtered pairs
+                    if not ticker_data:
+                        self.logger().info("📊 No ticker data - using all pairs without spread check")
+                        for pair, vol in filtered_pairs[:100]:
+                            spread_checked_pairs.append((pair, vol, 0.0))  # spread=0 indicates no data
+                    else:
+                        for pair, vol in filtered_pairs[:100]:
+                            # Find kraken_symbol for this pair
+                            kraken_symbol = None
+                            for k, v in trading_pair_map.items():
+                                if v == pair:
+                                    kraken_symbol = k
+                                    break
+                            if kraken_symbol and kraken_symbol in ticker_data:
+                                ticker = ticker_data[kraken_symbol]
+                                # Kraken ticker: 'a' = ask [price, whole lot volume, lot volume], 'b' = bid [...]
+                                try:
+                                    best_ask = float(ticker["a"][0]) if "a" in ticker and ticker["a"] else None
+                                    best_bid = float(ticker["b"][0]) if "b" in ticker and ticker["b"] else None
+                                    if best_bid and best_ask and best_ask > 0:
+                                        spread = (best_ask - best_bid) / best_ask
+                                        if spread <= spread_limit:
+                                            spread_checked_pairs.append((pair, vol, spread))
+                                except Exception as e:
+                                    self.logger().warning(f"Spread calc failed for {pair}: {e}")
 
                     # Sort by volume again, just in case
                     spread_checked_pairs.sort(key=lambda x: x[1], reverse=True)  # Sort by volume descending
@@ -1541,7 +1554,7 @@ class MultiCoinGridController(ControllerBase):
         # ===== FEATURE 1.1: MARKET REGIME FILTER CHECK =====
         if self.market_regime_filter:
             regime_state = self.market_regime_filter.get_market_regime_state()
-            if regime_state and not regime_state.favorable:
+            if regime_state and not regime_state.is_favorable:
                 self.logger().info(f"🌍 Feature 1.1: {regime_state.reason}")
                 # Block new entries but allow exits
                 if not (self.active_coin and self.active_executor_id):
@@ -3772,8 +3785,8 @@ class MultiCoinGridController(ControllerBase):
             Volatility-adjusted position size
         """
         try:
-            # Get ATR and current price
-            trend = self.trends.get(symbol)
+            # Get ATR and current price using TrendCalculator
+            trend = self.trend_calculator.get_trend(symbol)
             atr = self._calculate_atr(symbol, trend)
             current_price = self.connector.get_mid_price(symbol)
 

@@ -42,8 +42,8 @@ class CoinSelector:
         self.logger = logger or logging.getLogger(__name__)
 
         # Configuration
-        self.blacklist: Set[str] = set(cfg.get("blacklist", []))
-        self.core_universe: List[str] = cfg.get("core_universe", [])
+        self.blacklist: Set[str] = set(cfg.get("blacklist") or [])
+        self.core_universe: List[str] = cfg.get("core_universe") or []
         self.min_volume_eur = cfg.get("min_24h_volume_eur", 300000)
         self.max_spread_pct = cfg.get("max_entry_spread_pct", 0.5)
         self.quote_asset = cfg.get("quote_asset", "EUR")
@@ -78,7 +78,10 @@ class CoinSelector:
         """
         if not self.use_dynamic:
             self.logger.info("Using manual trading pairs from config")
-            manual_pairs = self.cfg.get("manual_trading_pairs", self.core_universe)
+            manual_pairs = self.cfg.get("manual_trading_pairs") or self.core_universe
+            if not manual_pairs:
+                self.logger.warning("⚠️  No manual trading pairs configured, returning empty list")
+                return []
             return [p for p in manual_pairs if p not in self.blacklist]
 
         self.logger.info(f"🔍 Filtering {len(available_pairs)} pairs...")

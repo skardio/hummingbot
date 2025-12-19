@@ -206,6 +206,11 @@ class DrawdownTracker:
             self.initialize_balances(current_balance)
             return True, "OK"
 
+        # Guard against division by zero
+        if self.daily_start_balance == Decimal("0"):
+            logger.warning("Daily start balance is 0, skipping drawdown check")
+            return True, "OK (no balance yet)"
+
         # Check daily drawdown (percentage) - uses PORTFOLIO VALUE
         daily_pnl_pct = (portfolio_value - self.daily_start_balance) / self.daily_start_balance * Decimal("100")
         if daily_pnl_pct < -self.max_daily_loss_pct:
@@ -217,7 +222,7 @@ class DrawdownTracker:
             return False, reason
 
         # Check weekly drawdown (percentage)
-        if self.weekly_start_balance:
+        if self.weekly_start_balance and self.weekly_start_balance != Decimal("0"):
             weekly_pnl_pct = (portfolio_value - self.weekly_start_balance) / self.weekly_start_balance * Decimal("100")
             if weekly_pnl_pct < -self.max_weekly_loss_pct:
                 reason = (
@@ -228,7 +233,7 @@ class DrawdownTracker:
                 return False, reason
 
         # Check monthly drawdown (percentage)
-        if self.monthly_start_balance:
+        if self.monthly_start_balance and self.monthly_start_balance != Decimal("0"):
             monthly_pnl_pct = (portfolio_value - self.monthly_start_balance) / self.monthly_start_balance * Decimal("100")
             if monthly_pnl_pct < -self.max_monthly_loss_pct:
                 reason = (

@@ -330,10 +330,25 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
         """
         lines = []
 
+        # Debug: check if controllers exist
+        self.logger().info(f"🔍 format_status called: {len(self.controllers)} controllers")
+
         # Get controller status
-        for controller in self.controllers.values():
-            if isinstance(controller, MultiCoinGridController):
-                lines.extend(controller.to_format_status())
+        for controller_id, controller in self.controllers.items():
+            self.logger().info(f"🔍 Checking controller {controller_id}: type={type(controller).__name__}")
+            # Check if controller has to_format_status method instead of isinstance check
+            # (isinstance fails with symlinked imports in different module paths)
+            if hasattr(controller, 'to_format_status') and callable(getattr(controller, 'to_format_status')):
+                try:
+                    status_lines = controller.to_format_status()
+                    self.logger().info(f"✅ Got {len(status_lines)} status lines from controller")
+                    lines.extend(status_lines)
+                except Exception as e:
+                    self.logger().error(f"❌ Error getting status from controller: {e}")
+                    import traceback
+                    self.logger().error(traceback.format_exc())
+            else:
+                self.logger().warning(f"⚠️  Controller {controller_id} has no to_format_status method")
 
         # Add executor status
         if self.executor_orchestrator:

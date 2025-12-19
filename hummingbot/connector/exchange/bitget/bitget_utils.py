@@ -24,8 +24,10 @@ def is_exchange_information_valid(exchange_info: Dict[str, Any]) -> bool:
     :return: True if the trading pair is enabled, False otherwise
     """
     symbol = bool(exchange_info.get("symbol"))
+    # Only include pairs with "online" status to avoid delisted/offline pairs
+    status = exchange_info.get("status", "").lower() == "online"
 
-    return symbol
+    return symbol and status
 
 
 class BitgetConfigMap(BaseConnectorConfigMap):

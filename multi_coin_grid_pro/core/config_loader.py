@@ -66,19 +66,23 @@ def parse_market_regime_config(config: Dict[str, Any]) -> MarketRegimeConfig:
     regime_config_dict = config.get("market_regime", {})
 
     # Create config with values from YAML (or defaults)
+    # Support both btc_symbol (new) and btc_reference_pair (legacy)
+    btc_pair = regime_config_dict.get("btc_symbol") or regime_config_dict.get("btc_reference_pair", "BTC-EUR")
+
     regime_config = MarketRegimeConfig(
-        btc_reference_pair=regime_config_dict.get("btc_reference_pair", "BTC-EUR"),
+        btc_reference_pair=btc_pair,
         btc_trend_weight=regime_config_dict.get("btc_trend_weight", 0.6),
-        btc_min_trend_1h=regime_config_dict.get("btc_min_trend_1h", -2.0),
-        btc_min_trend_4h=regime_config_dict.get("btc_min_trend_4h", 0.0),
-        btc_min_trend_24h=regime_config_dict.get("btc_min_trend_24h", -5.0),
+        # Support both old and new naming conventions
+        btc_min_trend_1h=regime_config_dict.get("btc_trend_1h_min_pct") or regime_config_dict.get("btc_min_trend_1h", -2.0),
+        btc_min_trend_4h=regime_config_dict.get("btc_trend_4h_min_pct") or regime_config_dict.get("btc_min_trend_4h", 0.0),
+        btc_min_trend_24h=regime_config_dict.get("btc_trend_24h_min_pct") or regime_config_dict.get("btc_min_trend_24h", -5.0),
         altcoin_breadth_enabled=regime_config_dict.get("altcoin_breadth_enabled", True),
         altcoin_breadth_min=regime_config_dict.get("altcoin_breadth_min", 0.30),
         altcoin_breadth_pairs=regime_config_dict.get("altcoin_breadth_pairs", None),
         altcoin_breadth_threshold_1h=regime_config_dict.get("altcoin_breadth_threshold_1h", 0.5),
         pause_on_btc_dump=regime_config_dict.get("pause_on_btc_dump", True),
-        btc_dump_threshold_1h=regime_config_dict.get("btc_dump_threshold_1h", -5.0),
-        btc_dump_cooldown_minutes=regime_config_dict.get("btc_dump_cooldown_minutes", 60),
+        btc_dump_threshold_1h=regime_config_dict.get("dump_threshold_pct") or regime_config_dict.get("btc_dump_threshold_1h", -5.0),
+        btc_dump_cooldown_minutes=regime_config_dict.get("dump_pause_minutes") or regime_config_dict.get("btc_dump_cooldown_minutes", 60),
         resume_on_recovery=regime_config_dict.get("resume_on_recovery", True),
         recovery_threshold_pct=regime_config_dict.get("recovery_threshold_pct", 2.0),
     )

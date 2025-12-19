@@ -204,10 +204,17 @@ class TrendCalculator:
         try:
             import ccxt
 
-            logger.info(f"📥 Loading historical data for {len(symbols)} coins from Kraken...")
+            # Detect exchange from connector
+            exchange_name = self.connector.name.replace("_paper_trade", "")
+            logger.info(f"📥 Loading historical data for {len(symbols)} coins from {exchange_name}...")
 
-            # Create ccxt Kraken instance
-            kraken = ccxt.kraken()
+            # Create ccxt exchange instance dynamically
+            exchange_class = getattr(ccxt, exchange_name, None)
+            if not exchange_class:
+                logger.error(f"❌ Unsupported exchange for historical data: {exchange_name}")
+                return
+
+            exchange = exchange_class()
 
             # Calculate timeframe: get 30 hours of data (buffer for 5m candles)
             since_ms = int((time.time() - (30 * 3600)) * 1000)  # 30 hours ago
@@ -220,13 +227,13 @@ class TrendCalculator:
                     # Convert XRP-EUR to XRP/EUR format for ccxt
                     ccxt_symbol = symbol.replace("-", "/")
 
-                    # Fetch 5-minute OHLCV data (Kraken limit = 720 candles max!)
-                    # Kraken supported timeframes: 1m, 5m, 15m, 30m, 1h, 4h, 1d (NO 2m!)
+                    # Fetch 5-minute OHLCV data (limit = 720 candles max!)
+                    # Supported timeframes: 1m, 5m, 15m, 30m, 1h, 4h, 1d
                     # 720 candles × 5 min = 3600 min = 60 hours ✅ (covers 24h + buffer)
                     logger.debug(f"  Fetching {ccxt_symbol} OHLCV data...")
-                    ohlcv = kraken.fetch_ohlcv(
+                    ohlcv = exchange.fetch_ohlcv(
                         symbol=ccxt_symbol,
-                        timeframe='5m',  # 5-minute candles (Kraken supported, gives 60h coverage)
+                        timeframe='5m',  # 5-minute candles (gives 60h coverage)
                         since=since_ms,
                         limit=720  # Max 720 candles = 60 hours of data
                     )
