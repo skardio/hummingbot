@@ -66,9 +66,15 @@ class ScriptStrategyBase(StrategyPyBase):
         :param timestamp: current tick timestamp
         """
         if not self.ready_to_trade:
-            self.ready_to_trade = all(ex.ready for ex in self.connectors.values())
+            # FIXED: Use trading_pair_symbol_map_ready() instead of .ready
+            # .ready waits for ALL order books, which can take 1-2 minutes
+            # trading_pair_symbol_map_ready() only waits for essential data (1-2 seconds)
+            self.ready_to_trade = all(
+                ex.trading_pair_symbol_map_ready() if hasattr(ex, 'trading_pair_symbol_map_ready') else ex.ready
+                for ex in self.connectors.values()
+            )
             if not self.ready_to_trade:
-                for con in [c for c in self.connectors.values() if not c.ready]:
+                for con in [c for c in self.connectors.values() if not (c.trading_pair_symbol_map_ready() if hasattr(c, 'trading_pair_symbol_map_ready') else c.ready)]:
                     # Debug: log detailed ready status
                     status_parts = []
                     if hasattr(con, '_trading_required'):

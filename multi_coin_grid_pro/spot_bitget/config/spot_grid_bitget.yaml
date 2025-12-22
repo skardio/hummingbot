@@ -7,6 +7,93 @@
 controller_name: spot_grid_bitget
 log_level: INFO
 
+# ==============================================================================
+# DEBUG & TRACING
+# ==============================================================================
+
+debug_trace_enabled: true          # 🔍 Enable decision trace logging
+debug_trace_format: compact        # compact | detailed | json
+debug_trace_log_accepted: false    # Only log rejections (reduces noise)
+debug_trace_log_rejected: true     # Always log rejections
+
+# ==============================================================================
+# ADAPTIVE REGIME DETECTION (Phase 1: Logging Only)
+# ==============================================================================
+
+adaptive_regime_detection:
+  enabled: true                    # Enable regime detection
+  logging_only: false              # PHASE 2: Apply adaptive filters based on regime
+
+  # Regime classification thresholds
+  bull_score_min: 5.0              # Score >= 5 → BULL
+  chop_score_min: -3.0             # Score in [-3, 5] → CHOP
+  bear_score_max: -3.0             # Score < -3 → BEAR
+  min_confidence: 0.65             # Minimum confidence to classify
+
+  # Hysteresis settings (prevent flip-flopping)
+  bull_min_duration_sec: 1800      # 30 min minimum in BULL
+  chop_min_duration_sec: 900       # 15 min minimum in CHOP
+  bear_min_duration_sec: 1800      # 30 min minimum in BEAR
+  hysteresis_buffer: 1.0           # Score buffer for regime exit
+
+  # Logging
+  log_regime_changes: true
+  log_filter_updates: true
+
+adaptive_filters:
+  # Baseline filters (conservative, used as fallback)
+  baseline:
+    rsi_buy_min: 25.0
+    rsi_buy_max: 70.0
+    rsi_extreme_min: 20.0
+    vwap_max_deviation_pct: 3.0
+    max_up_accel_pct: 1.2
+    max_down_accel_pct: -2.0
+    atr_min_pct: 0.15
+    atr_max_pct: 6.0
+    spike_5m_max_pct: 2.0
+    wick_ratio_min: 0.0
+    grid_spacing_mult: 1.0
+    max_active_grids: 1
+    entry_confidence_min: 0.70
+
+  # BULL regime: relaxed filters (NOT ACTIVE YET - logging_only mode)
+  BULL:
+    rsi_buy_max: 85.0
+    vwap_max_deviation_pct: 7.0
+    max_up_accel_pct: 3.0
+    max_down_accel_pct: -4.0
+    atr_min_pct: 0.10
+    spike_5m_max_pct: 3.5
+    grid_spacing_mult: 1.2
+    max_active_grids: 3
+    entry_confidence_min: 0.60
+
+  # CHOP regime: strict filters (= baseline)
+  CHOP:
+    rsi_buy_max: 70.0
+    vwap_max_deviation_pct: 3.0
+    max_up_accel_pct: 1.2
+    max_down_accel_pct: -2.0
+    atr_min_pct: 0.15
+    spike_5m_max_pct: 2.0
+    grid_spacing_mult: 0.8
+    max_active_grids: 1
+    entry_confidence_min: 0.75
+
+  # BEAR regime: ultra-strict or disabled
+  BEAR:
+    rsi_buy_max: 50.0
+    vwap_max_deviation_pct: 1.5
+    max_up_accel_pct: 0.5
+    max_down_accel_pct: -1.0
+    atr_min_pct: 0.20
+    spike_5m_max_pct: 1.0
+    grid_spacing_mult: 1.5
+    max_active_grids: 0          # Disabled
+    entry_confidence_min: 0.90
+    bear_allow_meanrev: false    # Set true to allow mean-reversion trades
+
 # === EXCHANGE CONFIGURATION ===
 paper_trading: false              # Set to true for testing
 connector_name: bitget            # Bitget SPOT connector
@@ -44,26 +131,29 @@ blacklist:
   - NFP-USDT
 
 manual_trading_pairs: []
-  # - BTC-USDT
-  # - ETH-USDT
-  # - SOL-USDT
-  # - BNB-USDT
-  # - AVAX-USDT
-  # - LINK-USDT
-  # - DOGE-USDT
-  # - ARB-USDT
-  # - OP-USDT
-  # - SUI-USDT
+  # 🔧 DYNAMIC MODE: Leave empty! Coins are discovered dynamically.
+  # The controller will handle order book initialization automatically.
 
 max_simultaneous_coins: 1         # Start with 1 coin
+
+# ==============================================================================
+# MULTI-TIMEFRAME BUY PROTECTION (PREVENT KAS-EUR DISASTER)
+# ==============================================================================
+
+use_multi_timeframe_buy: true      # ENABLE multi-timeframe checks voor entries
+mtf_1h_min_pct: -0.1               # 1h mag max -0.1% (kleine pullback OK)
+mtf_4h_min_pct: 0.3                # 4h moet ≥ +0.3% (momentum required)
+mtf_24h_min_pct: 0.5               # 24h moet ≥ +0.5% (uptrend required)
+mtf_declining_1h_max: -0.5         # Als 1h < -0.5% EN 4h < 0% → REJECT
+mtf_declining_4h_max: 0.0          # (prevents trading during crashes)
 
 # ==============================================================================
 # WARMUP TREND OVERRIDE – PRO PULLBACK MODE
 # ==============================================================================
 
 warmup_override_enabled: true
-warmup_4h_strong_min: 0.5         # 4H moet bullish zijn
-warmup_1h_min_if_4h_strong: -0.3  # 1H mag licht rood zijn (pullback)
+warmup_4h_strong_min: -0.5        # 🔧 FIX: 0.5→-0.5 (allow 4h pullback if 24h strong)
+warmup_1h_min_if_4h_strong: -2.0  # 🔧 FIX: -1.5→-2.0 (allow 1h dips in bullish coins)
 
 # ==============================================================================
 # FEATURE 1.1: MARKET REGIME FILTER - BTC Trend Following
@@ -195,25 +285,25 @@ use_smart_entry_filter: true
 
 smart_entry_filter:
   # RSI
-  rsi_buy_max: 65.0
+  rsi_buy_max: 72.0                # 🔧 FIX: 65→72 (bullish markets stay elevated)
   rsi_extreme_low: 25.0
-  rsi_block_min: 75.0
+  rsi_block_min: 80.0              # 🔧 FIX: 75→80 (less blocking in bull runs)
 
   # VWAP / candles
-  vwap_max_deviation_pct: 3.0
-  min_wick_ratio: 0.05
+  vwap_max_deviation_pct: 5.0      # 🔧 FIX: 3.0→5.0 (allow stronger moves)
+  min_wick_ratio: 0.0              # 🔧 FIX: 0.05→0.0 (body-dominant OK!)
 
   # Volatiliteit / ATR
   max_atr_pct_for_grid: 6.0
-  min_atr_pct_for_grid: 0.2
+  min_atr_pct_for_grid: 0.15       # 🔧 FIX: 0.2→0.15 (allow lower vol coins like CHESS)
 
   # Short-term spikes
   max_5m_spike_pct: 2.5
-  max_down_accel_pct: -1.2
+  max_down_accel_pct: -4.0          # 🔧 FIX: -1.2→-4.0 (allow healthy pullbacks in bull markets)
   max_up_accel_pct: 1.8
 
   # 24h trend bounds
-  max_trend_24h_pct: 10.0
+  max_trend_24h_pct: 15.0          # 🔧 FIX: 10.0→15.0 (allow stronger bull runs like CHZ +14%)
   min_trend_24h_pct: -10.0
 
   # Slippage Protection (single source of truth)
@@ -303,10 +393,10 @@ trend_min_entry_strength: 0.010   # 1.0% min trend strength
 # COIN ROTATION & MONITORING
 # ==============================================================================
 
-coin_rotation_threshold: 180
+coin_rotation_threshold: 120        # 🚀 FIX: 180→60 (2 min - faster rotation)
 price_update_interval: 30
 
-max_coin_monitoring_seconds: 300
+max_coin_monitoring_seconds: 120   # 🚀 FIX: 300→120 (2 min - faster timeout)
 session_blacklist_duration_seconds: 7200
 
 # ==============================================================================
@@ -328,16 +418,16 @@ take_profit_pct: 0.02             # 2% TP
 
 min_grid_profit_pct: 0.6          # 0.6% min profit (0.2% fees + 0.2% spread + 0.2% buffer)
 
-emergency_exit_pct: 0.015         # 1.5% emergency exit (positive percent, controller negates)
-hard_stop_pct: 0.025              # 2.5% hard stop (positive percent, controller negates)
+emergency_exit_pct: -3.0          # 🔧 FIX: 0.03→-3.0 (3% emergency - NEGATIVE percentage format!)
+hard_stop_pct: -5.0               # 🔧 FIX: 0.05→-5.0 (5% hard stop - NEGATIVE percentage format!)
 
 # ==============================================================================
 # DRAWDOWN / KILL SWITCH
 # ==============================================================================
 
-max_daily_loss_pct: 0.03
-max_weekly_loss_pct: 0.08
-max_monthly_loss_pct: 0.12
+max_daily_loss_pct: 5.0      # 🔧 FIX: 0.03→5.0 (was absurd - stopped at €0.05 loss!)
+max_weekly_loss_pct: 10.0    # 🔧 FIX: 0.08→10.0 (realistic for grid trading)
+max_monthly_loss_pct: 15.0   # 🔧 FIX: 0.12→15.0 (allows proper risk management)
 
 # =============================================================================
 # TELEGRAM ALERTS (v2.0)
@@ -355,9 +445,9 @@ max_open_orders: 14               # 2 × num_grids (7) for 2-sided grid
 order_frequency: 3
 # max_entry_spread_pct: removed (handled in smart_entry_filter)
 
-min_switch_interval_seconds: 1800
-min_hold_time_seconds: 1200
-min_startup_wait_seconds: 90
+min_switch_interval_seconds: 600    # 🚀 FIX: 1800→600 (10 min - faster switching)
+min_hold_time_seconds: 300         # 🚀 FIX: 1200→300 (5 min - faster exits!)
+min_startup_wait_seconds: 60       # 🚀 FIX: 90→60 (1 min startup delay)
 
 smart_switch_k: 2.0
 switch_cost_multiplier: 2.5

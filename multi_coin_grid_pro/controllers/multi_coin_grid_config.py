@@ -23,22 +23,6 @@ class MultiCoinGridConfig(ControllerConfigBase):
     This strategy monitors multiple coins and automatically switches to trade
     the coin with the best trend using grid trading.
     """
-
-    def load_controller_configs(self):
-        """
-        Override base method - we don't use separate controller config files.
-        Return self as single controller config.
-        """
-        return [self]
-
-
-class MultiCoinGridConfig(ControllerConfigBase):
-    """
-    Configuration for Multi-Coin Grid Trading Strategy
-
-    This strategy monitors multiple coins and automatically switches to trade
-    the coin with the best trend using grid trading.
-    """
     # Blacklist for coins to exclude (from YAML)
     blacklist: Optional[List[str]] = Field(
         default_factory=list,
@@ -822,6 +806,132 @@ class MultiCoinGridConfig(ControllerConfigBase):
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
+    )
+
+    # ==============================================================================
+    # DEBUG TRACE SYSTEM (Decision Transparency)
+    # ==============================================================================
+
+    debug_trace_enabled: bool = Field(
+        default=False,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable decision trace logging (debugging)? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Enable detailed logging of accept/reject decisions for trading pairs"
+    )
+
+    debug_trace_format: str = Field(
+        default="compact",
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Decision trace format (compact/detailed/json): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Output format for decision traces: compact (prod), detailed (debug), json (analysis)"
+    )
+
+    debug_trace_log_accepted: bool = Field(
+        default=False,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Log accepted pairs (can be verbose)? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Log decision traces for accepted trading pairs"
+    )
+
+    debug_trace_log_rejected: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Log rejected pairs? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Log decision traces for rejected trading pairs"
+    )
+
+    # ===== ADAPTIVE REGIME DETECTION (Phase 1: Logging Only) =====
+    adaptive_regime_detection: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable adaptive regime detection? (leave empty for disabled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False},
+        description="Adaptive regime detection config (BULL/CHOP/BEAR)"
+    )
+
+    adaptive_filters: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Adaptive filter config (leave empty for disabled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False},
+        description="Filter parameters per regime (BULL/CHOP/BEAR)"
+    )
+
+    # ===== MULTI-TIMEFRAME BUY PROTECTION =====
+    use_multi_timeframe_buy: bool = Field(
+        default=False,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable multi-timeframe buy protection? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Require positive momentum on multiple timeframes before entry"
+    )
+
+    mtf_1h_min_pct: float = Field(
+        default=-0.1,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum 1h trend % (default -0.1): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Minimum 1h trend required for entry (allows small pullbacks)"
+    )
+
+    mtf_4h_min_pct: float = Field(
+        default=0.3,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum 4h trend % (default 0.3): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Minimum 4h trend required for entry (momentum required)"
+    )
+
+    mtf_24h_min_pct: float = Field(
+        default=0.5,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum 24h trend % (default 0.5): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Minimum 24h trend required for entry (uptrend required)"
+    )
+
+    mtf_declining_1h_max: float = Field(
+        default=-0.5,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Max 1h decline for crash detection (default -0.5): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="If 1h < this AND 4h < 0%, reject entry (crash detection)"
+    )
+
+    mtf_declining_4h_max: float = Field(
+        default=0.0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Max 4h decline for crash detection (default 0.0): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="If 1h declining AND 4h < this, reject entry (prevents trading during crashes)"
     )
 
     @property

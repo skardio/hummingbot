@@ -394,7 +394,8 @@ class PerformanceTracker:
             wins = sum(1 for t in symbol_trades if t.outcome == TradeOutcome.WIN)
             losses = sum(1 for t in symbol_trades if t.outcome == TradeOutcome.LOSS)
             total = len(symbol_trades)
-            pnl = sum(t.realized_pnl_eur for t in symbol_trades)
+            # Fix: Convert Decimal to float to avoid type mismatch
+            pnl = sum(float(t.realized_pnl_eur) for t in symbol_trades)
 
             breakdown[symbol] = {
                 "total_trades": total,

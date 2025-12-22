@@ -23,6 +23,7 @@ from multi_coin_grid_pro.alerts.telegram_alerter import TelegramAlerter
 
 # Config parsers
 from multi_coin_grid_pro.core.config_loader import (
+    MarketRegimeConfig,
     parse_market_regime_config,
     parse_performance_config,
     parse_time_based_config,
@@ -45,11 +46,13 @@ from multi_coin_grid_pro.logic.coin_selector import CoinSelector
 from multi_coin_grid_pro.logic.grid_sizer import DynamicGridSizer as DynamicGridSizerV2
 
 # Hybrid Grid Bot v2.0 - New modular components
+from multi_coin_grid_pro.logic.liquidity_aware_sizer import LiquidityAwareSizing
 from multi_coin_grid_pro.logic.smart_entry import SmartEntryBaseConfig, SmartEntryFilter as SmartEntryFilterV2
 from multi_coin_grid_pro.risk.pnl_tracker import RealtimePnLTracker
 from multi_coin_grid_pro.risk.risk_guard import RiskGuardV2
 from multi_coin_grid_pro.utils.candle_indicators import CandleIndicatorsCalculator
 from multi_coin_grid_pro.utils.coin_discovery import CoinDiscovery
+from multi_coin_grid_pro.utils.decision_trace import PairDecisionTrace
 from multi_coin_grid_pro.utils.dynamic_grid_sizer import DynamicGridSizer
 from multi_coin_grid_pro.utils.trend_calculator import TrendCalculator, TrendStatus
 
@@ -346,6 +349,33 @@ class MultiCoinGridController(ControllerBase):
             except Exception as e:
                 self.logger().warning(f"⚠️  Feature 1.3 disabled: {e}")
 
+        # ===== DECISION TRACE SYSTEM =====
+        self.debug_trace_enabled = getattr(config, 'debug_trace_enabled', False)
+        self.debug_trace_format = getattr(config, 'debug_trace_format', 'compact')
+        self.debug_trace_log_accepted = getattr(config, 'debug_trace_log_accepted', False)
+        self.debug_trace_log_rejected = getattr(config, 'debug_trace_log_rejected', True)
+        if self.debug_trace_enabled:
+            self.logger().info(f"🔍 Decision Trace: ENABLED (format={self.debug_trace_format})")
+
+        # ===== ADAPTIVE REGIME DETECTION (Phase 1: Logging Only) =====
+        self.regime_detector = None
+        self.filter_resolver = None
+        regime_detection_cfg = getattr(config, 'adaptive_regime_detection', None)
+        if regime_detection_cfg and regime_detection_cfg.get('enabled', False):
+            try:
+                from multi_coin_grid_pro.utils.adaptive_filter_resolver import AdaptiveFilterResolver
+                from multi_coin_grid_pro.utils.regime_detector import RegimeDetector
+
+                self.regime_detector = RegimeDetector(regime_detection_cfg, self.logger())
+                adaptive_filters_cfg = getattr(config, 'adaptive_filters', {})
+                self.filter_resolver = AdaptiveFilterResolver(adaptive_filters_cfg, self.logger())
+
+                logging_only = regime_detection_cfg.get('logging_only', True)
+                mode_str = "LOGGING ONLY" if logging_only else "ACTIVE"
+                self.logger().info(f"🌡️  Adaptive Regime Detection: ENABLED ({mode_str})")
+            except Exception as e:
+                self.logger().warning(f"⚠️  Adaptive Regime Detection failed to initialize: {e}")
+
         self.logger().info("=" * 80)
         self.logger().info("🚀 MULTI-COIN GRID CONTROLLER INITIALIZED (v3.3)")
         self.logger().info("=" * 80)
@@ -376,6 +406,37 @@ class MultiCoinGridController(ControllerBase):
         if self.performance_tracker:
             self.logger().info("📊 Feature 1.3: Performance Tracker ENABLED")
         self.logger().info("=" * 80)
+
+    def _log_decision_trace(self, trace: PairDecisionTrace):
+        """
+        Log decision trace based on config settings.
+
+        Args:
+            trace: PairDecisionTrace instance with all filter checks
+        """
+        if not trace.enabled:
+            return
+
+        # Only log if configured
+        should_log = (
+            (trace.accepted and self.debug_trace_log_accepted) or
+            (not trace.accepted and self.debug_trace_log_rejected)
+        )
+
+        if not should_log:
+            return
+
+        # Choose format based on config
+        try:
+            if self.debug_trace_format == "detailed":
+                self.logger().info(trace.to_detailed_log())
+            elif self.debug_trace_format == "json":
+                self.logger().info(f"DECISION_TRACE: {trace.to_json()}")
+            else:  # compact (default)
+                self.logger().info(trace.to_compact_log())
+        except Exception as e:
+            # Trace errors should never break trading
+            self.logger().error(f"Error logging decision trace: {e}")
 
     def _calculate_portfolio_value(self) -> Decimal:
         """
@@ -886,6 +947,37 @@ class MultiCoinGridController(ControllerBase):
             self.logger().critical("🚨 RiskGuard v2.0: Kill switch activated - trading disabled")
             return  # Stop all trading activity
 
+        # ===== ADAPTIVE REGIME DETECTION (Phase 1: Logging Only) =====
+        if hasattr(self, 'regime_detector') and self.regime_detector:
+            try:
+                # Detect regime periodically (once per control cycle)
+                regime_state = await self._detect_current_regime()
+                if regime_state:
+                    self.logger().info(
+                        f"🌡️  REGIME: {regime_state.regime} "
+                        f"(score: {regime_state.score:.1f}, "
+                        f"confidence: {regime_state.confidence:.2f}, "
+                        f"duration: {regime_state.duration_minutes}m)\n"
+                        f"   {regime_state.reason}"
+                    )
+
+                    # Resolve filters based on regime
+                    if hasattr(self, 'filter_resolver') and self.filter_resolver:
+                        active_filters = self.filter_resolver.resolve_filters(regime_state)
+                        self.logger().info(self.filter_resolver.explain_active_filters())
+
+                        # Apply filters if not in logging-only mode
+                        logging_only = True
+                        if hasattr(self.config, 'adaptive_regime_detection'):
+                            logging_only = getattr(self.config.adaptive_regime_detection, 'logging_only', True)
+
+                        if not logging_only:
+                            # Phase 2: Apply adaptive filters to SmartEntry
+                            self._apply_adaptive_filters(active_filters)
+                            self.logger().info("✅ Adaptive filters applied to SmartEntry")
+            except Exception as e:
+                self.logger().error(f"❌ Regime detection error: {e}")
+
         # ===== FEATURE 1.3: PERIODIC PERFORMANCE REPORTING =====
         if self.performance_tracker:
             current_time = time.time()
@@ -1097,9 +1189,11 @@ class MultiCoinGridController(ControllerBase):
                 self.logger().info("💫 First run - discovering coins automatically...")
                 self.logger().info("DEBUG: INSIDE if not self.monitored_coins block!")
                 try:
-                    # Wait for connector to be ready (trading pair map loaded)
-                    if not self.connector.ready:
-                        self.logger().warning(f"⏳ Connector {self.config.connector_name} not ready yet, waiting...")
+                    # 🔧 FIX: Don't wait for ALL order books to be ready (connector.ready)
+                    # Only check if trading_pair_symbol_map is available (essential for coin discovery)
+                    # This fixes the "kraken is not ready" spam (was waiting for 40 order books)
+                    if not self.connector.trading_pair_symbol_map_ready():
+                        self.logger().warning(f"⏳ Connector {self.config.connector_name} symbol map not ready yet, waiting...")
                         return
 
                     self.logger().info("=" * 80)
@@ -1688,9 +1782,58 @@ class MultiCoinGridController(ControllerBase):
                 )
                 best_coin = None
 
-            # Phase 2.5: Apply multi-timeframe buy conditions if enabled
+            # SMART SELECTION: Check SmartEntry BEFORE finalizing coin selection
+            # This prevents selecting coins that will be rejected anyway
             rejection_reason = None
-            if best_coin and use_multi_timeframe:
+            if best_coin and not self._check_smart_entry_filter(best_coin):
+                self.logger().warning(
+                    f"⚠️  {best_coin} rejected by SmartEntry - checking fallbacks..."
+                )
+
+                # Try next best coins from top 10
+                fallback_found = False
+            elif best_coin and not self._check_multi_timeframe_buy(best_coin):
+                self.logger().warning(
+                    f"⏱️  {best_coin} rejected by multi-timeframe protection - checking fallbacks..."
+                )
+
+                # Try next best coins from top 10
+                fallback_found = False
+                if hasattr(self.trend_calculator, '_debug_info'):
+                    top_10 = self.trend_calculator._debug_info.get('top_10', [])
+                    for i, (fallback_coin, fallback_trend) in enumerate(top_10[1:], start=2):
+                        if fallback_coin in excluded_coins or fallback_coin in config_blacklist:
+                            self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (blacklist)")
+                            continue
+
+                        # Check SmartEntry for fallback
+                        if self._check_smart_entry_filter(fallback_coin):
+                            # Multi-timeframe buy protection check
+                            if not self._check_multi_timeframe_buy(fallback_coin):
+                                self.logger().warning(f"⏱️  {fallback_coin}: Blocked by multi-timeframe protection")
+                                continue
+
+                            # Also check multi-timeframe if enabled
+                            if not use_multi_timeframe or self._check_multi_timeframe_buy_conditions(fallback_coin):
+                                self.logger().info(
+                                    f"✅ Fallback: {fallback_coin} (#{i}) passes ALL filters! "
+                                    f"Trend: {fallback_trend:+.2f}%"
+                                )
+                                best_coin = fallback_coin
+                                fallback_found = True
+                                break
+                            else:
+                                self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (multi-timeframe)")
+                        else:
+                            self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (SmartEntry)")
+
+                if not fallback_found:
+                    self.logger().warning("⚠️  No valid coin found in top 10 after SmartEntry filtering")
+                    best_coin = None
+                    rejection_reason = "All top coins rejected by SmartEntry filters"
+
+            # Phase 2.5: Apply multi-timeframe buy conditions if enabled (only if not already checked above)
+            if best_coin and use_multi_timeframe and rejection_reason is None:
                 if not self._check_multi_timeframe_buy_conditions(best_coin):
                     # Get rejection reason from trend data
                     trend_obj = self.trend_calculator.get_trend(best_coin)
@@ -1715,44 +1858,9 @@ class MultiCoinGridController(ControllerBase):
                         rejection_reason = "Multi-timeframe data niet beschikbaar"
 
                     self.logger().warning(
-                        f"❌ {best_coin} does not meet multi-timeframe buy conditions - rejecting"
+                        f"❌ {best_coin} does not meet multi-timeframe buy conditions - will retry next cycle"
                     )
-
-                    # BUGFIX: Try next best coins as fallback (top 10)
-                    self.logger().info("🔄 Checking fallback coins (top 10)...")
-                    if hasattr(self.trend_calculator, '_debug_info'):
-                        top_10 = self.trend_calculator._debug_info.get('top_10', [])
-                        for i, (fallback_coin, fallback_trend) in enumerate(top_10[1:], start=2):  # Skip #1 (already rejected)
-                            if fallback_coin in excluded_coins:
-                                self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (in exclusion list)")
-                                continue
-
-                            if self._check_multi_timeframe_buy_conditions(fallback_coin):
-                                # Also check SmartEntry for fallback (new!)
-                                if self._check_smart_entry_filter(fallback_coin):
-                                    self.logger().info(
-                                        f"✅ Fallback: {fallback_coin} (#{i}) meets ALL criteria! "
-                                        f"Trend: {fallback_trend:+.2f}%"
-                                    )
-                                    best_coin = fallback_coin
-                                    rejection_reason = None  # Clear rejection reason
-                                    break
-                                else:
-                                    self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (SmartEntry filters)")
-                            else:
-                                fallback_trend_obj = self.trend_calculator.get_trend(fallback_coin)
-                                if fallback_trend_obj:
-                                    trend_1h = getattr(fallback_trend_obj, 'trend_60m', 0.0)
-                                    self.logger().debug(
-                                        f"   {i}. {fallback_coin}: REJECTED (1h: {trend_1h:+.2f}%)"
-                                    )
-
-                        if best_coin is None:
-                            self.logger().warning(
-                                "⚠️  No fallback coin found in top 10 - waiting for better opportunities"
-                            )
-                    else:
-                        best_coin = None
+                    best_coin = None
 
             # Log debug info from trend_calculator
             if hasattr(self.trend_calculator, '_debug_info'):
@@ -1849,7 +1957,7 @@ class MultiCoinGridController(ControllerBase):
 
                 # NEW: Check if we've been monitoring this coin too long without execution
                 current_time = self.market_data_provider.time()
-                max_monitoring_seconds = getattr(self.config, 'max_coin_monitoring_seconds', 300)  # Default 5 min
+                max_monitoring_seconds = getattr(self.config, 'max_coin_monitoring_seconds', 60)  # Default 60s (was 300s)
 
                 if best_coin == self.monitoring_coin and self.monitoring_start_time > 0:
                     # Same coin being monitored - check timeout
@@ -2338,6 +2446,11 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().debug(f"      ❌ SmartEntry filter rejected")
                     continue
 
+                # 2b. Multi-timeframe buy protection
+                if not self._check_multi_timeframe_buy(candidate_coin):
+                    self.logger().debug(f"      ❌ Multi-timeframe protection rejected")
+                    continue
+
                 # 3. Check if should create new grid
                 if not self._should_create_new_grid(candidate_coin):
                     self.logger().debug(f"      ❌ _should_create_new_grid returned False")
@@ -2732,10 +2845,15 @@ class MultiCoinGridController(ControllerBase):
                                 else:
                                     exit_reason = "manual" if realised_pnl >= 0 else "stop_loss"
 
+                                # Convert timestamps to datetime objects
+                                from datetime import datetime
+                                entry_dt = datetime.fromtimestamp(entry_time_ts)
+                                exit_dt = datetime.fromtimestamp(now)
+
                                 self.performance_tracker.record_trade(
                                     symbol=trading_pair,
-                                    entry_time=entry_time_ts,
-                                    exit_time=now,
+                                    entry_time=entry_dt,
+                                    exit_time=exit_dt,
                                     entry_price=float(entry_price),
                                     exit_price=float(exit_price),
                                     position_size_eur=float(position_size),
@@ -2989,6 +3107,10 @@ class MultiCoinGridController(ControllerBase):
 
             # 🧠 SmartEntry Filter Check (if enabled)
             if not self._check_smart_entry_filter(best_coin):
+                return False
+
+            # ⏱️  Multi-timeframe buy protection check
+            if not self._check_multi_timeframe_buy(best_coin):
                 return False
 
             requested_notional = Decimal(str(self.config.total_amount_quote))
@@ -3593,8 +3715,15 @@ class MultiCoinGridController(ControllerBase):
                 change_5m_pct=indicators_legacy.change_5m_pct,
             )
 
-            # Check with v2.0 filter
-            allowed, reason = self.smart_entry_v2.allows_entry(symbol, indicators_v2)
+            # Check with v2.0 filter (with trace)
+            allowed, reason, trace = self.smart_entry_v2.allows_entry(
+                symbol, indicators_v2,
+                exchange=self.config.connector_name,
+                trace_enabled=self.debug_trace_enabled
+            )
+
+            # Log decision trace
+            self._log_decision_trace(trace)
 
             if allowed:
                 self.logger().info(reason)
@@ -3628,8 +3757,15 @@ class MultiCoinGridController(ControllerBase):
             if not indicators:
                 return False
 
-            # Check entry permission
-            allowed, reason = self.smart_entry_filter.allows_entry(symbol, indicators)
+            # Check entry permission (with trace)
+            allowed, reason, trace = self.smart_entry_filter.allows_entry(
+                symbol, indicators,
+                exchange=self.config.connector_name,
+                trace_enabled=self.debug_trace_enabled
+            )
+
+            # Log decision trace
+            self._log_decision_trace(trace)
 
             if allowed:
                 self.logger().info(f"🧠 {reason}")
@@ -3691,6 +3827,82 @@ class MultiCoinGridController(ControllerBase):
         except Exception as e:
             self.logger().error(f"Error calculating SmartEntry indicators for {symbol}: {e}")
             return None
+
+    def _check_multi_timeframe_buy(self, symbol: str) -> bool:
+        """
+        Check if coin passes multi-timeframe buy protection.
+
+        Requires positive momentum on multiple timeframes to prevent buying
+        crashing or illiquid coins (prevents KAS-EUR disaster scenarios).
+
+        Returns:
+            True if entry allowed (or feature disabled), False if blocked
+        """
+        # Check if feature is enabled
+        if not getattr(self.config, 'use_multi_timeframe_buy', False):
+            return True  # Feature disabled - allow entry
+
+        # Get trend data with indicators
+        trend = self.trend_calculator.get_trend(symbol)
+        if not trend or not trend.candles or len(trend.candles) < 288:  # Need 24h of 5m candles
+            self.logger().warning(f"⏱️  {symbol}: Insufficient candle data for multi-timeframe check")
+            return False  # No data - block entry for safety
+
+        try:
+            # Calculate indicators to get trend percentages
+            indicators = self._calculate_smart_entry_indicators(symbol, trend)
+            if not indicators:
+                return False
+
+            trend_1h = indicators.trend_1h_pct
+            trend_4h = indicators.trend_4h_pct
+            trend_24h = indicators.trend_24h_pct
+
+            # Get thresholds from config
+            mtf_1h_min = self.config.mtf_1h_min_pct
+            mtf_4h_min = self.config.mtf_4h_min_pct
+            mtf_24h_min = self.config.mtf_24h_min_pct
+            mtf_declining_1h_max = self.config.mtf_declining_1h_max
+            mtf_declining_4h_max = self.config.mtf_declining_4h_max
+
+            # Check 1: Minimum trend requirements
+            if trend_1h < mtf_1h_min:
+                self.logger().warning(
+                    f"⏱️  {symbol}: 1h trend too weak ({trend_1h:.2f}% < {mtf_1h_min:.2f}%)"
+                )
+                return False
+
+            if trend_4h < mtf_4h_min:
+                self.logger().warning(
+                    f"⏱️  {symbol}: 4h momentum missing ({trend_4h:.2f}% < {mtf_4h_min:.2f}%)"
+                )
+                return False
+
+            if trend_24h < mtf_24h_min:
+                self.logger().warning(
+                    f"⏱️  {symbol}: 24h uptrend required ({trend_24h:.2f}% < {mtf_24h_min:.2f}%)"
+                )
+                return False
+
+            # Check 2: Declining trend protection (crash detection)
+            if trend_1h < mtf_declining_1h_max and trend_4h < mtf_declining_4h_max:
+                self.logger().warning(
+                    f"⏱️  {symbol}: Declining trend detected (crash protection) "
+                    f"[1h: {trend_1h:.2f}% < {mtf_declining_1h_max:.2f}%, "
+                    f"4h: {trend_4h:.2f}% < {mtf_declining_4h_max:.2f}%]"
+                )
+                return False
+
+            # All checks passed
+            self.logger().info(
+                f"⏱️  {symbol}: Multi-timeframe check PASSED "
+                f"[1h: {trend_1h:.2f}%, 4h: {trend_4h:.2f}%, 24h: {trend_24h:.2f}%]"
+            )
+            return True
+
+        except Exception as e:
+            self.logger().error(f"⏱️  Error in multi-timeframe check for {symbol}: {e}")
+            return False  # Error - block entry for safety
 
     # Phase 4.2: Volatility-Based Grid Count
     def _calculate_volatility_based_grid_count(self, symbol: str, trend) -> int:
@@ -3794,8 +4006,8 @@ class MultiCoinGridController(ControllerBase):
                 self.logger().warning(f"⚠️  No ATR/price for {symbol}, using base size €{base_size}")
                 return base_size
 
-            # Calculate volatility percentage
-            volatility_pct = float(atr / current_price * 100)
+            # Calculate volatility percentage (convert both to Decimal for safety)
+            volatility_pct = float(Decimal(str(atr)) / Decimal(str(current_price)) * 100)
 
             # Determine size multiplier based on volatility
             if volatility_pct > 5.0:  # Very high volatility
@@ -3855,47 +4067,77 @@ class MultiCoinGridController(ControllerBase):
                 return False
 
             # Check 1: Is the symbol in connector's trading_pairs?
-            connector_pairs = getattr(self.connector, '_trading_pairs', None)
-            if connector_pairs is None:
-                # Try alternative attribute names
-                connector_pairs = getattr(self.connector, 'trading_pairs', [])
+            # DYNAMIC DISCOVERY: Skip this check if dynamic discovery is enabled
+            use_dynamic = getattr(self.config, 'use_dynamic_pair_discovery', False)
+            if not use_dynamic:
+                connector_pairs = getattr(self.connector, '_trading_pairs', None)
+                if connector_pairs is None:
+                    # Try alternative attribute names
+                    connector_pairs = getattr(self.connector, 'trading_pairs', [])
 
-            if symbol not in connector_pairs:
-                self.logger().warning(
-                    f"⚠️ {symbol} NOT in connector's trading_pairs - "
-                    f"cannot trade (have: {len(connector_pairs)} pairs)"
-                )
-                # Auto-blacklist this coin to prevent repeated failures
-                self.auto_blacklisted_coins.add(symbol)
-                self.logger().info(f"🚫 Auto-blacklisted {symbol} (not in connector's trading pairs)")
-                return False
+                if symbol not in connector_pairs:
+                    self.logger().warning(
+                        f"⚠️ {symbol} NOT in connector's trading_pairs - "
+                        f"cannot trade (have: {len(connector_pairs)} pairs)"
+                    )
+                    # Auto-blacklist this coin to prevent repeated failures
+                    self.auto_blacklisted_coins.add(symbol)
+                    self.logger().info(f"🚫 Auto-blacklisted {symbol} (not in connector's trading pairs)")
+                    return False
+            else:
+                self.logger().debug(f"✅ {symbol} - Dynamic discovery enabled, skipping trading_pairs check")
 
             # Check 2: Does an order book exist?
+            # DYNAMIC DISCOVERY: Fail-open if order book doesn't exist yet
             try:
                 order_book = self.connector.get_order_book(symbol)
                 if order_book is None:
-                    self.logger().warning(f"⚠️ No order book for {symbol} - cannot trade")
-                    return False
+                    if use_dynamic:
+                        self.logger().debug(f"⚠️ No order book for {symbol} - will be initialized on trade")
+                        return True  # Dynamic discovery: Allow trading, order book will be created
+                    else:
+                        self.logger().warning(f"⚠️ No order book for {symbol} - cannot trade")
+                        return False
             except (ValueError, KeyError) as e:
-                self.logger().warning(f"⚠️ Cannot get order book for {symbol}: {e}")
-                return False
+                if use_dynamic:
+                    self.logger().debug(f"⚠️ Order book for {symbol} not yet initialized: {e}")
+                    return True  # Dynamic discovery: Allow trading
+                else:
+                    self.logger().warning(f"⚠️ Cannot get order book for {symbol}: {e}")
+                    return False
 
             # Check 3: Does the order book have data?
+            # DYNAMIC DISCOVERY: Skip if order book is not yet populated
             try:
-                if hasattr(order_book, 'snapshot') and order_book.snapshot:
+                if order_book and hasattr(order_book, 'snapshot') and order_book.snapshot:
                     bids, asks = order_book.snapshot
                     if bids is None or asks is None:
-                        self.logger().warning(f"⚠️ {symbol} order book has no bid/ask data")
-                        return False
+                        if use_dynamic:
+                            self.logger().debug(f"⚠️ {symbol} order book has no bid/ask data yet")
+                            return True  # Dynamic discovery: Allow, will populate later
+                        else:
+                            self.logger().warning(f"⚠️ {symbol} order book has no bid/ask data")
+                            return False
                     # Check if empty
                     bids_empty = (hasattr(bids, '__len__') and len(bids) == 0) or (hasattr(bids, 'empty') and bids.empty)
                     asks_empty = (hasattr(asks, '__len__') and len(asks) == 0) or (hasattr(asks, 'empty') and asks.empty)
                     if bids_empty or asks_empty:
-                        self.logger().warning(f"⚠️ {symbol} order book is empty")
-                        return False
+                        if use_dynamic:
+                            self.logger().debug(f"⚠️ {symbol} order book is empty - will populate on trade")
+                            return True  # Dynamic discovery: Allow
+                        else:
+                            self.logger().warning(f"⚠️ {symbol} order book is empty")
+                            return False
+                elif use_dynamic:
+                    self.logger().debug(f"⚠️ {symbol} order book not yet populated (dynamic discovery)")
+                    return True  # Dynamic discovery: Allow
             except Exception as e:
-                self.logger().warning(f"⚠️ Error checking order book data for {symbol}: {e}")
-                return False
+                if use_dynamic:
+                    self.logger().debug(f"⚠️ Error checking order book data for {symbol}: {e} - allowing for dynamic discovery")
+                    return True  # Dynamic discovery: Fail-open
+                else:
+                    self.logger().warning(f"⚠️ Error checking order book data for {symbol}: {e}")
+                    return False
 
             self.logger().debug(f"✅ {symbol} is tradeable")
             return True
@@ -3919,6 +4161,12 @@ class MultiCoinGridController(ControllerBase):
             True if spread is acceptable, False if too wide
         """
         try:
+            # DYNAMIC DISCOVERY: Skip spread check if order books don't exist yet
+            use_dynamic = getattr(self.config, 'use_dynamic_pair_discovery', False)
+            if use_dynamic:
+                self.logger().debug(f"✅ {symbol} - Dynamic discovery: skipping spread check (order books not pre-loaded)")
+                return True  # Allow trading, spread will be checked when placing actual orders
+
             # First check if the pair is actually tradeable
             if not self._is_trading_pair_tradeable(symbol):
                 return False
@@ -4026,8 +4274,13 @@ class MultiCoinGridController(ControllerBase):
 
             required_depth_eur = order_size_eur * min_depth_multiplier
 
-            # Get order book
-            order_book = self.connector.get_order_book(symbol)
+            # Get order book - DYNAMIC DISCOVERY: Fail-open if order book doesn't exist yet
+            try:
+                order_book = self.connector.get_order_book(symbol)
+            except (ValueError, KeyError) as e:
+                self.logger().debug(f"[DEPTH] {symbol} - Order book not yet initialized (dynamic discovery): {e}")
+                return True  # Fail-open: Allow trading without depth check for new pairs
+
             if not order_book or not order_book.snapshot:
                 self.logger().warning(f"[DEPTH] {symbol} - No order book data available")
                 return True  # Allow entry if no data (fail-open)
@@ -4445,6 +4698,7 @@ class MultiCoinGridController(ControllerBase):
             activation_bounds=Decimal("0.05"),  # 5% activation bounds
             keep_position=False,  # Don't keep position on stop
             leverage=leverage,  # Use derivative_leverage from config (for futures) or 1 (for spot)
+            deduct_base_fees=True,  # Deduct fees paid in base asset from sell amount (e.g., PEAQ fees for PEAQ-USDT)
         )
 
         # Ensure controller_id is set (fallback to controller_name if id is None)
@@ -5046,7 +5300,7 @@ class MultiCoinGridController(ControllerBase):
                     f"[EXIT] 🚨 {coin} EMERGENCY EXIT TRIGGERED:\n"
                     f"   Entry Price: €{entry_price:.4f}\n"
                     f"   Current Price: €{current_price:.4f}\n"
-                    f"   Price Change: {price_change_pct:.2f}% (threshold: {emergency_exit_pct}%)\n"
+                    f"   Price Change: {price_change_pct:.2f}% (threshold: {emergency_exit_pct * 100:.2f}%)\n"
                     f"   [REASON] Price dropped {abs(price_change_pct):.2f}% below entry - emergency exit to prevent further losses"
                 )
                 return "emergency_exit"
@@ -5060,7 +5314,7 @@ class MultiCoinGridController(ControllerBase):
                     f"[EXIT] 🛑 {coin} HARD STOP TRIGGERED:\n"
                     f"   Entry Price: €{entry_price:.4f}\n"
                     f"   Current Price: €{current_price:.4f}\n"
-                    f"   Price Change: {price_change_pct:.2f}% (threshold: {hard_stop_pct}%)\n"
+                    f"   Price Change: {price_change_pct:.2f}% (threshold: {hard_stop_pct * 100:.2f}%)\n"
                     f"   [REASON] Price dropped {abs(price_change_pct):.2f}% below entry - hard stop fail-safe activated"
                 )
                 return "hard_stop_exit"
@@ -5164,6 +5418,132 @@ class MultiCoinGridController(ControllerBase):
             self.logger().error(traceback.format_exc())
             # On error, don't exit (fail closed)
             return None
+
+    async def _detect_current_regime(self):
+        """
+        Detect current market regime using multi-timeframe analysis.
+
+        Returns:
+            RegimeState or None if detection failed
+        """
+        if not self.regime_detector:
+            return None
+
+        try:
+            # Get a sample coin for market-wide regime detection
+            # Use the most liquid / most stable coin from monitored_coins
+            sample_pairs = self.monitored_coins[:5] if self.monitored_coins else []
+            if not sample_pairs:
+                return None
+
+            # Try to find a major coin (BTC, ETH, etc.) for market-wide signal
+            major_coins = ['BTC', 'ETH', 'SOL', 'UNI', 'LINK']
+            sample_pair = None
+            for coin in major_coins:
+                test_pair = f"{coin}-{self.config.quote_asset}"
+                if test_pair in sample_pairs:
+                    sample_pair = test_pair
+                    break
+
+            # Fallback: use first available pair
+            if not sample_pair:
+                sample_pair = sample_pairs[0]
+
+            # Get trend data from trend_calculator
+            if sample_pair not in self.trend_calculator.trends:
+                return None
+
+            trend_obj = self.trend_calculator.trends[sample_pair]
+
+            # Map CoinTrend attributes to dict expected by RegimeDetector
+            trend_data = {
+                'trend_1h': trend_obj.trend_60m,      # 1h = 60min
+                'trend_4h': trend_obj.trend_240m,     # 4h = 240min
+                'trend_24h': trend_obj.trend_1440m,   # 24h = 1440min
+                'consensus': trend_obj.consensus_trend_pct
+            }
+
+            # Get candle data if available
+            candles_1h = []
+            candles_4h = []
+            if hasattr(trend_obj, 'candles') and len(trend_obj.candles) > 0:
+                # Convert CandleData to dict format for RegimeDetector
+                candles_1h = [
+                    {
+                        'timestamp': c.timestamp,
+                        'open': float(c.open),
+                        'high': float(c.high),
+                        'low': float(c.low),
+                        'close': float(c.close),
+                        'volume': float(c.volume)
+                    }
+                    for c in trend_obj.candles
+                ]
+                # For 4h, use the same candles (RegimeDetector will aggregate as needed)
+                candles_4h = candles_1h
+
+            # Calculate metrics
+            metrics = self.regime_detector.calculate_metrics(
+                trend_data=trend_data,
+                candles_1h=candles_1h,
+                candles_4h=candles_4h
+            )
+
+            # Detect regime
+            regime_state = self.regime_detector.detect_regime(metrics)
+
+            return regime_state
+
+        except Exception as e:
+            self.logger().error(f"❌ Regime detection failed: {e}")
+            import traceback
+            self.logger().error(traceback.format_exc())
+            return None
+
+    def _apply_adaptive_filters(self, filters: Dict[str, any]) -> None:
+        """
+        Apply resolved adaptive filters to SmartEntry filter.
+
+        Args:
+            filters: Dict with resolved filter parameters (rsi_max, vwap_max_deviation, etc.)
+        """
+        try:
+            if not self.smart_entry_v2:
+                self.logger().warning("⚠️  SmartEntry v2 not initialized - cannot apply adaptive filters")
+                return
+
+            # Map resolved filters to SmartEntry config format
+            # The filters dict has keys like: rsi_max, vwap_max_deviation, up_accel_limit, etc.
+            filter_mapping = {
+                'rsi_max': 'rsi_buy_max',
+                'rsi_min': 'rsi_extreme_low',
+                'vwap_max_deviation': 'vwap_max_deviation_pct',
+                'up_accel_limit': 'max_up_accel_pct',
+                'down_accel_limit': 'max_down_accel_pct',
+                'atr_min': 'min_atr_pct_for_grid',
+                'atr_max': 'max_atr_pct_for_grid',
+                'spike_5m_max': 'max_5m_spike_pct',
+                'wick_ratio_min': 'min_wick_ratio',
+                # Note: grid_spacing_mult and max_active_grids are NOT SmartEntry params
+                # They belong to DynamicGridSizer - don't map them here
+            }
+
+            # Update base config with resolved filters
+            updated_fields = []
+            for filter_key, config_key in filter_mapping.items():
+                if filter_key in filters:
+                    value = filters[filter_key]
+                    if hasattr(self.smart_entry_v2.base_cfg, config_key):
+                        setattr(self.smart_entry_v2.base_cfg, config_key, value)
+                        updated_fields.append(f"{config_key}={value}")
+
+            if updated_fields:
+                self.logger().debug(f"📝 Updated SmartEntry config: {', '.join(updated_fields)}")
+
+        except Exception as e:
+            self.logger().error(f"❌ Failed to apply adaptive filters: {e}")
+            import traceback
+            self.logger().error(traceback.format_exc())
 
     # Phase 2.5: Multi-Timeframe Exit Conditions (DEPRECATED - use should_exit_position instead)
     def _check_multi_timeframe_exit_conditions(self, coin: str) -> bool:

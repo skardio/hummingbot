@@ -16,13 +16,14 @@ import logging
 # Import from parent package
 import sys
 from dataclasses import dataclass
-from decimal import Decimal
+# from decimal import Decimal  # noqa: F401
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.models import CandleIndicators
+from utils.decision_trace import PairDecisionTrace, trace_percentage_check, trace_range_check
 
 
 @dataclass
@@ -132,71 +133,106 @@ class SmartEntryFilter:
         self,
         symbol: str,
         ind: CandleIndicators,
-    ) -> Tuple[bool, str]:
+        exchange: str = "unknown",
+        trace_enabled: bool = False,
+    ) -> Tuple[bool, str, Optional[PairDecisionTrace]]:
         """
         Check if entry is allowed for this symbol based on indicators
 
         Args:
             symbol: Trading pair (e.g., "ATOM-EUR")
             ind: CandleIndicators with all technical data
+            exchange: Exchange name (for trace)
+            trace_enabled: Enable decision tracing
 
         Returns:
-            Tuple of (allowed: bool, reason: str)
+            Tuple of (allowed: bool, reason: str, trace: Optional[PairDecisionTrace])
             - If allowed=True, reason explains why entry is OK
             - If allowed=False, reason explains which filter blocked it
+            - trace: Optional decision trace (None if trace_enabled=False)
         """
+        # Create trace (zero overhead if disabled)
+        trace = PairDecisionTrace(
+            trading_pair=symbol,
+            exchange=exchange,
+            enabled=trace_enabled,
+            strategy="spot_grid"
+        )
+
         cfg = self._get_effective_cfg(symbol)
 
         # 1) RSI Regime Checks
         # Use rsi_block_min (max overbought threshold) - allows coin profiles to override
-        if ind.rsi_14 >= cfg["rsi_block_min"]:
-            return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} >= {cfg['rsi_block_min']} (overbought)"
+        rsi_block_ok = trace_range_check(trace, "rsi_block", ind.rsi_14, 0, cfg["rsi_block_min"])
+        if not rsi_block_ok:
+            trace.finalize(accepted=False, rejected_by="rsi_block", final_reason="overbought")
+            return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} >= {cfg['rsi_block_min']} (overbought)", trace
 
-        # NOTE: Removed duplicate rsi_buy_max check - only rsi_block_min matters for entry
-        # The profile system allows trending coins to have higher rsi_block_min than default 70
-
-        if ind.rsi_14 < cfg["rsi_extreme_low"]:
-            return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} < {cfg['rsi_extreme_low']} (falling knife risk)"
+        rsi_extreme_ok = trace_percentage_check(trace, "rsi_extreme", ind.rsi_14, cfg["rsi_extreme_low"], ">=")
+        if not rsi_extreme_ok:
+            trace.finalize(accepted=False, rejected_by="rsi_extreme", final_reason="falling knife risk")
+            return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} < {cfg['rsi_extreme_low']} (falling knife risk)", trace
 
         # 2) VWAP Mean Reversion Check
         vwap_dev = 0.0
         if ind.vwap > 0:
             vwap_dev = float((ind.price - ind.vwap) / ind.vwap * 100)
-        if abs(vwap_dev) > cfg["vwap_max_deviation_pct"]:
-            return False, f"🧠 {symbol}: NO BUY – VWAP dev {vwap_dev:+.2f}% > ±{cfg['vwap_max_deviation_pct']}%"
+        vwap_ok = trace_percentage_check(trace, "vwap_deviation", abs(vwap_dev), cfg["vwap_max_deviation_pct"], "<=")
+        if not vwap_ok:
+            trace.finalize(accepted=False, rejected_by="vwap_deviation", final_reason="too far from VWAP")
+            return False, f"🧠 {symbol}: NO BUY – VWAP dev {vwap_dev:+.2f}% > ±{cfg['vwap_max_deviation_pct']}%", trace
 
         # 3) Wick Structure Check (candle quality)
-        if ind.wick_ratio < cfg["min_wick_ratio"]:
-            return False, f"🧠 {symbol}: NO BUY – wick_ratio {ind.wick_ratio:.2f} < {cfg['min_wick_ratio']} (poor structure)"
+        wick_ok = trace_percentage_check(trace, "wick_ratio", ind.wick_ratio, cfg["min_wick_ratio"], ">=")
+        if not wick_ok:
+            trace.finalize(accepted=False, rejected_by="wick_ratio", final_reason="poor candle structure")
+            return False, f"🧠 {symbol}: NO BUY – wick_ratio {ind.wick_ratio:.2f} < {cfg['min_wick_ratio']} (poor structure)", trace
 
         # 4) ATR Volatility Regime
-        if ind.atr_pct < cfg["min_atr_pct_for_grid"]:
-            return False, f"🧠 {symbol}: NO BUY – ATR {ind.atr_pct:.2f}% < {cfg['min_atr_pct_for_grid']}% (too low)"
+        atr_min_ok = trace_percentage_check(trace, "atr_min", ind.atr_pct, cfg["min_atr_pct_for_grid"], ">=")
+        if not atr_min_ok:
+            trace.finalize(accepted=False, rejected_by="atr_min", final_reason="volatility too low")
+            return False, f"🧠 {symbol}: NO BUY – ATR {ind.atr_pct:.2f}% < {cfg['min_atr_pct_for_grid']}% (too low)", trace
 
-        if ind.atr_pct > cfg["max_atr_pct_for_grid"]:
-            return False, f"🧠 {symbol}: NO BUY – ATR {ind.atr_pct:.2f}% > {cfg['max_atr_pct_for_grid']}% (too chaotic)"
+        atr_max_ok = trace_percentage_check(trace, "atr_max", ind.atr_pct, cfg["max_atr_pct_for_grid"], "<=")
+        if not atr_max_ok:
+            trace.finalize(accepted=False, rejected_by="atr_max", final_reason="too chaotic")
+            return False, f"🧠 {symbol}: NO BUY – ATR {ind.atr_pct:.2f}% > {cfg['max_atr_pct_for_grid']}% (too chaotic)", trace
 
         # 5) 5m Spike Detection (news/chaos filter)
-        if abs(ind.change_5m_pct) > cfg["max_5m_spike_pct"]:
-            return False, f"🧠 {symbol}: NO BUY – 5m move {ind.change_5m_pct:+.2f}% > ±{cfg['max_5m_spike_pct']}% (spike detected)"
+        spike_5m = abs(ind.change_5m_pct)
+        spike_ok = trace_percentage_check(trace, "spike_5m", spike_5m, cfg["max_5m_spike_pct"], "<=")
+        if not spike_ok:
+            trace.finalize(accepted=False, rejected_by="spike_5m", final_reason="sudden price spike")
+            return False, f"🧠 {symbol}: NO BUY – 5m move {ind.change_5m_pct:+.2f}% > ±{cfg['max_5m_spike_pct']}% (spike detected)", trace
 
         # 6) Trend Acceleration Check (1h vs 4h)
         accel = ind.trend_1h_pct - ind.trend_4h_pct
-        if accel < cfg["max_down_accel_pct"]:
-            return False, f"🧠 {symbol}: NO BUY – down accel {accel:.2f}% < {cfg['max_down_accel_pct']}% (falling knife)"
 
-        if accel > cfg["max_up_accel_pct"]:
-            return False, f"🧠 {symbol}: NO BUY – up accel {accel:.2f}% > {cfg['max_up_accel_pct']}% (blow-off top risk)"
+        accel_down_ok = trace_percentage_check(trace, "down_acceleration", accel, cfg["max_down_accel_pct"], ">=")
+        if not accel_down_ok:
+            trace.finalize(accepted=False, rejected_by="down_acceleration", final_reason="falling knife detected")
+            return False, f"🧠 {symbol}: NO BUY – down accel {accel:.2f}% < {cfg['max_down_accel_pct']}% (falling knife)", trace
+
+        accel_up_ok = trace_percentage_check(trace, "up_acceleration", accel, cfg["max_up_accel_pct"], "<=")
+        if not accel_up_ok:
+            trace.finalize(accepted=False, rejected_by="up_acceleration", final_reason="blow-off top risk")
+            return False, f"🧠 {symbol}: NO BUY – up accel {accel:.2f}% > {cfg['max_up_accel_pct']}% (blow-off top risk)", trace
 
         # 7) 24h Trend Sanity Checks
-        if ind.trend_24h_pct > cfg["max_trend_24h_pct"]:
-            return False, f"🧠 {symbol}: NO BUY – 24h trend {ind.trend_24h_pct:+.2f}% > {cfg['max_trend_24h_pct']}% (extended run)"
+        trend_24h_max_ok = trace_percentage_check(trace, "trend_24h_max", ind.trend_24h_pct, cfg["max_trend_24h_pct"], "<=")
+        if not trend_24h_max_ok:
+            trace.finalize(accepted=False, rejected_by="trend_24h_max", final_reason="extended run")
+            return False, f"🧠 {symbol}: NO BUY – 24h trend {ind.trend_24h_pct:+.2f}% > {cfg['max_trend_24h_pct']}% (extended run)", trace
 
-        if ind.trend_24h_pct < cfg["min_trend_24h_pct"]:
-            return False, f"🧠 {symbol}: NO BUY – 24h trend {ind.trend_24h_pct:+.2f}% < {cfg['min_trend_24h_pct']}% (capitulation zone)"
+        trend_24h_min_ok = trace_percentage_check(trace, "trend_24h_min", ind.trend_24h_pct, cfg["min_trend_24h_pct"], ">=")
+        if not trend_24h_min_ok:
+            trace.finalize(accepted=False, rejected_by="trend_24h_min", final_reason="capitulation zone")
+            return False, f"🧠 {symbol}: NO BUY – 24h trend {ind.trend_24h_pct:+.2f}% < {cfg['min_trend_24h_pct']}% (capitulation zone)", trace
 
         # All checks passed!
+        trace.finalize(accepted=True, final_reason="all SmartEntry filters passed")
         return True, (
             f"✅ {symbol}: BUY ALLOWED – SmartEntry v2.0 passed "
             f"(RSI={ind.rsi_14:.1f}, ATR={ind.atr_pct:.2f}%, wick={ind.wick_ratio:.2f})"
-        )
+        ), trace

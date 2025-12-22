@@ -963,6 +963,10 @@ class TrendCalculator:
             'top_10': qualifying_coins[:10]
         }
 
+        # Add 'best' key if we have qualifying coins (for controller compatibility)
+        if top_n:
+            self._debug_info['best'] = top_n[0]  # (symbol, trend_value) tuple
+
         return [symbol for symbol, _ in top_n]
 
     def get_trend(self, symbol: str) -> Optional[CoinTrend]:
@@ -1014,8 +1018,10 @@ class TrendCalculator:
                 volatility=trend.volatility
             )
 
-        # Get trend score (composite multi-timeframe score)
-        trend_score = trend.trend_score
+        # 🔧 FIX: Use consensus trend instead of weighted average (trend_score)
+        # Consensus trend is more responsive and better for bullish markets
+        # trend_score was too conservative (0.2*1h + 0.4*4h + 0.4*24h)
+        trend_score = trend.consensus_trend_pct  # Changed from trend.trend_score
 
         # Determine status and passes flag
         if trend_score < -MIN_TREND_THRESHOLD:
@@ -1355,7 +1361,8 @@ class TrendCalculator:
 
             # 1440m (24 hours) - with warm-up mode support
             time_since_bot_start = current_time - self.bot_start_time
-            warmup_period_seconds = self.trend_lookback_long_minutes * 60  # 24 hours
+            # BUGFIX: Reduce warm-up from 24h to 6h - with 360+ candles we have enough data
+            warmup_period_seconds = min(self.trend_lookback_long_minutes * 60, 360 * 60)  # Max 6 hours
 
             if time_since_bot_start < warmup_period_seconds:
                 # BUGFIX: In warm-up mode, use conservative averaging instead of aggressive extrapolation
