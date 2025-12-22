@@ -12,18 +12,18 @@ This module implements intelligent entry filtering based on:
 Each coin can have custom thresholds via coin_profiles in config.
 """
 import logging
-
-# Import from parent package
 import sys
 from dataclasses import dataclass
-# from decimal import Decimal  # noqa: F401
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+# Import from parent package
+# Avoid importing from utils/__init__.py which has heavy dependencies
+# Import directly from the module files to keep tests lightweight
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.models import CandleIndicators
-from utils.decision_trace import PairDecisionTrace, trace_percentage_check, trace_range_check
+from core.models import CandleIndicators  # noqa: E402
+from utils.decision_trace import PairDecisionTrace, trace_percentage_check, trace_range_check  # noqa: E402
 
 
 @dataclass
@@ -70,7 +70,7 @@ class SmartEntryFilter:
         base_cfg: SmartEntryBaseConfig,
         coin_profiles: Dict[str, Dict[str, Any]],
         logger: Optional[logging.Logger] = None,
-        exchange=None,
+        exchange_connector=None,
     ):
         """
         Initialize SmartEntry filter
@@ -79,11 +79,12 @@ class SmartEntryFilter:
             base_cfg: Base configuration with global defaults
             coin_profiles: Dict mapping symbol -> overrides (e.g., {"ATOM-EUR": {"min_wick_ratio": 0.20}})
             logger: Optional logger instance
+            exchange_connector: Exchange connector object for order book access
         """
         self.base_cfg = base_cfg
         self.coin_profiles = coin_profiles
         self.logger = logger or logging.getLogger(__name__)
-        self.exchange = exchange
+        self.exchange_connector = exchange_connector
 
         self.logger.info("=" * 80)
         self.logger.info("🧠 SmartEntryFilter v2.0 initialized")
@@ -97,11 +98,11 @@ class SmartEntryFilter:
         Fetch best bid/ask from exchange order book.
         Returns (bid, ask) or (None, None) if unavailable.
         """
-        if not self.exchange:
+        if not self.exchange_connector:
             return None, None
 
         try:
-            order_book = self.exchange.get_order_book(symbol)
+            order_book = self.exchange_connector.get_order_book(symbol)
             if not order_book or 'bids' not in order_book or 'asks' not in order_book:
                 return None, None
 
@@ -132,12 +133,12 @@ class SmartEntryFilter:
             bid_price, ask_price = self._get_best_bid_ask(symbol)
 
         if bid_price is None or ask_price is None:
-            self.logger.warning(f"[SPREAD] {symbol} - Invalid prices: bid={bid_price}, ask={ask_price}")
-            return True, "Invalid prices (skipping check)", None
+            self.logger.debug(f"[SPREAD] {symbol} - Unable to fetch prices, skipping check")
+            return True, "Prices unavailable (skipping spread check)", None
 
         if bid_price <= 0 or ask_price <= 0:
             self.logger.warning(f"[SPREAD] {symbol} - Invalid prices: bid={bid_price}, ask={ask_price}")
-            return True, "Invalid prices (skipping check)", None
+            return True, "Invalid prices (skipping spread check)", None
 
         mid_price = (bid_price + ask_price) / 2
         spread_pct = float((ask_price - bid_price) / mid_price * 100)
@@ -155,13 +156,14 @@ class SmartEntryFilter:
         Check if order book has sufficient depth for order.
         Uses the same logic and thresholds as legacy SmartEntryFilter.
         """
-        if not self.exchange:
-            return True, "Depth check disabled or no exchange", 0.0, 0.0
+        if not self.exchange_connector:
+            self.logger.debug(f"[DEPTH] {symbol} - Exchange connector not available, skipping check")
+            return True, "Depth check disabled (no exchange connector)", 0.0, 0.0
 
         try:
             required_depth = order_size_eur * min_depth_multiplier
 
-            order_book = self.exchange.get_order_book(symbol)
+            order_book = self.exchange_connector.get_order_book(symbol)
 
             if not order_book or 'bids' not in order_book or 'asks' not in order_book:
                 self.logger.warning(f"[DEPTH] {symbol} - No order book data available")

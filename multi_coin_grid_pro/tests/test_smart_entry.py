@@ -266,6 +266,172 @@ class TestSmartEntryFilter(unittest.TestCase):
         self.assertIn("24h trend", reason)
         self.assertIn("extended", reason.lower())
 
+    def test_spread_check_with_mock_exchange(self):
+        """Test spread check with mock exchange connector"""
+        # Create mock exchange with order book
+        class MockExchange:
+            def get_order_book(self, symbol):
+                return {
+                    'bids': [[10.0, 100.0]],  # [price, volume]
+                    'asks': [[10.10, 100.0]]  # 1% spread
+                }
+
+        # Create filter with mock exchange
+        filter_with_exchange = SmartEntryFilter(
+            self.base_cfg,
+            self.coin_profiles,
+            self.logger,
+            exchange_connector=MockExchange()
+        )
+
+        indicators = CandleIndicators(
+            price=Decimal("10.05"),
+            rsi_14=50.0,
+            vwap=Decimal("10.0"),
+            atr_pct=2.5,
+            wick_ratio=0.50,
+            trend_1h_pct=0.5,
+            trend_4h_pct=0.3,
+            trend_24h_pct=1.0,
+            change_5m_pct=0.2,
+        )
+
+        # Spread is 1%, which exceeds max_entry_spread_pct (0.5%)
+        allowed, reason, trace = filter_with_exchange.allows_entry("BTC-EUR", indicators, trace_enabled=True)
+        self.assertFalse(allowed)
+        self.assertIn("Spread", reason)
+        self.assertIn("wide", reason.lower())
+
+    def test_spread_check_passed(self):
+        """Test spread check passes with acceptable spread"""
+        class MockExchange:
+            def get_order_book(self, symbol):
+                return {
+                    'bids': [[10.0, 100.0]],
+                    'asks': [[10.02, 100.0]]  # 0.2% spread - OK
+                }
+
+        filter_with_exchange = SmartEntryFilter(
+            self.base_cfg,
+            self.coin_profiles,
+            self.logger,
+            exchange_connector=MockExchange()
+        )
+
+        indicators = CandleIndicators(
+            price=Decimal("10.01"),
+            rsi_14=50.0,
+            vwap=Decimal("10.0"),
+            atr_pct=2.5,
+            wick_ratio=0.50,
+            trend_1h_pct=0.5,
+            trend_4h_pct=0.3,
+            trend_24h_pct=1.0,
+            change_5m_pct=0.2,
+        )
+
+        allowed, reason, _ = filter_with_exchange.allows_entry("BTC-EUR", indicators)
+        self.assertTrue(allowed)
+
+    def test_depth_check_insufficient(self):
+        """Test order book depth check rejects insufficient liquidity"""
+        class MockExchange:
+            def get_order_book(self, symbol):
+                return {
+                    'bids': [[10.0, 5.0]],  # Only 50 EUR depth
+                    'asks': [[10.01, 5.0]]
+                }
+
+        filter_with_exchange = SmartEntryFilter(
+            self.base_cfg,
+            self.coin_profiles,
+            self.logger,
+            exchange_connector=MockExchange()
+        )
+
+        indicators = CandleIndicators(
+            price=Decimal("10.0"),
+            rsi_14=50.0,
+            vwap=Decimal("10.0"),
+            atr_pct=2.5,
+            wick_ratio=0.50,
+            trend_1h_pct=0.5,
+            trend_4h_pct=0.3,
+            trend_24h_pct=1.0,
+            change_5m_pct=0.2,
+        )
+
+        # Order size is 100 EUR, needs 3x depth = 300 EUR
+        # But order book only has ~50 EUR on each side
+        allowed, reason, trace = filter_with_exchange.allows_entry(
+            "BTC-EUR",
+            indicators,
+            order_size_eur=100.0,
+            trace_enabled=True
+        )
+        self.assertFalse(allowed)
+        self.assertIn("liquidity", reason.lower())
+
+    def test_depth_check_sufficient(self):
+        """Test order book depth check passes with sufficient liquidity"""
+        class MockExchange:
+            def get_order_book(self, symbol):
+                return {
+                    'bids': [[10.0, 50.0]],  # 500 EUR depth
+                    'asks': [[10.01, 50.0]]
+                }
+
+        filter_with_exchange = SmartEntryFilter(
+            self.base_cfg,
+            self.coin_profiles,
+            self.logger,
+            exchange_connector=MockExchange()
+        )
+
+        indicators = CandleIndicators(
+            price=Decimal("10.0"),
+            rsi_14=50.0,
+            vwap=Decimal("10.0"),
+            atr_pct=2.5,
+            wick_ratio=0.50,
+            trend_1h_pct=0.5,
+            trend_4h_pct=0.3,
+            trend_24h_pct=1.0,
+            change_5m_pct=0.2,
+        )
+
+        # Order size is 100 EUR, needs 3x depth = 300 EUR
+        # Order book has 500 EUR on each side - sufficient
+        allowed, reason, _ = filter_with_exchange.allows_entry(
+            "BTC-EUR",
+            indicators,
+            order_size_eur=100.0
+        )
+        self.assertTrue(allowed)
+
+    def test_depth_check_skipped_without_exchange(self):
+        """Test depth check is skipped when no exchange connector is provided"""
+        # Filter without exchange connector
+        indicators = CandleIndicators(
+            price=Decimal("10.0"),
+            rsi_14=50.0,
+            vwap=Decimal("10.0"),
+            atr_pct=2.5,
+            wick_ratio=0.50,
+            trend_1h_pct=0.5,
+            trend_4h_pct=0.3,
+            trend_24h_pct=1.0,
+            change_5m_pct=0.2,
+        )
+
+        # Should pass because depth check is skipped
+        allowed, reason, _ = self.filter.allows_entry(
+            "BTC-EUR",
+            indicators,
+            order_size_eur=100.0
+        )
+        self.assertTrue(allowed)
+
 
 if __name__ == "__main__":
     unittest.main()

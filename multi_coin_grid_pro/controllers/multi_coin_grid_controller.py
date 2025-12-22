@@ -179,7 +179,6 @@ class MultiCoinGridController(ControllerBase):
 
         self._last_logged_regime = None
 
-
         # Phase 1.4: Position Size Limits state
         self.current_exposure_per_coin: Dict[str, Decimal] = {}  # {coin: exposure_amount}
         self.total_exposure: Decimal = Decimal("0")
@@ -285,7 +284,7 @@ class MultiCoinGridController(ControllerBase):
                     base_cfg,
                     coin_profiles,
                     self.logger(),
-                    exchange=self.market_data_provider
+                    exchange_connector=self.market_data_provider
                 )
                 self.logger().info("🧠 SmartEntry v2.0: ENABLED (with coin profiles)")
 
@@ -3756,8 +3755,11 @@ class MultiCoinGridController(ControllerBase):
             if total_amount_quote:
                 try:
                     per_coin_capital = Decimal(str(total_amount_quote)) / Decimal(str(max(1, self.max_simultaneous_coins)))
-                    order_size_eur = float(per_coin_capital)
-                except Exception:
+                    # Calculate actual order size per grid level
+                    num_grids = self._calculate_grid_count(symbol, trend)
+                    order_size_eur = float(per_coin_capital / Decimal(str(num_grids)))
+                except Exception as e:
+                    self.logger().debug(f"Failed to calculate order_size_eur for {symbol}: {e}")
                     order_size_eur = None
 
             allowed, reason, trace = self.smart_entry_v2.allows_entry(
