@@ -7,11 +7,11 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
+from multi_coin_grid_pro.core.models import CandleIndicators  # noqa: E402
+from multi_coin_grid_pro.logic.smart_entry import SmartEntryBaseConfig, SmartEntryFilter  # noqa: E402
+
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from multi_coin_grid_pro.core.models import CandleIndicators
-from multi_coin_grid_pro.logic.smart_entry import SmartEntryBaseConfig, SmartEntryFilter
 
 
 class TestSmartEntryFilter(unittest.TestCase):
@@ -70,7 +70,7 @@ class TestSmartEntryFilter(unittest.TestCase):
             change_5m_pct=0.2,  # Small move
         )
 
-        allowed, reason = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed, reason, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertTrue(allowed, f"Entry should be allowed: {reason}")
         self.assertIn("BUY ALLOWED", reason)
 
@@ -88,7 +88,7 @@ class TestSmartEntryFilter(unittest.TestCase):
             change_5m_pct=0.2,
         )
 
-        allowed, reason = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed, reason, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertFalse(allowed)
         self.assertIn("RSI", reason)
         self.assertIn("overbought", reason.lower())
@@ -107,7 +107,7 @@ class TestSmartEntryFilter(unittest.TestCase):
             change_5m_pct=0.2,
         )
 
-        allowed, reason = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed, reason, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertFalse(allowed)
         self.assertIn("RSI", reason)
         self.assertIn("falling knife", reason.lower())
@@ -126,7 +126,7 @@ class TestSmartEntryFilter(unittest.TestCase):
             change_5m_pct=0.2,
         )
 
-        allowed, reason = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed, reason, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertFalse(allowed)
         self.assertIn("VWAP", reason)
 
@@ -144,7 +144,7 @@ class TestSmartEntryFilter(unittest.TestCase):
             change_5m_pct=0.2,
         )
 
-        allowed, reason = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed, reason, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertFalse(allowed)
         self.assertIn("wick_ratio", reason)
         self.assertIn("poor structure", reason.lower())
@@ -165,11 +165,11 @@ class TestSmartEntryFilter(unittest.TestCase):
         )
 
         # Should fail for BTC (uses base config with 0.25 threshold)
-        allowed_btc, _ = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed_btc, _, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertFalse(allowed_btc)
 
         # Should pass for ATOM (has override)
-        allowed_atom, reason_atom = self.filter.allows_entry("ATOM-EUR", indicators)
+        allowed_atom, reason_atom, _ = self.filter.allows_entry("ATOM-EUR", indicators)
         self.assertTrue(allowed_atom, f"ATOM should be allowed with profile override: {reason_atom}")
 
     def test_atr_too_low(self):
@@ -186,7 +186,7 @@ class TestSmartEntryFilter(unittest.TestCase):
             change_5m_pct=0.2,
         )
 
-        allowed, reason = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed, reason, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertFalse(allowed)
         self.assertIn("ATR", reason)
         self.assertIn("too low", reason.lower())
@@ -205,7 +205,7 @@ class TestSmartEntryFilter(unittest.TestCase):
             change_5m_pct=0.2,
         )
 
-        allowed, reason = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed, reason, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertFalse(allowed)
         self.assertIn("ATR", reason)
         self.assertIn("chaotic", reason.lower())
@@ -224,7 +224,7 @@ class TestSmartEntryFilter(unittest.TestCase):
             change_5m_pct=5.0,  # Large spike
         )
 
-        allowed, reason = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed, reason, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertFalse(allowed)
         self.assertIn("5m move", reason)
         self.assertIn("spike", reason.lower())
@@ -243,7 +243,7 @@ class TestSmartEntryFilter(unittest.TestCase):
             change_5m_pct=0.2,
         )
 
-        allowed, reason = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed, reason, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertFalse(allowed)
         self.assertIn("accel", reason)
 
@@ -261,7 +261,7 @@ class TestSmartEntryFilter(unittest.TestCase):
             change_5m_pct=0.2,
         )
 
-        allowed, reason = self.filter.allows_entry("BTC-EUR", indicators)
+        allowed, reason, _ = self.filter.allows_entry("BTC-EUR", indicators)
         self.assertFalse(allowed)
         self.assertIn("24h trend", reason)
         self.assertIn("extended", reason.lower())

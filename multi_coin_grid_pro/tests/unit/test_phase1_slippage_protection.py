@@ -6,7 +6,6 @@ Tests the _check_spread_acceptable() method that rejects entries with wide sprea
 
 import sys
 import unittest
-from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -25,6 +24,7 @@ class TestPhase1SlippageProtection(unittest.TestCase):
         # Mock config
         self.controller.config = MagicMock()
         self.controller.config.quote_asset = "EUR"
+        self.controller.config.use_dynamic_pair_discovery = False  # Ensure spread checks are enforced
 
         # Mock connector
         self.controller.connector = MagicMock()
@@ -35,6 +35,9 @@ class TestPhase1SlippageProtection(unittest.TestCase):
 
         # Import the actual method we want to test
         from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
+
+        # Mock _is_trading_pair_tradeable to always return True
+        self.controller._is_trading_pair_tradeable = MagicMock(return_value=True)
 
         # Bind the method to our mock (so 'self' works correctly)
         self.check_spread = MultiCoinGridController._check_spread_acceptable.__get__(self.controller, MultiCoinGridController)
@@ -186,9 +189,11 @@ class TestPhase1SlippageProtection(unittest.TestCase):
         futures_controller = MagicMock()
         futures_controller.config = MagicMock()
         futures_controller.config.quote_asset = "USDT"
+        futures_controller.config.use_dynamic_pair_discovery = False
         futures_controller.connector = MagicMock()
         futures_controller.logger = MagicMock()
         futures_controller.logger.return_value = MagicMock()
+        futures_controller._is_trading_pair_tradeable = MagicMock(return_value=True)
 
         # Import and bind method
         from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
@@ -213,9 +218,11 @@ class TestPhase1SlippageProtection(unittest.TestCase):
         futures_controller = MagicMock()
         futures_controller.config = MagicMock()
         futures_controller.config.quote_asset = "USDT"
+        futures_controller.config.use_dynamic_pair_discovery = False
         futures_controller.connector = MagicMock()
         futures_controller.logger = MagicMock()
         futures_controller.logger.return_value = MagicMock()
+        futures_controller._is_trading_pair_tradeable = MagicMock(return_value=True)
 
         from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
         check_spread_futures = MultiCoinGridController._check_spread_acceptable.__get__(
