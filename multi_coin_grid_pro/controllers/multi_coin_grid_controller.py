@@ -278,7 +278,12 @@ class MultiCoinGridController(ControllerBase):
             if smart_filter_cfg:
                 base_cfg = SmartEntryBaseConfig(**smart_filter_cfg)
                 coin_profiles = getattr(config, 'coin_profiles', {})
-                self.smart_entry_v2 = SmartEntryFilterV2(base_cfg, coin_profiles, self.logger())
+                self.smart_entry_v2 = SmartEntryFilterV2(
+                    base_cfg,
+                    coin_profiles,
+                    self.logger(),
+                    exchange=self.market_data_provider
+                )
                 self.logger().info("🧠 SmartEntry v2.0: ENABLED (with coin profiles)")
 
         # Dynamic Grid Sizer v2.0 (ATR-based)
@@ -3738,10 +3743,20 @@ class MultiCoinGridController(ControllerBase):
             )
 
             # Check with v2.0 filter (with trace)
+            order_size_eur = None
+            total_amount_quote = getattr(self.config, 'total_amount_quote', None)
+            if total_amount_quote:
+                try:
+                    per_coin_capital = Decimal(str(total_amount_quote)) / Decimal(str(max(1, self.max_simultaneous_coins)))
+                    order_size_eur = float(per_coin_capital)
+                except Exception:
+                    order_size_eur = None
+
             allowed, reason, trace = self.smart_entry_v2.allows_entry(
                 symbol, indicators_v2,
                 exchange=self.config.connector_name,
-                trace_enabled=self.debug_trace_enabled
+                trace_enabled=self.debug_trace_enabled,
+                order_size_eur=order_size_eur,
             )
 
             # Log decision trace
