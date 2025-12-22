@@ -177,6 +177,9 @@ class MultiCoinGridController(ControllerBase):
         self._last_pnl_reset_week = None
         self._last_pnl_reset_month = None
 
+        self._last_logged_regime = None
+
+
         # Phase 1.4: Position Size Limits state
         self.current_exposure_per_coin: Dict[str, Decimal] = {}  # {coin: exposure_amount}
         self.total_exposure: Decimal = Decimal("0")
@@ -980,18 +983,22 @@ class MultiCoinGridController(ControllerBase):
                 # Detect regime periodically (once per control cycle)
                 regime_state = await self._detect_current_regime()
                 if regime_state:
-                    self.logger().info(
-                        f"🌡️  REGIME: {regime_state.regime} "
-                        f"(score: {regime_state.score:.1f}, "
-                        f"confidence: {regime_state.confidence:.2f}, "
-                        f"duration: {regime_state.duration_minutes}m)\n"
-                        f"   {regime_state.reason}"
-                    )
+                    regime_changed = regime_state.regime != self._last_logged_regime
+                    if regime_changed:
+                        self.logger().info(
+                            f"🌡️  REGIME: {regime_state.regime} "
+                            f"(score: {regime_state.score:.1f}, "
+                            f"confidence: {regime_state.confidence:.2f}, "
+                            f"duration: {regime_state.duration_minutes}m)\n"
+                            f"   {regime_state.reason}"
+                        )
+                        self._last_logged_regime = regime_state.regime
 
                     # Resolve filters based on regime
                     if hasattr(self, 'filter_resolver') and self.filter_resolver:
                         active_filters = self.filter_resolver.resolve_filters(regime_state)
-                        self.logger().info(self.filter_resolver.explain_active_filters())
+                        if regime_changed:
+                            self.logger().info(self.filter_resolver.explain_active_filters())
 
                         # Apply filters if not in logging-only mode
                         logging_only = True
@@ -1001,7 +1008,8 @@ class MultiCoinGridController(ControllerBase):
                         if not logging_only:
                             # Phase 2: Apply adaptive filters to SmartEntry
                             self._apply_adaptive_filters(active_filters)
-                            self.logger().info("✅ Adaptive filters applied to SmartEntry")
+                            if regime_changed:
+                                self.logger().info("✅ Adaptive filters applied to SmartEntry")
             except Exception as e:
                 self.logger().error(f"❌ Regime detection error: {e}")
 
