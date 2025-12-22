@@ -70,6 +70,7 @@ class SmartEntryFilter:
         base_cfg: SmartEntryBaseConfig,
         coin_profiles: Dict[str, Dict[str, Any]],
         logger: Optional[logging.Logger] = None,
+        exchange=None,
     ):
         """
         Initialize SmartEntry filter
@@ -82,6 +83,7 @@ class SmartEntryFilter:
         self.base_cfg = base_cfg
         self.coin_profiles = coin_profiles
         self.logger = logger or logging.getLogger(__name__)
+        self.exchange = exchange
 
         self.logger.info("=" * 80)
         self.logger.info("🧠 SmartEntryFilter v2.0 initialized")
@@ -89,6 +91,108 @@ class SmartEntryFilter:
         self.logger.info(f"   ATR range: [{base_cfg.min_atr_pct_for_grid}, {base_cfg.max_atr_pct_for_grid}]%")
         self.logger.info(f"   Coin profiles loaded: {len(coin_profiles)} coins")
         self.logger.info("=" * 80)
+
+    def _get_best_bid_ask(self, symbol: str) -> Tuple[Optional[float], Optional[float]]:
+        """
+        Fetch best bid/ask from exchange order book.
+        Returns (bid, ask) or (None, None) if unavailable.
+        """
+        if not self.exchange:
+            return None, None
+
+        try:
+            order_book = self.exchange.get_order_book(symbol)
+            if not order_book or 'bids' not in order_book or 'asks' not in order_book:
+                return None, None
+
+            bids = order_book.get('bids', [])
+            asks = order_book.get('asks', [])
+            if not bids or not asks:
+                return None, None
+
+            best_bid = float(bids[0][0])
+            best_ask = float(asks[0][0])
+            return best_bid, best_ask
+        except Exception as e:
+            self.logger.warning(f"[SPREAD] {symbol} - Error fetching bid/ask: {e}")
+            return None, None
+
+    def _check_spread(
+        self,
+        symbol: str,
+        bid_price: Optional[float],
+        ask_price: Optional[float],
+        max_spread_pct: float,
+    ) -> Tuple[bool, str, Optional[float]]:
+        """
+        Check if bid-ask spread is acceptable.
+        Uses the same logic and thresholds as legacy SmartEntryFilter.
+        """
+        if bid_price is None or ask_price is None:
+            bid_price, ask_price = self._get_best_bid_ask(symbol)
+
+        if bid_price is None or ask_price is None:
+            self.logger.warning(f"[SPREAD] {symbol} - Invalid prices: bid={bid_price}, ask={ask_price}")
+            return True, "Invalid prices (skipping check)", None
+
+        if bid_price <= 0 or ask_price <= 0:
+            self.logger.warning(f"[SPREAD] {symbol} - Invalid prices: bid={bid_price}, ask={ask_price}")
+            return True, "Invalid prices (skipping check)", None
+
+        mid_price = (bid_price + ask_price) / 2
+        spread_pct = float((ask_price - bid_price) / mid_price * 100)
+
+        if spread_pct > max_spread_pct:
+            return False, (
+                f"Spread too wide: {spread_pct:.3f}% > {max_spread_pct}% "
+                f"(bid={bid_price:.4f}, ask={ask_price:.4f})"
+            ), spread_pct
+
+        return True, f"Spread OK: {spread_pct:.3f}%", spread_pct
+
+    def _check_order_book_depth(self, symbol: str, order_size_eur: float, min_depth_multiplier: float) -> Tuple[bool, str, float, float]:
+        """
+        Check if order book has sufficient depth for order.
+        Uses the same logic and thresholds as legacy SmartEntryFilter.
+        """
+        if not self.exchange:
+            return True, "Depth check disabled or no exchange", 0.0, 0.0
+
+        try:
+            required_depth = order_size_eur * min_depth_multiplier
+
+            order_book = self.exchange.get_order_book(symbol)
+
+            if not order_book or 'bids' not in order_book or 'asks' not in order_book:
+                self.logger.warning(f"[DEPTH] {symbol} - No order book data available")
+                return True, "No order book data (skipping check)", 0.0, required_depth
+
+            bid_total_eur = 0.0
+            for bid_price, bid_volume in order_book['bids']:
+                bid_total_eur += float(bid_price) * float(bid_volume)
+                if bid_total_eur >= required_depth:
+                    break
+
+            ask_total_eur = 0.0
+            for ask_price, ask_volume in order_book['asks']:
+                ask_total_eur += float(ask_price) * float(ask_volume)
+                if ask_total_eur >= required_depth:
+                    break
+
+            has_bid_depth = bid_total_eur >= required_depth
+            has_ask_depth = ask_total_eur >= required_depth
+
+            if not has_bid_depth or not has_ask_depth:
+                return False, (
+                    f"Insufficient liquidity: BID {bid_total_eur:.0f}/{required_depth:.0f} EUR, "
+                    f"ASK {ask_total_eur:.0f}/{required_depth:.0f} EUR (need {min_depth_multiplier}x)"
+                ), min(bid_total_eur, ask_total_eur), required_depth
+
+            return True, f"Sufficient depth ({min_depth_multiplier}x confirmed)", min(bid_total_eur, ask_total_eur), required_depth
+
+        except Exception as e:
+            self.logger.warning(f"[DEPTH] {symbol} - Error checking depth: {e}")
+            return True, f"Depth check failed (allowing entry): {e}", 0.0, 0.0
 
     def _get_effective_cfg(self, symbol: str) -> Dict[str, Any]:
         """
@@ -135,6 +239,9 @@ class SmartEntryFilter:
         ind: CandleIndicators,
         exchange: str = "unknown",
         trace_enabled: bool = False,
+        order_size_eur: Optional[float] = None,
+        bid_price: Optional[float] = None,
+        ask_price: Optional[float] = None,
     ) -> Tuple[bool, str, Optional[PairDecisionTrace]]:
         """
         Check if entry is allowed for this symbol based on indicators
@@ -161,12 +268,54 @@ class SmartEntryFilter:
 
         cfg = self._get_effective_cfg(symbol)
 
+        # 0) Slippage Protection - Check spread
+        if cfg["slippage_check_enabled"]:
+            spread_ok, spread_reason, spread_pct = self._check_spread(
+                symbol,
+                bid_price,
+                ask_price,
+                cfg["max_entry_spread_pct"],
+            )
+            trace.add_check(
+                filter_name="spread",
+                value=spread_pct,
+                threshold=cfg["max_entry_spread_pct"],
+                passed=spread_ok,
+                operator="<="
+            )
+            if not spread_ok:
+                trace.finalize(accepted=False, rejected_by="spread", final_reason="spread too wide")
+                return False, f"🧠 {symbol}: NO BUY – {spread_reason}", trace
+
+        # 0B) Order Book Depth Check
+        if cfg["depth_check_enabled"] and order_size_eur:
+            depth_ok, depth_reason, depth_available, depth_required = self._check_order_book_depth(
+                symbol,
+                order_size_eur,
+                cfg["min_depth_multiplier"],
+            )
+            trace.add_check(
+                filter_name="depth",
+                value=depth_available,
+                threshold=depth_required,
+                passed=depth_ok,
+                operator=">="
+            )
+            if not depth_ok:
+                trace.finalize(accepted=False, rejected_by="depth", final_reason="insufficient depth")
+                return False, f"🧠 {symbol}: NO BUY – {depth_reason}", trace
+
         # 1) RSI Regime Checks
         # Use rsi_block_min (max overbought threshold) - allows coin profiles to override
         rsi_block_ok = trace_range_check(trace, "rsi_block", ind.rsi_14, 0, cfg["rsi_block_min"])
         if not rsi_block_ok:
             trace.finalize(accepted=False, rejected_by="rsi_block", final_reason="overbought")
             return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} >= {cfg['rsi_block_min']} (overbought)", trace
+
+        rsi_buy_ok = trace_percentage_check(trace, "rsi_buy_max", ind.rsi_14, cfg["rsi_buy_max"], "<=")
+        if not rsi_buy_ok:
+            trace.finalize(accepted=False, rejected_by="rsi_buy_max", final_reason="overbought")
+            return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} > {cfg['rsi_buy_max']} (overbought)", trace
 
         rsi_extreme_ok = trace_percentage_check(trace, "rsi_extreme", ind.rsi_14, cfg["rsi_extreme_low"], ">=")
         if not rsi_extreme_ok:

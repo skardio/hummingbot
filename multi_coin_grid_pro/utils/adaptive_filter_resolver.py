@@ -103,7 +103,7 @@ class AdaptiveFilterResolver:
         """Check if new entries are allowed in current regime."""
         if regime_state.regime == "BEAR":
             # Check if mean-reversion mode enabled
-            return self.config.get('bear_allow_meanrev', False)
+            return self.regime_filters.get('BEAR', {}).get('bear_allow_meanrev', False)
 
         return True  # BULL and CHOP allow entries
 

@@ -8,6 +8,7 @@ Hummingbot's Strategy V2 architecture.
 import asyncio
 import logging
 import time
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -172,6 +173,9 @@ class MultiCoinGridController(ControllerBase):
         self.max_backoff_seconds: float = 300.0  # Max 5 minutes backoff
         self.last_successful_api_call: float = time.time()
         self.permanent_api_failure: bool = False  # Circuit breaker open permanently
+        self._last_pnl_reset_day = None
+        self._last_pnl_reset_week = None
+        self._last_pnl_reset_month = None
 
         # Phase 1.4: Position Size Limits state
         self.current_exposure_per_coin: Dict[str, Decimal] = {}  # {coin: exposure_amount}
@@ -274,7 +278,12 @@ class MultiCoinGridController(ControllerBase):
             if smart_filter_cfg:
                 base_cfg = SmartEntryBaseConfig(**smart_filter_cfg)
                 coin_profiles = getattr(config, 'coin_profiles', {})
-                self.smart_entry_v2 = SmartEntryFilterV2(base_cfg, coin_profiles, self.logger())
+                self.smart_entry_v2 = SmartEntryFilterV2(
+                    base_cfg,
+                    coin_profiles,
+                    self.logger(),
+                    exchange=self.market_data_provider
+                )
                 self.logger().info("🧠 SmartEntry v2.0: ENABLED (with coin profiles)")
 
         # Dynamic Grid Sizer v2.0 (ATR-based)
@@ -508,8 +517,8 @@ class MultiCoinGridController(ControllerBase):
 
         # Circuit breaker: Check for permanent failure
         if self.total_api_errors >= self.max_total_errors:
-            if not self.permanent_failure:
-                self.permanent_failure = True
+            if not self.permanent_api_failure:
+                self.permanent_api_failure = True
                 self.logger().critical(
                     f"🔴 CIRCUIT BREAKER OPEN - PERMANENT FAILURE!\n"
                     f"   Total API errors: {self.total_api_errors}\n"
@@ -946,6 +955,24 @@ class MultiCoinGridController(ControllerBase):
         if not self.risk_guard_v2.check_limits():
             self.logger().critical("🚨 RiskGuard v2.0: Kill switch activated - trading disabled")
             return  # Stop all trading activity
+
+        # PnL tracker resets (UTC-based)
+        now_utc = datetime.utcnow()
+        current_day = now_utc.date()
+        current_week = now_utc.isocalendar().week
+        current_month = (now_utc.year, now_utc.month)
+
+        if self._last_pnl_reset_day != current_day:
+            self.pnl_tracker_v2.on_new_day()
+            self._last_pnl_reset_day = current_day
+
+        if self._last_pnl_reset_week != current_week:
+            self.pnl_tracker_v2.on_new_week()
+            self._last_pnl_reset_week = current_week
+
+        if self._last_pnl_reset_month != current_month:
+            self.pnl_tracker_v2.on_new_month()
+            self._last_pnl_reset_month = current_month
 
         # ===== ADAPTIVE REGIME DETECTION (Phase 1: Logging Only) =====
         if hasattr(self, 'regime_detector') and self.regime_detector:
@@ -3716,10 +3743,20 @@ class MultiCoinGridController(ControllerBase):
             )
 
             # Check with v2.0 filter (with trace)
+            order_size_eur = None
+            total_amount_quote = getattr(self.config, 'total_amount_quote', None)
+            if total_amount_quote:
+                try:
+                    per_coin_capital = Decimal(str(total_amount_quote)) / Decimal(str(max(1, self.max_simultaneous_coins)))
+                    order_size_eur = float(per_coin_capital)
+                except Exception:
+                    order_size_eur = None
+
             allowed, reason, trace = self.smart_entry_v2.allows_entry(
                 symbol, indicators_v2,
                 exchange=self.config.connector_name,
-                trace_enabled=self.debug_trace_enabled
+                trace_enabled=self.debug_trace_enabled,
+                order_size_eur=order_size_eur,
             )
 
             # Log decision trace
@@ -5515,14 +5552,14 @@ class MultiCoinGridController(ControllerBase):
             # Map resolved filters to SmartEntry config format
             # The filters dict has keys like: rsi_max, vwap_max_deviation, up_accel_limit, etc.
             filter_mapping = {
-                'rsi_max': 'rsi_buy_max',
-                'rsi_min': 'rsi_extreme_low',
-                'vwap_max_deviation': 'vwap_max_deviation_pct',
-                'up_accel_limit': 'max_up_accel_pct',
-                'down_accel_limit': 'max_down_accel_pct',
-                'atr_min': 'min_atr_pct_for_grid',
-                'atr_max': 'max_atr_pct_for_grid',
-                'spike_5m_max': 'max_5m_spike_pct',
+                'rsi_buy_max': 'rsi_buy_max',
+                'rsi_extreme_min': 'rsi_extreme_low',
+                'vwap_max_deviation_pct': 'vwap_max_deviation_pct',
+                'max_up_accel_pct': 'max_up_accel_pct',
+                'max_down_accel_pct': 'max_down_accel_pct',
+                'atr_min_pct': 'min_atr_pct_for_grid',
+                'atr_max_pct': 'max_atr_pct_for_grid',
+                'spike_5m_max_pct': 'max_5m_spike_pct',
                 'wick_ratio_min': 'min_wick_ratio',
                 # Note: grid_spacing_mult and max_active_grids are NOT SmartEntry params
                 # They belong to DynamicGridSizer - don't map them here
