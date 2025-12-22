@@ -2,19 +2,18 @@
 Tests for the Bitget futures controller with relaxed multi-timeframe conditions.
 """
 import sys
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from multi_coin_grid_pro.futures_bitget.config_schema import FuturesGridBitgetConfig  # noqa: E402
+from multi_coin_grid_pro.futures_bitget.controller import FuturesGridBitgetController  # noqa: E402
+
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
-
-from decimal import Decimal
-
-from multi_coin_grid_pro.futures_bitget.config_schema import FuturesGridBitgetConfig
-from multi_coin_grid_pro.futures_bitget.controller import FuturesGridBitgetController
 
 
 class TestFuturesGridBitgetController:
@@ -48,7 +47,10 @@ class TestFuturesGridBitgetController:
             futures_min_entry_strength_24h=1.5,
             futures_min_entry_strength_4h=1.0,
             futures_min_entry_strength_1h=0.0,
-            trend_min_entry_strength=0.7,
+            trend_min_entry_strength=0.07,  # 7% trend strength (0.07 = 7%)
+            # Warmup mode thresholds
+            warmup_min_4h_trend_pct=1.0,
+            warmup_min_1h_trend_pct=0.5,
         )
 
         market_data_provider = MagicMock()
@@ -165,7 +167,8 @@ class TestFuturesGridBitgetController:
         trend.trend_1440m = 1.0   # Below 1.5% threshold (futures requires >1.5%)
         trend.trend_240m = 1.5
         trend.trend_60m = 0.5
-        trend.trend_score = 0.1
+        trend.trend_score = 0.05   # Low trend score (0.05 < 0.07 threshold)
+        trend.consensus_trend_pct = 0.05  # Ensure consensus is also low
         trend.long_trend_warmup = False
         trend.last_updated = futures_controller.market_data_provider.time() - 10
         trend.current_price = Decimal("50000.0")
@@ -174,5 +177,7 @@ class TestFuturesGridBitgetController:
 
         result = futures_controller._check_multi_timeframe_buy_conditions("LINK-USDT")
 
-        assert result is False, "Futures controller should reject coins with 24h trend <= 0.1%"
-        futures_controller._logger_instance.debug.assert_called()
+        assert result is False, "Futures controller should reject coins with trend score < 0.07"
+        # Should have logged rejection reason (either debug for trend strength or info for timeframe thresholds)
+        logged = futures_controller._logger_instance.info.called or futures_controller._logger_instance.debug.called
+        assert logged, "Should log rejection reason"

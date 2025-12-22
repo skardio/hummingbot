@@ -176,7 +176,9 @@ class MultiCoinGridController(ControllerBase):
         self._last_pnl_reset_day = None
         self._last_pnl_reset_week = None
         self._last_pnl_reset_month = None
+
         self._last_logged_regime = None
+
 
         # Phase 1.4: Position Size Limits state
         self.current_exposure_per_coin: Dict[str, Decimal] = {}  # {coin: exposure_amount}
