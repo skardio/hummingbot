@@ -8,7 +8,7 @@ allow temporary negative 1H trends (buying the dip).
 import sys
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -215,7 +215,6 @@ class TestWarmupOverride:
             trend_60m=-0.6,   # Exactly at minimum
         )
 
-        warmup_240m_ok = trend.trend_240m > 0.75  # True
         warmup_60m_ok = trend.trend_60m >= 0.0    # False
 
         # Override at exact limits

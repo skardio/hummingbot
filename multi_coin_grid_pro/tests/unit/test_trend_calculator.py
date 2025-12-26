@@ -9,10 +9,10 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from utils.trend_calculator import CoinTrend, TrendCalculator
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.trend_calculator import CoinTrend, TrendCalculator
 
 # Mark all tests in this module as async
 pytestmark = pytest.mark.asyncio
@@ -345,7 +345,7 @@ class TestTrendCalculator:
         # First call - should proceed immediately
         start_time = time.time()
         await calculator.update_all_trends_v2(["XRP-EUR", "BTC-EUR"])
-        first_call_time = time.time() - start_time
+        time.time() - start_time
 
         # Second call immediately after - should wait
         start_time = time.time()
@@ -353,7 +353,8 @@ class TestTrendCalculator:
         second_call_time = time.time() - start_time
 
         # Second call should take longer due to rate limiting (at least 2 seconds)
-        assert second_call_time >= 1.8, f"Rate limiting not working: second call took {second_call_time:.2f}s (expected >= 1.8s)"
+        assert second_call_time >= 1.8, f"Rate limiting not working: second call took {
+            second_call_time:.2f}s (expected >= 1.8s)"
         assert connector.get_last_traded_prices.call_count == 2, "Should have made 2 API calls"
 
     async def test_rate_limiting_skips_wait_if_enough_time_passed(self):

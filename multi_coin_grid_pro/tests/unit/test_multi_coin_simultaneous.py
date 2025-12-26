@@ -8,7 +8,6 @@ trading multiple coins at the same time with capital divided equally.
 import sys
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
@@ -145,7 +144,6 @@ class TestMultiCoinDecisionLogic:
             "ADA-EUR": "executor_456"
         }
         max_simultaneous = 2
-        best_coin = "LINK-EUR"
 
         has_room = len(active_coins) < max_simultaneous
 
@@ -160,7 +158,7 @@ class TestMultiCoinBackwardsCompatibility:
         """When max_simultaneous_coins=1, should behave like before"""
         max_simultaneous = 1
         active_coins = {}
-        active_coin = None  # Legacy tracking
+        _ = None  # Legacy tracking
 
         # First coin should be allowed
         best_coin = "SOL-EUR"
@@ -169,17 +167,15 @@ class TestMultiCoinBackwardsCompatibility:
 
         # Add it
         active_coins[best_coin] = "executor_123"
-        active_coin = best_coin
 
         # Second coin should NOT be allowed
-        best_coin2 = "ADA-EUR"
         has_room = len(active_coins) < max_simultaneous
         assert has_room is False
 
     def test_legacy_active_coin_tracking_synced(self):
         """Legacy active_coin should sync with active_coins dict"""
         active_coins = {}
-        active_coin = None
+        _ = None
 
         # Add coin (both legacy and new tracking)
         active_coins["SOL-EUR"] = "executor_123"

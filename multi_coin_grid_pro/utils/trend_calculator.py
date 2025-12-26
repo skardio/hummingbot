@@ -19,7 +19,63 @@ import numpy as np
 
 from hummingbot.connector.connector_base import ConnectorBase
 
+# Liquidity proxy utilities for orderbook depth filtering
+try:
+    from hummingbot.multi_coin_grid_controllers.utils.liquidity_proxy import (
+        calculate_orderbook_depth,
+        calculate_required_depth,
+        get_orderbook_snapshot,
+        is_sufficient_depth,
+    )
+    LIQUIDITY_PROXY_AVAILABLE = True
+except ImportError:
+    # Import may fail during standalone testing but works in bot runtime
+    # Set functions to None and check at runtime instead
+    calculate_orderbook_depth = None
+    calculate_required_depth = None
+    is_sufficient_depth = None
+    get_orderbook_snapshot = None
+    LIQUIDITY_PROXY_AVAILABLE = False
+    # Note: This is expected when importing trend_calculator standalone
+    # In production bot context, the import succeeds
+
 logger = logging.getLogger(__name__)
+
+
+def _check_liquidity_proxy_available() -> bool:
+    """
+    Runtime check for liquidity proxy availability.
+
+    Import-time checks can fail when trend_calculator is imported before
+    full Hummingbot environment is loaded. This function checks at runtime.
+
+    Returns:
+        True if liquidity proxy functions are available, False otherwise
+    """
+    global calculate_orderbook_depth, calculate_required_depth
+    global is_sufficient_depth, get_orderbook_snapshot
+
+    # If import-time check succeeded, we're good
+    if LIQUIDITY_PROXY_AVAILABLE:
+        return True
+
+    # If import-time failed, try importing again at runtime
+    try:
+        from hummingbot.multi_coin_grid_controllers.utils.liquidity_proxy import (
+            calculate_orderbook_depth as _calc_depth,
+            calculate_required_depth as _req_depth,
+            get_orderbook_snapshot as _get_snapshot,
+            is_sufficient_depth as _is_sufficient,
+        )
+
+        # Update global references
+        calculate_orderbook_depth = _calc_depth
+        calculate_required_depth = _req_depth
+        is_sufficient_depth = _is_sufficient
+        get_orderbook_snapshot = _get_snapshot
+        return True
+    except ImportError:
+        return False
 
 
 # ============================================================================
@@ -321,7 +377,7 @@ class TrendCalculator:
 
             # Log summary
             logger.info(
-                f"🎯 Ready for accurate 24h trends! No more warm-up mode needed! ✅"
+                "🎯 Ready for accurate 24h trends! No more warm-up mode needed! ✅"
             )
 
         except Exception as e:
@@ -625,19 +681,93 @@ class TrendCalculator:
             logger.error(f"❌ Error updating trend for {symbol} with price {price}: {e}")
             return None
 
-    async def update_all_trends_v2(self, symbols: List[str], retry_on_failure: bool = True) -> None:
+    async def update_all_trends_v2(
+            self, symbols: List[str], retry_on_failure: bool = True,
+            orderbook_config: Optional[dict] = None) -> None:
         """
-        Update trends for all monitored coins - V2 with batch API calls and retry logic
-
-        CRITICAL: Rate limiting is built-in to prevent API rate limit errors.
-        This method will wait if called too frequently (Kraken: 1 call/second).
+        Batch update all trends using efficient batch API call.
+        Falls back to individual API calls if batch fails.
 
         Args:
-            symbols: List of trading pair symbols
-            retry_on_failure: If True, retry once on complete failure
+            symbols: List of trading pairs to update (e.g. ['BTC-EUR', 'ETH-EUR'])
+            retry_on_failure: Whether to retry failed updates after a delay (default: True)
+            orderbook_config: Optional dict for Phase 2 early depth filtering:
+                - enabled: bool
+                - mode: str ('shadow', 'ranking', 'early')
+                - depth_pct_range: float
+                - depth_levels: int
+                - min_depth_multiplier: float
+                - order_size: Decimal
         """
         # Convert all symbols from / to - format (Kraken uses - format)
         converted_symbols = [s.replace("/", "-") if "/" in s else s for s in symbols]
+
+        # === PHASE 2: EARLY DEPTH FILTERING ===
+        # Pre-filter coins by liquidity BEFORE expensive trend calculation
+        depth_filtered_symbols = converted_symbols
+        if orderbook_config and _check_liquidity_proxy_available():
+            mode = orderbook_config.get('mode', 'ranking')
+            enabled = orderbook_config.get('enabled', False)
+
+            if enabled and mode == 'early':
+                # Early mode: Pre-filter coins BEFORE trend updates
+                # NOTE: Disabled - orderbook data not reliably available in trend update loop
+                # Depth filtering moved to SmartEntry phase where orderbook is cached
+                logger.info(
+                    "⚠️ Early mode enabled but depth filtering skipped - "
+                    "orderbook data not available in trend update loop. "
+                    "Depth filtering happens in SmartEntry phase instead."
+                )
+                depth_filtered_symbols = converted_symbols
+            elif enabled and mode == 'shadow':
+                # Shadow mode: Check depth but DON'T filter (log only)
+                depth_pct_range = orderbook_config.get('depth_pct_range', 0.5)
+                depth_levels = orderbook_config.get('depth_levels', 10)
+                min_depth_multiplier = orderbook_config.get('min_depth_multiplier', 5.0)
+                order_size = orderbook_config.get('order_size')
+
+                if order_size:
+                    required_depth = calculate_required_depth(
+                        order_size_quote=Decimal(str(order_size)),
+                        multiplier=min_depth_multiplier
+                    )
+
+                    logger.info(
+                        f"👻 Shadow Mode: Testing depth filtering (would require €{required_depth:.2f}) "
+                        f"- NO actual filtering"
+                    )
+
+                    would_pass = 0
+                    would_fail = 0
+
+                    for symbol in converted_symbols[:5]:  # Test first 5 only for performance
+                        try:
+                            orderbook = await get_orderbook_snapshot(
+                                connector=self.connector,
+                                symbol=symbol,
+                                depth_levels=depth_levels
+                            )
+
+                            if orderbook:
+                                bid_depth, ask_depth = calculate_orderbook_depth(
+                                    orderbook=orderbook,
+                                    pct_range=depth_pct_range,
+                                    quote_currency='EUR'
+                                )
+
+                                if is_sufficient_depth(bid_depth, ask_depth, required_depth):
+                                    would_pass += 1
+                                    logger.info(f"✅ Shadow: {symbol} would PASS (bid: €{bid_depth:.2f}, ask: €{ask_depth:.2f})")
+                                else:
+                                    would_fail += 1
+                                    logger.info(f"❌ Shadow: {symbol} would FAIL (bid: €{bid_depth:.2f}, ask: €{ask_depth:.2f})")
+                        except Exception as e:
+                            logger.debug(f"Shadow check error for {symbol}: {e}")
+
+                    logger.info(f"👻 Shadow Mode: {would_pass}/{would_pass + would_fail} would pass depth check")
+
+        converted_symbols = depth_filtered_symbols  # Use filtered list
+        # === END PHASE 2 ===
 
         if not converted_symbols:
             logger.warning("No symbols to update")
@@ -654,7 +784,10 @@ class TrendCalculator:
 
         if time_since_last_call < MIN_CALL_INTERVAL:
             wait_time = MIN_CALL_INTERVAL - time_since_last_call
-            logger.debug(f"⏳ Rate limiting: Waiting {wait_time:.2f}s before batch API call (last call was {time_since_last_call:.2f}s ago)")
+            logger.debug(
+                f"⏳ Rate limiting: Waiting {
+                    wait_time:.2f}s before batch API call (last call was {
+                    time_since_last_call:.2f}s ago)")
             await asyncio.sleep(wait_time)
 
         # Try batch API call first (much faster - 1 call instead of N calls)
@@ -691,10 +824,13 @@ class TrendCalculator:
             if self.base_connector:
                 try:
                     batch_call_attempted = True
-                    logger.info(f"🔄 Attempting batch API call via base connector for {len(converted_symbols)} symbols...")
+                    logger.info(
+                        f"🔄 Attempting batch API call via base connector for {
+                            len(converted_symbols)} symbols...")
                     prices_dict = await self.base_connector.get_last_traded_prices(converted_symbols)
                     batch_call_success = True
-                    logger.info(f"✅ Base connector batch API call successful: {len(prices_dict)}/{len(converted_symbols)} prices retrieved")
+                    logger.info(
+                        f"✅ Base connector batch API call successful: {len(prices_dict)}/{len(converted_symbols)} prices retrieved")  # noqa: E501
                 except Exception as e:
                     logger.warning(f"⚠️  Base connector batch fetch failed: {e}")
                     prices_dict = {}
@@ -704,14 +840,23 @@ class TrendCalculator:
             prices_dict = {}
 
         # If batch call failed or returned empty, fall back to individual calls with rate limiting
-        if not batch_call_success or not prices_dict or len(prices_dict) < len(converted_symbols) * 0.5:  # If less than 50% success
+        if not batch_call_success or not prices_dict or len(prices_dict) < len(
+                converted_symbols) * 0.5:  # If less than 50% success
             # Fallback: individual calls with rate limiting
             # IMPORTANT: Use direct price fetching instead of update_coin_trend to avoid nested API calls
-            RATE_LIMIT_DELAY = 1.5  # Increased from 1.1 to 1.5 seconds between API calls to be safer (Kraken allows 1 call per second)
+            # Increased from 1.1 to 1.5 seconds between API calls to be safer (Kraken allows 1 call per second)
+            RATE_LIMIT_DELAY = 1.5
 
             if batch_call_attempted:
-                logger.warning(f"⚠️  Batch call incomplete ({len(prices_dict)}/{len(converted_symbols)}), falling back to individual calls with rate limiting...")
-                logger.warning(f"⚠️  This will make {len(converted_symbols)} API calls with {RATE_LIMIT_DELAY}s delay = ~{len(converted_symbols) * RATE_LIMIT_DELAY:.1f}s total")
+                logger.warning(
+                    f"⚠️  Batch call incomplete ({
+                        len(prices_dict)}/{
+                        len(converted_symbols)}), falling back to individual calls with rate limiting...")
+                logger.warning(
+                    f"⚠️  This will make {
+                        len(converted_symbols)} API calls with {RATE_LIMIT_DELAY}s delay = ~{
+                        len(converted_symbols)
+                        * RATE_LIMIT_DELAY:.1f}s total")
             else:
                 logger.info(f"🔄 Using individual API calls with rate limiting for {len(converted_symbols)} symbols...")
 
@@ -757,9 +902,11 @@ class TrendCalculator:
                     failed_updates.append(f"{symbol}:{type(e).__name__}")
                     continue
             # Log fallback results
-            logger.info(f"✅ Fallback complete: {successful_updates}/{len(converted_symbols)} trends updated successfully")
+            logger.info(
+                f"✅ Fallback complete: {successful_updates}/{len(converted_symbols)} trends updated successfully")
             if failed_updates:
-                logger.warning(f"❌ Failed updates: {', '.join(failed_updates[:10])}" + (f" (+{len(failed_updates) - 10} more)" if len(failed_updates) > 10 else ""))
+                logger.warning(f"❌ Failed updates: {', '.join(failed_updates[:10])}" + (
+                    f" (+{len(failed_updates) - 10} more)" if len(failed_updates) > 10 else ""))
         else:
             # Batch mode: update all trends using fetched prices
             logger.info(f"✅ Batch mode: updating {len(prices_dict)} trends using batch-fetched prices")
@@ -772,7 +919,11 @@ class TrendCalculator:
             for dc in debug_coins:
                 if dc in converted_symbols:
                     price = prices_dict.get(dc)
-                    logger.warning(f"🔍 DEBUG {dc}: price_in_dict={price}, dict_keys_sample={list(prices_dict.keys())[:5]}")
+                    logger.warning(
+                        f"🔍 DEBUG {dc}: price_in_dict={price}, dict_keys_sample={
+                            list(
+                                prices_dict.keys())[
+                                :5]}")
 
             for symbol in converted_symbols:
                 price = prices_dict.get(symbol)
@@ -794,9 +945,11 @@ class TrendCalculator:
                     failed_updates.append(f"{symbol}:{type(e).__name__}")
 
             # Log batch results summary
-            logger.info(f"✅ Batch update complete: {successful_updates}/{len(converted_symbols)} trends updated successfully")
+            logger.info(
+                f"✅ Batch update complete: {successful_updates}/{len(converted_symbols)} trends updated successfully")
             if failed_updates:
-                logger.warning(f"❌ Failed batch updates ({len(failed_updates)}): {', '.join(failed_updates[:5])}" + (f" (+{len(failed_updates) - 5} more)" if len(failed_updates) > 5 else ""))
+                logger.warning(f"❌ Failed batch updates ({len(failed_updates)}): {', '.join(failed_updates[:5])}" + (
+                    f" (+{len(failed_updates) - 5} more)" if len(failed_updates) > 5 else ""))
 
                 # If most updates failed and retry is enabled, try one more time after a delay
                 failure_rate = len(failed_updates) / len(converted_symbols)
@@ -809,13 +962,24 @@ class TrendCalculator:
                         logger.info(f"🔄 Retrying {len(failed_symbols)} failed symbols...")
                         await self.update_all_trends_v2(failed_symbols, retry_on_failure=False)
 
-    def get_best_coin(self, min_trend_pct: float, exclude_coins: Optional[List[str]] = None) -> Optional[str]:
+    def get_best_coin(self, min_trend_pct: float, exclude_coins: Optional[List[str]] = None,
+                      orderbook_config: Optional[dict] = None) -> Optional[str]:
         """
-        Find coin with best (highest) trend
+        Find coin with best (highest) trend, filtered by orderbook depth
 
         Args:
             min_trend_pct: Minimum trend percentage required
             exclude_coins: Optional list of coin symbols to exclude from selection
+            orderbook_config: Optional dict with depth filtering config:
+                - enabled: bool (default True if provided)
+                - mode: str ('shadow', 'ranking', 'early') - default 'ranking'
+                  * 'shadow': Log depth checks but DON'T filter (test mode)
+                  * 'ranking': Filter HERE during coin selection (Phase 1 behavior)
+                  * 'early': Filter in update_all_trends_v2() BEFORE trend calc (Phase 2 optimization)
+                - depth_pct_range: float (default 0.5)
+                - depth_levels: int (default 10)
+                - min_depth_multiplier: float (default 5.0)
+                - order_size: Decimal (required if enabled)
 
         Returns:
             Symbol of best coin or None if no coin meets criteria
@@ -831,6 +995,35 @@ class TrendCalculator:
             'min_trend': min_trend_pct
         }
 
+        # Parse orderbook config with mode support
+        depth_filtering_enabled = False
+        shadow_mode = False
+        if orderbook_config and _check_liquidity_proxy_available():
+            enabled = orderbook_config.get('enabled', True)
+            mode = orderbook_config.get('mode', 'ranking')
+
+            # Determine if we should filter here
+            if mode == 'shadow':
+                shadow_mode = True  # Log only, don't filter
+                depth_filtering_enabled = False
+            elif mode == 'ranking':
+                depth_filtering_enabled = enabled  # Filter here (Phase 1 behavior)
+            elif mode == 'early':
+                depth_filtering_enabled = False  # Already filtered in update_all_trends_v2()
+                logger.debug("Mode='early': depth filtering already done in update loop, skipping here")
+
+            depth_pct_range = orderbook_config.get('depth_pct_range', 0.5)
+            depth_levels = orderbook_config.get('depth_levels', 10)
+            min_depth_multiplier = orderbook_config.get('min_depth_multiplier', 5.0)
+            order_size = orderbook_config.get('order_size')
+
+            if not order_size and (depth_filtering_enabled or shadow_mode):
+                logger.warning("⚠️ Orderbook config missing 'order_size', disabling depth filtering")
+                depth_filtering_enabled = False
+                shadow_mode = False
+        elif orderbook_config and not _check_liquidity_proxy_available():
+            logger.warning("⚠️ Liquidity proxy not available, disabling depth filtering")
+
         # Set of coins to exclude (for fast lookup)
         exclude_set = set(exclude_coins) if exclude_coins else set()
 
@@ -839,6 +1032,7 @@ class TrendCalculator:
 
         # Track all trends for debugging
         all_trends = []
+        depth_filtered_count = 0
 
         coin_idx = 0
         for symbol, trend in self.trends.items():
@@ -857,6 +1051,73 @@ class TrendCalculator:
             # Skip coins without sufficient data
             if not trend.has_sufficient_data:
                 continue
+
+            # DEPTH PRE-FILTER (Phase 1 + Shadow Mode Support)
+            if depth_filtering_enabled or shadow_mode:
+                try:
+                    # Get orderbook snapshot
+                    orderbook = get_orderbook_snapshot(self.connector, symbol)
+                    if not orderbook or not orderbook.snapshot_uid:
+                        if shadow_mode:
+                            logger.info(f"👻 Shadow: {symbol} - No orderbook data (would skip if filtering)")
+                        elif depth_filtering_enabled:
+                            logger.debug(f"🚫 {symbol}: No orderbook data, skipping")
+                            depth_filtered_count += 1
+                            continue
+
+                    # Calculate depth metrics
+                    depth_metrics = calculate_orderbook_depth(
+                        bids=orderbook.bids,
+                        asks=orderbook.asks,
+                        mid_price=orderbook.bids[0].price if orderbook.bids else Decimal("0"),
+                        pct_range=depth_pct_range,
+                        max_levels=depth_levels
+                    )
+
+                    # Check if depth is sufficient
+                    required_depth = calculate_required_depth(
+                        order_size_quote=order_size,
+                        multiplier=min_depth_multiplier
+                    )
+
+                    depth_sufficient = is_sufficient_depth(depth_metrics, required_depth, tolerance=0.1)
+
+                    if shadow_mode:
+                        # Shadow mode: LOG but don't filter
+                        if depth_sufficient:
+                            logger.info(
+                                f"✅ Shadow: {symbol} would PASS "
+                                f"(bid: €{depth_metrics.bid_depth:.2f}, ask: €{depth_metrics.ask_depth:.2f} >= €{required_depth:.2f})"
+                            )
+                        else:
+                            logger.info(
+                                f"❌ Shadow: {symbol} would FAIL "
+                                f"(bid: €{depth_metrics.bid_depth:.2f}, ask: €{depth_metrics.ask_depth:.2f} < €{required_depth:.2f}) "
+                                f"- but NOT filtering (shadow mode)"
+                            )
+                    elif depth_filtering_enabled:
+                        # Ranking mode: Actually filter
+                        if not depth_sufficient:
+                            logger.info(
+                                f"🚫 {symbol}: Insufficient depth "
+                                f"(available={depth_metrics.bid_depth:.1f}, "
+                                f"required={required_depth:.1f}) - SKIPPED"
+                            )
+                            depth_filtered_count += 1
+                            continue
+                        else:
+                            logger.debug(
+                                f"✅ {symbol}: Sufficient depth "
+                                f"(available={depth_metrics.bid_depth:.1f}, "
+                                f"required={required_depth:.1f})"
+                            )
+
+                except Exception as e:
+                    if shadow_mode:
+                        logger.info(f"👻 Shadow: {symbol} - Depth check error ({e})")
+                    else:
+                        logger.warning(f"⚠️ {symbol}: Depth check failed ({e}), allowing through")
+                    # Don't filter on errors - let SmartEntry handle it
 
             # SIMPLIFIED: Just use consensus_trend_pct directly (always in percentage format like 7.98 for 7.98%)
             # No need for complex multi-timeframe checks - consensus is already the best metric
@@ -877,6 +1138,14 @@ class TrendCalculator:
         else:
             self._debug_info['top_10'] = []
             self._debug_info['all_count'] = 0
+
+        # Log depth filtering stats
+        if depth_filtering_enabled and depth_filtered_count > 0:
+            logger.info(
+                f"🔍 Depth filtering: {depth_filtered_count} coins filtered out "
+                f"({len(all_trends)} liquid coins remain)"
+            )
+            self._debug_info['depth_filtered'] = depth_filtered_count
 
         if best_symbol:
             self._debug_info['best'] = (best_symbol, best_trend)
@@ -900,23 +1169,62 @@ class TrendCalculator:
 
         return best_symbol
 
-    def get_top_n_coins(self, n: int, min_trend_pct: float, exclude_coins: Optional[List[str]] = None) -> List[str]:
+    def get_top_n_coins(self, n: int, min_trend_pct: float, exclude_coins: Optional[List[str]] = None,
+                        orderbook_config: Optional[dict] = None) -> List[str]:
         """
-        Find top N coins with best (highest) trends
+        Find top N coins with best (highest) trends, filtered by orderbook depth
 
         Args:
             n: Number of top coins to return
             min_trend_pct: Minimum trend percentage required
             exclude_coins: Optional list of coin symbols to exclude from selection
+            orderbook_config: Optional dict with depth filtering config:
+                - enabled: bool (default True if provided)
+                - mode: str ('shadow', 'ranking', 'early') - default 'ranking'
+                - depth_pct_range: float (default 0.5)
+                - depth_levels: int (default 10)
+                - min_depth_multiplier: float (default 5.0)
+                - order_size: Decimal (required if enabled)
 
         Returns:
             List of symbols for top N coins, or empty list if no coins meet criteria
         """
+        # Parse orderbook config with mode support
+        depth_filtering_enabled = False
+        shadow_mode = False
+        if orderbook_config and _check_liquidity_proxy_available():
+            enabled = orderbook_config.get('enabled', True)
+            mode = orderbook_config.get('mode', 'ranking')
+
+            # Determine if we should filter here
+            if mode == 'shadow':
+                shadow_mode = True  # Log only, don't filter
+                depth_filtering_enabled = False
+            elif mode == 'ranking':
+                depth_filtering_enabled = enabled  # Filter here (Phase 1 behavior)
+            elif mode == 'early':
+                depth_filtering_enabled = False  # Already filtered in update_all_trends_v2()
+                logger.debug("Mode='early': depth filtering already done in update loop, skipping here")
+
+            depth_pct_range = orderbook_config.get('depth_pct_range', 0.5)
+            depth_levels = orderbook_config.get('depth_levels', 10)
+            min_depth_multiplier = orderbook_config.get('min_depth_multiplier', 5.0)
+            order_size = orderbook_config.get('order_size')
+
+            if not order_size and (depth_filtering_enabled or shadow_mode):
+                logger.warning("⚠️ Orderbook config missing 'order_size', disabling depth filtering")
+                depth_filtering_enabled = False
+                shadow_mode = False
+        elif orderbook_config and not _check_liquidity_proxy_available():
+            logger.warning("⚠️ Liquidity proxy not available, disabling depth filtering")
+
         # Set of coins to exclude (for fast lookup)
         exclude_set = set(exclude_coins) if exclude_coins else set()
 
         # Collect all qualifying coins with their trends
         qualifying_coins = []
+        all_coins = []  # Track ALL coins for fallback purposes
+        depth_filtered_count = 0
 
         for symbol, trend in self.trends.items():
             # Skip excluded coins (e.g., coins in cooldown or already active)
@@ -927,9 +1235,74 @@ class TrendCalculator:
             if not trend.has_sufficient_data:
                 continue
 
+            # DEPTH PRE-FILTER (Phase 1 + Shadow Mode Support)
+            if depth_filtering_enabled or shadow_mode:
+                try:
+                    # Get orderbook snapshot
+                    orderbook = get_orderbook_snapshot(self.connector, symbol)
+                    if not orderbook or not orderbook.snapshot_uid:
+                        if shadow_mode:
+                            logger.info(f"👻 Shadow: {symbol} - No orderbook data (would skip if filtering)")
+                        elif depth_filtering_enabled:
+                            logger.debug(f"🚫 {symbol}: No orderbook data, skipping")
+                            depth_filtered_count += 1
+                            continue
+
+                    # Calculate depth metrics
+                    depth_metrics = calculate_orderbook_depth(
+                        bids=orderbook.bids,
+                        asks=orderbook.asks,
+                        mid_price=orderbook.bids[0].price if orderbook.bids else Decimal("0"),
+                        pct_range=depth_pct_range,
+                        max_levels=depth_levels
+                    )
+
+                    # Check if depth is sufficient
+                    required_depth = calculate_required_depth(
+                        order_size_quote=order_size,
+                        multiplier=min_depth_multiplier
+                    )
+
+                    depth_sufficient = is_sufficient_depth(depth_metrics, required_depth, tolerance=0.1)
+
+                    if shadow_mode:
+                        # Shadow mode: LOG but don't filter (only log first 3 for performance)
+                        if len(qualifying_coins) < 3:
+                            if depth_sufficient:
+                                logger.info(
+                                    f"✅ Shadow: {symbol} would PASS "
+                                    f"(bid: €{depth_metrics.bid_depth:.2f} >= €{required_depth:.2f})"
+                                )
+                            else:
+                                logger.info(
+                                    f"❌ Shadow: {symbol} would FAIL "
+                                    f"(bid: €{depth_metrics.bid_depth:.2f} < €{required_depth:.2f}) "
+                                    f"- but NOT filtering"
+                                )
+                    elif depth_filtering_enabled:
+                        # Ranking mode: Actually filter
+                        if not depth_sufficient:
+                            logger.debug(
+                                f"🚫 {symbol}: Insufficient depth "
+                                f"(available={depth_metrics.bid_depth:.1f}, "
+                                f"required={required_depth:.1f}) - SKIPPED"
+                            )
+                            depth_filtered_count += 1
+                            continue
+
+                except Exception as e:
+                    if shadow_mode:
+                        logger.debug(f"👻 Shadow: {symbol} - Depth check error ({e})")
+                    else:
+                        logger.warning(f"⚠️ {symbol}: Depth check failed ({e}), allowing through")
+                    # Don't filter on errors - let SmartEntry handle it
+
             # SIMPLIFIED: Just use consensus_trend_pct directly (always in percentage format like 7.98 for 7.98%)
             # No need for complex multi-timeframe checks - consensus is already the best metric
             trend_value = trend.consensus_trend_pct
+
+            # Store ALL coins for fallback (even if below min_trend)
+            all_coins.append((symbol, trend_value))
 
             # DEBUG: Log first 5 coins to see what's happening
             if len(qualifying_coins) < 5:
@@ -942,9 +1315,17 @@ class TrendCalculator:
             if trend_value >= min_trend_pct:
                 qualifying_coins.append((symbol, trend_value))
 
-        # Sort by trend strength (descending) and take top N
+        # Sort both lists by trend strength (descending)
         qualifying_coins.sort(key=lambda x: x[1], reverse=True)
+        all_coins.sort(key=lambda x: x[1], reverse=True)
         top_n = qualifying_coins[:n]
+
+        # Log depth filtering stats
+        if depth_filtering_enabled and depth_filtered_count > 0:
+            logger.info(
+                f"🔍 Depth filtering: {depth_filtered_count} coins filtered out "
+                f"({len(qualifying_coins)} liquid coins remain)"
+            )
 
         # Log selection
         if top_n:
@@ -960,7 +1341,8 @@ class TrendCalculator:
             'sufficient': sum(1 for t in self.trends.values() if t.has_sufficient_data),
             'min_trend': min_trend_pct,
             'all_count': len(qualifying_coins),
-            'top_10': qualifying_coins[:10]
+            'top_10': all_coins[:10],  # Use ALL coins (not just qualifying) for fallback
+            'depth_filtered': depth_filtered_count if depth_filtering_enabled else 0
         }
 
         # Add 'best' key if we have qualifying coins (for controller compatibility)
@@ -1103,10 +1485,11 @@ class TrendCalculator:
         for sel in selections:
             status_counts[sel.status] += 1
 
-        logger.info(f"Status Distribution:")
+        logger.info("Status Distribution:")
         logger.info(f"  WARMUP:   {status_counts[TrendStatus.WARMUP]} coins (insufficient data)")
         logger.info(f"  BEARISH:  {status_counts[TrendStatus.BEARISH]} coins (< {-MIN_TREND_THRESHOLD:+.2f}%)")
-        logger.info(f"  SIDEWAYS: {status_counts[TrendStatus.SIDEWAYS]} coins ({-MIN_TREND_THRESHOLD:+.2f}% to {MIN_TREND_THRESHOLD:+.2f}%)")
+        logger.info(
+            f"  SIDEWAYS: {status_counts[TrendStatus.SIDEWAYS]} coins ({-MIN_TREND_THRESHOLD:+.2f}% to {MIN_TREND_THRESHOLD:+.2f}%)")  # noqa: E501
         logger.info(f"  BULLISH:  {status_counts[TrendStatus.BULLISH]} coins (>= {MIN_TREND_THRESHOLD:+.2f}%)")
         logger.info("")
 
@@ -1314,10 +1697,10 @@ class TrendCalculator:
 
             # Calculate weighted average
             consensus = (
-                ema_trend * weight_ema +
-                linreg_trend * weight_linreg +
-                normalized_trend * weight_normalized +
-                raw_trend * weight_raw
+                ema_trend * weight_ema
+                + linreg_trend * weight_linreg
+                + normalized_trend * weight_normalized
+                + raw_trend * weight_raw
             )
 
             return consensus
@@ -1393,9 +1776,9 @@ class TrendCalculator:
             # Calculate composite trend score
             # Formula: 0.2 * 60m + 0.4 * 240m + 0.4 * 1440m
             trend.trend_score = (
-                0.2 * trend.trend_60m +
-                0.4 * trend.trend_240m +
-                0.4 * trend.trend_1440m
+                0.2 * trend.trend_60m
+                + 0.4 * trend.trend_240m
+                + 0.4 * trend.trend_1440m
             )
 
         except Exception as e:

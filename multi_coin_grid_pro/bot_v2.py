@@ -128,7 +128,10 @@ class MultiCoinGridBot:
         self.discover_tradeable_coins()
 
         logger.info(f"📊 Monitoring {len(self.config['coins'])} coins: {', '.join(self.config['coins'])}")
-        logger.info(f"📈 Trend vereiste: {self.config['trend_min_change_pct']}% over {self.config['trend_lookback_minutes']}min")
+        logger.info(
+            f"📈 Trend vereiste: {
+                self.config['trend_min_change_pct']}% over {
+                self.config['trend_lookback_minutes']}min")
         logger.info(f"⏱️  Switch cooldown: {self.config['min_switch_interval_seconds'] / 60:.0f} minuten")
         logger.info(f"💰 Fees: {self.config['maker_fee'] * 100}% maker, {self.config['taker_fee'] * 100}% taker")
         logger.info("=" * 80)
@@ -195,7 +198,7 @@ class MultiCoinGridBot:
             if self.config.get('exclude_expensive_coins', False):
                 excluded = [f'BTC/{self.quote_currency}', f'ETH/{self.quote_currency}']
                 coin_volumes = [c for c in coin_volumes if c['symbol'] not in excluded]
-                logger.info(f"   🚫 Excluded BTC/ETH (te duur, weinig beweging)")
+                logger.info("   🚫 Excluded BTC/ETH (te duur, weinig beweging)")
 
             # Sorteer op PRIJS (laagste eerst) - goedkope coins = meer volatiliteit!
             coin_volumes.sort(key=lambda x: x['price'])
@@ -414,7 +417,11 @@ class MultiCoinGridBot:
         upper = current_price * (Decimal('1') + Decimal(str(self.config['range_pct_up'] / 100)))
 
         currency_symbol = '€' if self.quote_currency == 'EUR' else '$'
-        logger.info(f"📏 Grid range: {currency_symbol}{lower:.4f} - {currency_symbol}{upper:.4f} (huidig: {currency_symbol}{current_price:.4f})")
+        logger.info(
+            f"📏 Grid range: {currency_symbol}{
+                lower:.4f} - {currency_symbol}{
+                upper:.4f} (huidig: {currency_symbol}{
+                current_price:.4f})")
         return lower, upper
 
     def place_grid_orders(self):
@@ -436,8 +443,8 @@ class MultiCoinGridBot:
 
             # Update range als nodig (of eerste keer)
             current_time = time.time()
-            if (self.grid_lower is None or
-                    current_time - self.last_range_update > self.range_update_interval):
+            if (self.grid_lower is None
+                    or current_time - self.last_range_update > self.range_update_interval):
                 self.grid_lower, self.grid_upper = self.calculate_grid_range(current_price)
                 self.last_range_update = current_time
 
@@ -454,7 +461,10 @@ class MultiCoinGridBot:
             # Haal beschikbare quote currency op
             available_quote = self.get_available_quote()
             if available_quote < Decimal('20'):  # Minimaal €20/$20 voor 4 orders
-                logger.warning(f"⚠️  Onvoldoende {self.quote_currency} ({currency_symbol}{available_quote:.2f}) - minimaal {currency_symbol}20 vereist")
+                logger.warning(
+                    f"⚠️  Onvoldoende {
+                        self.quote_currency} ({currency_symbol}{
+                        available_quote:.2f}) - minimaal {currency_symbol}20 vereist")
                 return
 
             # Gebruik maximaal €80/$85 (of minder als niet beschikbaar)
@@ -500,7 +510,8 @@ class MultiCoinGridBot:
                         float(amount),
                         float(price)
                     )
-                    logger.info(f"   ✓ BUY  {float(amount):.4f} @ {currency_symbol}{float(price):.4f} (ID: {order['id']})")
+                    logger.info(
+                        f"   ✓ BUY  {float(amount):.4f} @ {currency_symbol}{float(price):.4f} (ID: {order['id']})")
                     self.open_orders.append(order)
                     orders_placed += 1
                     time.sleep(0.5)  # Rate limit respect
@@ -519,7 +530,8 @@ class MultiCoinGridBot:
                         float(amount),
                         float(price)
                     )
-                    logger.info(f"   ✓ SELL {float(amount):.4f} @ {currency_symbol}{float(price):.4f} (ID: {order['id']})")
+                    logger.info(
+                        f"   ✓ SELL {float(amount):.4f} @ {currency_symbol}{float(price):.4f} (ID: {order['id']})")
                     self.open_orders.append(order)
                     orders_placed += 1
                     time.sleep(0.5)  # Rate limit respect

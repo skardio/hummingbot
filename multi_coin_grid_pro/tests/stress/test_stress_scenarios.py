@@ -384,8 +384,8 @@ async def test_insufficient_balance_recovery(controller, mock_connector):
         if time_since_failure >= cooldown_seconds:
             # Cooldown expired - should be able to retry
             assert coin not in controller.last_insufficient_balance_time or \
-                   time_since_failure >= cooldown_seconds, \
-                   "Cooldown should be expired"
+                time_since_failure >= cooldown_seconds, \
+                "Cooldown should be expired"
 
 
 if __name__ == "__main__":

@@ -158,6 +158,12 @@ class TestFullCycle:
         controller.trend_calculator.trends["XRP-EUR"] = mock_trend
         controller.trend_calculator.get_best_coin = Mock(return_value="XRP-EUR")
 
+        # Mock _build_orderbook_config to avoid issues
+        controller._build_orderbook_config = Mock(return_value=None)
+
+        # Set last update time far in the past to ensure update runs
+        controller._last_trend_update = 0.0
+
         # Update trends
         controller.monitored_coins = ["XRP-EUR", "ADA-EUR"]
         await controller.update_processed_data()

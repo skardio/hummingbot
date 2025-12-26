@@ -130,7 +130,10 @@ class GlobalRiskManager:
             daily_loss_pct = (self._daily_loss_quote / self._reference_balance_quote) * DecimalHundred
             if daily_loss_pct >= self._limits.max_daily_loss_pct:
                 if logger:
-                    logger.info(f"🛑 RISK BLOCKED {symbol}: daily loss {daily_loss_pct:.2f}% >= {self._limits.max_daily_loss_pct}%")
+                    logger.info(
+                        f"🛑 RISK BLOCKED {symbol}: daily loss {
+                            daily_loss_pct:.2f}% >= {
+                            self._limits.max_daily_loss_pct}%")
                 return None
 
         # Cooldown following consecutive losses
@@ -138,7 +141,8 @@ class GlobalRiskManager:
             elapsed = now - self._last_loss_time
             if elapsed < self._limits.consecutive_loss_cooldown_seconds:
                 if logger:
-                    logger.info(f"🛑 RISK BLOCKED {symbol}: consecutive loss cooldown ({elapsed:.0f}s / {self._limits.consecutive_loss_cooldown_seconds}s)")
+                    logger.info(
+                        f"🛑 RISK BLOCKED {symbol}: consecutive loss cooldown ({elapsed:.0f}s / {self._limits.consecutive_loss_cooldown_seconds}s)")  # noqa: E501
                 return None
 
         # Exit cooldown per symbol
@@ -147,25 +151,34 @@ class GlobalRiskManager:
             elapsed = now - last_exit
             if elapsed < self._limits.exit_cooldown_seconds:
                 if logger:
-                    logger.info(f"🛑 RISK BLOCKED {symbol}: exit cooldown ({elapsed:.0f}s / {self._limits.exit_cooldown_seconds}s)")
+                    logger.info(
+                        f"🛑 RISK BLOCKED {symbol}: exit cooldown ({elapsed:.0f}s / {self._limits.exit_cooldown_seconds}s)")  # noqa: E501
                 return None
 
         # Switch cooldown (global)
         if self._last_switch_time > 0 and (now - self._last_switch_time) < self._limits.symbol_switch_cooldown_seconds:
             if logger:
-                logger.info(f"🛑 RISK BLOCKED {symbol}: switch cooldown ({(now - self._last_switch_time):.0f}s / {self._limits.symbol_switch_cooldown_seconds}s)")
+                logger.info(
+                    f"🛑 RISK BLOCKED {symbol}: switch cooldown "
+                    f"({(now - self._last_switch_time):.0f}s / {self._limits.symbol_switch_cooldown_seconds}s)"
+                )
             return None
 
         capped_notional = min(requested_notional, self._max_trade_notional())
         if capped_notional <= DecimalZero:
             if logger:
-                logger.info(f"🛑 RISK BLOCKED {symbol}: capped_notional <= 0 (requested={requested_notional}, max_per_trade={self._max_trade_notional()})")
+                logger.info(
+                    f"🛑 RISK BLOCKED {symbol}: capped_notional <= 0 (requested={requested_notional}, max_per_trade={
+                        self._max_trade_notional()})")
             return None
 
-        projected_total = self._total_open_notional + (capped_notional if symbol not in self._open_allocations else DecimalZero)
+        projected_total = self._total_open_notional + \
+            (capped_notional if symbol not in self._open_allocations else DecimalZero)
         if projected_total > self._max_total_notional():
             if logger:
-                logger.info(f"🛑 RISK BLOCKED {symbol}: projected total {projected_total} > max {self._max_total_notional()}")
+                logger.info(
+                    f"🛑 RISK BLOCKED {symbol}: projected total {projected_total} > max {
+                        self._max_total_notional()}")
             return None
 
         if logger:

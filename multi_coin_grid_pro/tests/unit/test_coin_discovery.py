@@ -5,14 +5,15 @@ Unit tests for CoinDiscovery module
 import sys
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 
+from multi_coin_grid_pro.utils.coin_discovery import CoinDiscovery
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from multi_coin_grid_pro.utils.coin_discovery import CoinDiscovery
 
 # Mark all tests in this module as async
 pytestmark = pytest.mark.asyncio

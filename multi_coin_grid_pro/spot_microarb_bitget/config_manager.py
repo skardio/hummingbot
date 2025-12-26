@@ -28,7 +28,8 @@ class MicroArbBitgetConfigManager(BaseConfigManager):
                 return env_path
         return self.config_dir / f"{config_name}.yaml"
 
-    def load_config(self, config_name: str = "spot_microarb_bitget", environment: Optional[str] = None) -> Dict[str, Any]:
+    def load_config(self, config_name: str = "spot_microarb_bitget",
+                    environment: Optional[str] = None) -> Dict[str, Any]:
         path = self.get_config_path(config_name, environment)
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
@@ -36,7 +37,11 @@ class MicroArbBitgetConfigManager(BaseConfigManager):
             data = yaml.safe_load(f) or {}
         return data
 
-    def save_config(self, config: Dict[str, Any], config_name: str = "spot_microarb_bitget", environment: Optional[str] = None) -> Path:
+    def save_config(self,
+                    config: Dict[str,
+                                 Any],
+                    config_name: str = "spot_microarb_bitget",
+                    environment: Optional[str] = None) -> Path:
         path = self.get_config_path(config_name, environment)
         with path.open("w") as f:
             yaml.safe_dump(config, f, sort_keys=False)

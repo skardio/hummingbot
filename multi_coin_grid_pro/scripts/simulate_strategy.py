@@ -15,12 +15,13 @@ import sys
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
+
+from hummingbot.connector.exchange.kraken.kraken_exchange import KrakenExchange
 
 # Add hummingbot to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from hummingbot.connector.exchange.kraken.kraken_exchange import KrakenExchange
 
 logging.basicConfig(
     level=logging.INFO,

@@ -6,12 +6,11 @@ Uitgebreide Trade Analyse - Eerste en Laatste Koop Analyse
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
-from decimal import Decimal
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from multi_coin_grid_pro.monitoring.database import MonitoringDatabase
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 def format_price(price: float) -> str:
@@ -154,7 +153,11 @@ def analyze_trades(hours: int = 8):
     status_after = None
     for status in status_snapshots:
         status_time = datetime.fromisoformat(status['timestamp'].replace('Z', '+00:00'))
-        if status_time < first_time and (status_before is None or status_time > datetime.fromisoformat(status_before['timestamp'].replace('Z', '+00:00'))):
+        if status_time < first_time and (
+            status_before is None or status_time > datetime.fromisoformat(
+                status_before['timestamp'].replace(
+                    'Z',
+                '+00:00'))):
             status_before = status
         if status_time > first_time and status_after is None:
             status_after = status
@@ -272,8 +275,10 @@ def analyze_trades(hours: int = 8):
                 total_profit += profit_abs
 
                 print(f"\n   Pair {i}:")
-                print(f"   Koop:  {format_timestamp(buy['timestamp'])} @ {format_price(buy['price'])} - {buy['amount']:.6f} GIGA")
-                print(f"   Verkoop: {format_timestamp(sell['timestamp'])} @ {format_price(sell['price'])} - {sell['amount']:.6f} GIGA")
+                print(
+                    f"   Koop:  {format_timestamp(buy['timestamp'])} @ {format_price(buy['price'])} - {buy['amount']:.6f} GIGA")  # noqa: E501
+                print(
+                    f"   Verkoop: {format_timestamp(sell['timestamp'])} @ {format_price(sell['price'])} - {sell['amount']:.6f} GIGA")  # noqa: E501
                 print(f"   Resultaat: {status} {format_price(profit_abs)} ({profit_pct:+.2f}%)")
 
             print(f"\n   💰 TOTAAL GIGA-EUR PROFIT: {format_price(total_profit)}")
@@ -318,8 +323,18 @@ def analyze_trades(hours: int = 8):
         if sells:
             first_sell = sells[0]
             last_sell = sells[-1]
-            print(f"   Eerste verkoop: {format_timestamp(first_sell['timestamp'])} @ {format_price(first_sell['price'])}")
-            print(f"   Laatste verkoop: {format_timestamp(last_sell['timestamp'])} @ {format_price(last_sell['price'])}")
+            print(
+                f"   Eerste verkoop: {
+                    format_timestamp(
+                        first_sell['timestamp'])} @ {
+                    format_price(
+                        first_sell['price'])}")
+            print(
+                f"   Laatste verkoop: {
+                    format_timestamp(
+                        last_sell['timestamp'])} @ {
+                    format_price(
+                        last_sell['price'])}")
 
         if pairs:
             total_profit = sum(

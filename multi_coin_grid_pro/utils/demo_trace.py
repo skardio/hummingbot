@@ -8,9 +8,9 @@ No Hummingbot dependencies required.
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(__file__))
-
 from decision_trace import PairDecisionTrace, trace_percentage_check, trace_range_check
+
+sys.path.insert(0, os.path.dirname(__file__))
 
 
 def demo_chz_usdt_rejection():
@@ -32,13 +32,10 @@ def demo_chz_usdt_rejection():
     consensus_trend = 16.25  # Very bullish!
     trend_1h = -1.00         # Short-term pullback
     trend_4h = 1.89          # Still bullish
-    trend_24h = 0.45         # Neutral
 
     # Technical indicators
     rsi = 79.3               # Overbought!
     vwap_deviation = 5.05    # Slightly above threshold
-    atr_pct = 2.5
-    wick_ratio = 0.15
 
     # Config thresholds
     consensus_min = 0.5
@@ -111,7 +108,7 @@ def demo_chz_usdt_rejection():
         trace.checks[-1].reason = "overbought"
     print(f"    Result: {'✅ PASS' if rsi_ok else '❌ FAIL'}")
     print(f"    RSI {rsi} must be <= {rsi_max} → {rsi_ok}")
-    print(f"    ⚠️  REJECTION TRIGGER: RSI too high!")
+    print("    ⚠️  REJECTION TRIGGER: RSI too high!")
     print()
 
     # 5. VWAP Deviation Check

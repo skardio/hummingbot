@@ -13,7 +13,7 @@ Key principles:
 # from decimal import Decimal  # noqa: F401
 from typing import Dict, Tuple
 
-from multi_coin_grid_pro.utils.decision_trace import PairDecisionTrace, trace_percentage_check, trace_range_check
+from multi_coin_grid_pro.utils.decision_trace import PairDecisionTrace, trace_percentage_check
 
 
 def smart_entry_check_with_trace(
@@ -71,7 +71,9 @@ def smart_entry_check_with_trace(
     )
     if not vwap_ok:
         trace.finalize(accepted=False, rejected_by="vwap_deviation", final_reason="too far from VWAP")
-        return False, f"🧠 {symbol}: NO BUY – VWAP dev {ind['vwap_deviation_pct']:+.2f}% > ±{cfg['vwap_max_deviation_pct']}%", trace
+        return False,
+        f"🧠 {symbol}: NO BUY – VWAP dev {ind['vwap_deviation_pct']:+.2f}% > ±{cfg['vwap_max_deviation_pct']}%",
+        trace
 
     # 3) Wick Ratio (candle structure)
     wick_ok = trace_percentage_check(
@@ -79,7 +81,9 @@ def smart_entry_check_with_trace(
     )
     if not wick_ok:
         trace.finalize(accepted=False, rejected_by="wick_ratio", final_reason="poor candle structure")
-        return False, f"🧠 {symbol}: NO BUY – wick_ratio {ind['wick_ratio']:.2f} < {cfg['min_wick_ratio']} (poor structure)", trace
+        return False, f"🧠 {symbol}: NO BUY – wick_ratio {
+            ind['wick_ratio']:.2f} < {
+            cfg['min_wick_ratio']} (poor structure)", trace
 
     # 4) ATR Volatility Range
     atr_min_ok = trace_percentage_check(
@@ -87,14 +91,18 @@ def smart_entry_check_with_trace(
     )
     if not atr_min_ok:
         trace.finalize(accepted=False, rejected_by="atr_min", final_reason="volatility too low")
-        return False, f"🧠 {symbol}: NO BUY – ATR {ind['atr_pct']:.2f}% < {cfg['min_atr_pct_for_grid']}% (too low)", trace
+        return False, f"🧠 {symbol}: NO BUY – ATR {
+            ind['atr_pct']:.2f}% < {
+            cfg['min_atr_pct_for_grid']}% (too low)", trace
 
     atr_max_ok = trace_percentage_check(
         trace, "atr_max", ind["atr_pct"], cfg["max_atr_pct_for_grid"], "<="
     )
     if not atr_max_ok:
         trace.finalize(accepted=False, rejected_by="atr_max", final_reason="too chaotic")
-        return False, f"🧠 {symbol}: NO BUY – ATR {ind['atr_pct']:.2f}% > {cfg['max_atr_pct_for_grid']}% (too chaotic)", trace
+        return False, f"🧠 {symbol}: NO BUY – ATR {
+            ind['atr_pct']:.2f}% > {
+            cfg['max_atr_pct_for_grid']}% (too chaotic)", trace
 
     # 5) 5-minute spike detection
     spike_5m = abs(ind["change_5m_pct"])
@@ -103,7 +111,9 @@ def smart_entry_check_with_trace(
     )
     if not spike_ok:
         trace.finalize(accepted=False, rejected_by="spike_5m", final_reason="sudden price spike")
-        return False, f"🧠 {symbol}: NO BUY – 5m move {ind['change_5m_pct']:+.2f}% > ±{cfg['max_5m_spike_pct']}% (spike detected)", trace
+        return False, f"🧠 {symbol}: NO BUY – 5m move {
+            ind['change_5m_pct']:+.2f}% > ±{
+            cfg['max_5m_spike_pct']}% (spike detected)", trace
 
     # 6) Trend Acceleration (1h vs 4h)
     accel = ind["trend_1h_pct"] - ind["trend_4h_pct"]
@@ -113,14 +123,18 @@ def smart_entry_check_with_trace(
     )
     if not accel_down_ok:
         trace.finalize(accepted=False, rejected_by="down_acceleration", final_reason="falling knife detected")
-        return False, f"🧠 {symbol}: NO BUY – down accel {accel:.2f}% < {cfg['max_down_accel_pct']}% (falling knife)", trace
+        return False, f"🧠 {symbol}: NO BUY – down accel {
+            accel:.2f}% < {
+            cfg['max_down_accel_pct']}% (falling knife)", trace
 
     accel_up_ok = trace_percentage_check(
         trace, "up_acceleration", accel, cfg["max_up_accel_pct"], "<="
     )
     if not accel_up_ok:
         trace.finalize(accepted=False, rejected_by="up_acceleration", final_reason="blow-off top risk")
-        return False, f"🧠 {symbol}: NO BUY – up accel {accel:.2f}% > {cfg['max_up_accel_pct']}% (blow-off top risk)", trace
+        return False, f"🧠 {symbol}: NO BUY – up accel {
+            accel:.2f}% > {
+            cfg['max_up_accel_pct']}% (blow-off top risk)", trace
 
     # 7) 24h Trend Sanity Checks
     trend_24h_max_ok = trace_percentage_check(
@@ -128,14 +142,18 @@ def smart_entry_check_with_trace(
     )
     if not trend_24h_max_ok:
         trace.finalize(accepted=False, rejected_by="trend_24h_max", final_reason="extended run")
-        return False, f"🧠 {symbol}: NO BUY – 24h trend {ind['trend_24h_pct']:+.2f}% > {cfg['max_trend_24h_pct']}% (extended run)", trace
+        return False, f"🧠 {symbol}: NO BUY – 24h trend {
+            ind['trend_24h_pct']:+.2f}% > {
+            cfg['max_trend_24h_pct']}% (extended run)", trace
 
     trend_24h_min_ok = trace_percentage_check(
         trace, "trend_24h_min", ind["trend_24h_pct"], cfg["min_trend_24h_pct"], ">="
     )
     if not trend_24h_min_ok:
         trace.finalize(accepted=False, rejected_by="trend_24h_min", final_reason="capitulation zone")
-        return False, f"🧠 {symbol}: NO BUY – 24h trend {ind['trend_24h_pct']:+.2f}% < {cfg['min_trend_24h_pct']}% (capitulation zone)", trace
+        return False, f"🧠 {symbol}: NO BUY – 24h trend {
+            ind['trend_24h_pct']:+.2f}% < {
+            cfg['min_trend_24h_pct']}% (capitulation zone)", trace
 
     # All checks passed!
     trace.finalize(accepted=True, final_reason="all SmartEntry filters passed")

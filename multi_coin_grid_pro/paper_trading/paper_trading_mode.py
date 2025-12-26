@@ -98,7 +98,10 @@ class PaperTradingMode:
 
         # Check if we have enough capital
         if total_cost > self.current_capital:
-            logger.warning(f"⚠️  Insufficient capital for buy: need €{total_cost:.2f}, have €{self.current_capital:.2f}")
+            logger.warning(
+                f"⚠️  Insufficient capital for buy: need €{
+                    total_cost:.2f}, have €{
+                    self.current_capital:.2f}")
             return None
 
         trade = PaperTrade(

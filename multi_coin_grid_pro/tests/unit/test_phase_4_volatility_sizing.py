@@ -64,7 +64,6 @@ class TestPhase4VolatilityLevelClassification(unittest.TestCase):
             multiplier = Decimal("0.67")
         elif volatility_pct > Decimal("3.0"):
             multiplier = Decimal("0.83")
-            level = "MEDIUM-HIGH"
 
         self.assertEqual(multiplier, Decimal("0.83"))
 
@@ -80,7 +79,6 @@ class TestPhase4VolatilityLevelClassification(unittest.TestCase):
             multiplier = Decimal("1.33")
         else:
             multiplier = Decimal("1.0")
-            level = "NORMAL"
 
         self.assertEqual(multiplier, Decimal("1.0"))
 
@@ -90,7 +88,6 @@ class TestPhase4VolatilityLevelClassification(unittest.TestCase):
 
         if volatility_pct < Decimal("1.5"):
             multiplier = Decimal("1.33")
-            level = "LOW"
 
         self.assertEqual(multiplier, Decimal("1.33"))
 

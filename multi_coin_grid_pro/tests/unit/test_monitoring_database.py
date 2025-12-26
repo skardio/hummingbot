@@ -3,9 +3,7 @@ Unit tests for Monitoring Database
 """
 import sys
 import tempfile
-from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock
 
 import pytest
 

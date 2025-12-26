@@ -18,7 +18,6 @@ sys.path.insert(0, str(project_root))
 def hummingbot_available():
     """Check if hummingbot modules are available"""
     try:
-        from hummingbot.connector.connector_base import ConnectorBase
         return True
     except (ImportError, KeyError):
         return False

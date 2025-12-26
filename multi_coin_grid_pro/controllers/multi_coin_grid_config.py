@@ -98,7 +98,10 @@ class MultiCoinGridConfig(ControllerConfigBase):
     manual_trading_pairs: Optional[List[str]] = Field(
         default=None,
         client_data=ClientFieldData(
-            prompt=lambda mi: "Manual trading pairs (comma separated, e.g. XRP-EUR,ADA-EUR) or leave empty for auto-discovery: ",
+            prompt=lambda mi: (
+                "Manual trading pairs (comma separated, e.g. XRP-EUR,ADA-EUR) "
+                "or leave empty for auto-discovery: "
+            ),
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
@@ -148,11 +151,11 @@ class MultiCoinGridConfig(ControllerConfigBase):
     coin_rotation_threshold: int = Field(
         default=90,
         client_data=ClientFieldData(
-            prompt=lambda mi: "Coin rotation threshold (number of updates without trades before replacement, default 90 = ~15 min): ",
+            prompt=lambda mi: "Coin rotation threshold (number of updates without trades before replacement, default 90 = ~15 min): ",  # noqa: E501
             prompt_on_new=False,
         ),
-        json_schema_extra={"is_updatable": True}
-    )
+        json_schema_extra={
+            "is_updatable": True})
 
     # Trend Detection Parameters
     trend_lookback_minutes: int = Field(
@@ -809,6 +812,44 @@ class MultiCoinGridConfig(ControllerConfigBase):
     )
 
     # ==============================================================================
+    # ORDERBOOK DEPTH-BASED LIQUIDITY PROXY (Phase 1-4: Multi-mode + Regime-Aware)
+    # ==============================================================================
+
+    orderbook_liquidity: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Orderbook liquidity config (dict): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description=(
+            "Orderbook depth-based liquidity proxy config. "
+            "Keys: enabled, mode ('shadow'|'ranking'|'early'), regime_aware, "
+            "depth_pct_range, depth_levels, min_depth_multiplier, "
+            "use_for_ranking, use_for_entry, log_depth_metrics. "
+            "Mode: 'shadow'=test only (log), 'ranking'=filter in coin selection (Phase 1), "
+            "'early'=filter before trend calculation (Phase 2 optimization). "
+            "Regime-aware (Phase 4): BULL=8x, CHOP=5x, BEAR=10x multipliers."
+        )
+    )
+
+    orderbook_prefetch: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Orderbook prefetch config (dict): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description=(
+            "Orderbook prefetch config for top-N candidates. "
+            "Keys: enabled (bool), mode ('shadow'|'live'), top_n (int), "
+            "max_subscriptions_per_minute (int). "
+            "Mode: 'shadow'=observe only (log cache status), 'live'=actually subscribe. "
+            "Helps pre-warm orderbook data for top candidates before SmartEntry validation."
+        )
+    )
+
+    # ==============================================================================
     # DEBUG TRACE SYSTEM (Decision Transparency)
     # ==============================================================================
 
@@ -943,14 +984,18 @@ class MultiCoinGridConfig(ControllerConfigBase):
 
         For futures/perpetual exchanges, use LIMIT instead of LIMIT_MAKER
         because many futures exchanges don't support LIMIT_MAKER order type.
+
+        FIX: Always use LIMIT_MAKER for spot trading to get maker fees (0.16% on Kraken).
+        Only use LIMIT for perpetual/futures exchanges.
         """
         # Check if this is a futures/perpetual exchange
         is_futures = (
-            "perpetual" in self.connector_name.lower() or
-            hasattr(self, "derivative_leverage") and getattr(self, "derivative_leverage", 1) > 1
+            "perpetual" in self.connector_name.lower()
+            or "_perpetual" in self.connector_name.lower()
+            or self.connector_name.endswith("_perp")
         )
 
-        # Use LIMIT for futures, LIMIT_MAKER for spot (lower fees)
+        # Use LIMIT_MAKER for spot (lower fees), LIMIT for futures (better compatibility)
         order_type = OrderType.LIMIT if is_futures else OrderType.LIMIT_MAKER
 
         return TripleBarrierConfig(

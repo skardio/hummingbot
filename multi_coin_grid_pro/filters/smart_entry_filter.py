@@ -84,16 +84,24 @@ class SmartEntryFilter:
     - Thin order books (depth protection)
     """
 
-    def __init__(self, config: SmartEntryConfig = None, exchange=None):
+    def __init__(self, config: SmartEntryConfig = None, exchange=None, connector_name: str = None):
         self.config = config or SmartEntryConfig()
         self.exchange = exchange  # For order book queries
+        self.connector_name = connector_name  # Store connector name for API calls
         logger.info("🧠 SmartEntryFilter initialized")
-        logger.info(f"   RSI range: {self.config.rsi_extreme_low}-{self.config.rsi_buy_max} (block >{self.config.rsi_block_min})")
+        logger.info(
+            f"   RSI range: {self.config.rsi_extreme_low}-{self.config.rsi_buy_max} (block >{self.config.rsi_block_min})")  # noqa: E501
         logger.info(f"   ATR range: {self.config.min_atr_pct_for_grid}%-{self.config.max_atr_pct_for_grid}%")
         logger.info(f"   5m spike max: {self.config.max_5m_spike_pct}%")
         logger.info(f"   Trend accel: {self.config.max_down_accel_pct}% to +{self.config.max_up_accel_pct}%")
-        logger.info(f"   Slippage protection: max spread {self.config.max_entry_spread_pct}% (enabled={self.config.slippage_check_enabled})")
-        logger.info(f"   Depth protection: {self.config.min_depth_multiplier}x multiplier (enabled={self.config.depth_check_enabled})")
+        logger.info(
+            f"   Slippage protection: max spread {
+                self.config.max_entry_spread_pct}% (enabled={
+                self.config.slippage_check_enabled})")
+        logger.info(
+            f"   Depth protection: {
+                self.config.min_depth_multiplier}x multiplier (enabled={
+                self.config.depth_check_enabled})")
 
     def check_order_book_depth(self, symbol: str, order_size_eur: float) -> Tuple[bool, str]:
         """
@@ -112,8 +120,8 @@ class SmartEntryFilter:
         try:
             required_depth = order_size_eur * self.config.min_depth_multiplier
 
-            # Get current order book from exchange
-            order_book = self.exchange.get_order_book(symbol)
+            # Get current order book from exchange using the new API
+            order_book = self.exchange.get_order_book(self.connector_name, symbol)
 
             if not order_book or 'bids' not in order_book or 'asks' not in order_book:
                 logger.warning(f"[DEPTH] {symbol} - No order book data available")

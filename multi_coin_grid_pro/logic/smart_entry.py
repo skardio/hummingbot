@@ -71,6 +71,7 @@ class SmartEntryFilter:
         coin_profiles: Dict[str, Dict[str, Any]],
         logger: Optional[logging.Logger] = None,
         exchange_connector=None,
+        connector_name: Optional[str] = None,
     ):
         """
         Initialize SmartEntry filter
@@ -79,12 +80,14 @@ class SmartEntryFilter:
             base_cfg: Base configuration with global defaults
             coin_profiles: Dict mapping symbol -> overrides (e.g., {"ATOM-EUR": {"min_wick_ratio": 0.20}})
             logger: Optional logger instance
-            exchange_connector: Exchange connector object for order book access
+            exchange_connector: MarketDataProvider instance for order book access
+            connector_name: Name of the connector to query (e.g., 'kraken')
         """
         self.base_cfg = base_cfg
         self.coin_profiles = coin_profiles
         self.logger = logger or logging.getLogger(__name__)
         self.exchange_connector = exchange_connector
+        self.connector_name = connector_name
 
         self.logger.info("=" * 80)
         self.logger.info("🧠 SmartEntryFilter v2.0 initialized")
@@ -98,11 +101,11 @@ class SmartEntryFilter:
         Fetch best bid/ask from exchange order book.
         Returns (bid, ask) or (None, None) if unavailable.
         """
-        if not self.exchange_connector:
+        if not self.exchange_connector or not self.connector_name:
             return None, None
 
         try:
-            order_book = self.exchange_connector.get_order_book(symbol)
+            order_book = self.exchange_connector.get_order_book(self.connector_name, symbol)
             if not order_book or 'bids' not in order_book or 'asks' not in order_book:
                 return None, None
 
@@ -151,49 +154,93 @@ class SmartEntryFilter:
 
         return True, f"Spread OK: {spread_pct:.3f}%", spread_pct
 
-    def _check_order_book_depth(self, symbol: str, order_size_eur: float, min_depth_multiplier: float) -> Tuple[bool, str, float, float]:
+    def _check_order_book_depth(self, symbol: str, order_size_eur: float,
+                                min_depth_multiplier: float) -> Tuple[bool, str, float, float]:
         """
-        Check if order book has sufficient depth for order.
-        Uses the same logic and thresholds as legacy SmartEntryFilter.
+        Check if order book has sufficient depth for safe order execution.
+
+        Uses liquidity_proxy utility for standardized depth calculation.
+
+        Args:
+            symbol: Trading pair (e.g., "BTC-USDT")
+            order_size_eur: Order size in quote currency
+            min_depth_multiplier: Required depth as multiplier of order size (e.g., 5.0 = 5x)
+
+        Returns:
+            (is_ok, reason, depth_available, depth_required)
         """
         if not self.exchange_connector:
             self.logger.debug(f"[DEPTH] {symbol} - Exchange connector not available, skipping check")
             return True, "Depth check disabled (no exchange connector)", 0.0, 0.0
 
         try:
-            required_depth = order_size_eur * min_depth_multiplier
+            from decimal import Decimal
 
-            order_book = self.exchange_connector.get_order_book(symbol)
+            # Import inside function to avoid circular imports
+            try:
+                from multi_coin_grid_pro.controllers.utils.liquidity_proxy import (
+                    calculate_orderbook_depth,
+                    format_depth_log,
+                    get_orderbook_snapshot,
+                    is_sufficient_depth,
+                )
+            except ImportError:
+                from hummingbot.multi_coin_grid_controllers.utils.liquidity_proxy import (
+                    calculate_orderbook_depth,
+                    format_depth_log,
+                    get_orderbook_snapshot,
+                    is_sufficient_depth,
+                )
 
-            if not order_book or 'bids' not in order_book or 'asks' not in order_book:
-                self.logger.warning(f"[DEPTH] {symbol} - No order book data available")
-                return True, "No order book data (skipping check)", 0.0, required_depth
+            # Get orderbook snapshot (non-blocking, uses cache)
+            bids, asks, mid_price = get_orderbook_snapshot(self.exchange_connector, symbol)
 
-            bid_total_eur = 0.0
-            for bid_price, bid_volume in order_book['bids']:
-                bid_total_eur += float(bid_price) * float(bid_volume)
-                if bid_total_eur >= required_depth:
-                    break
+            if not bids or not asks or not mid_price:
+                self.logger.warning(f"[DEPTH] {symbol} - No orderbook data available")
+                return True, "No orderbook data (skipping check)", 0.0, 0.0
 
-            ask_total_eur = 0.0
-            for ask_price, ask_volume in order_book['asks']:
-                ask_total_eur += float(ask_price) * float(ask_volume)
-                if ask_total_eur >= required_depth:
-                    break
+            # Calculate depth metrics (bids/asks are List[OrderBookRow], mid_price is Decimal)
+            depth_metrics = calculate_orderbook_depth(
+                bids=bids,
+                asks=asks,
+                mid_price=mid_price,
+                pct_range=0.5,  # ±0.5% around mid price
+                max_levels=10   # Top 10 levels per side
+            )
 
-            has_bid_depth = bid_total_eur >= required_depth
-            has_ask_depth = ask_total_eur >= required_depth
+            # Check if depth is sufficient
+            order_size_decimal = Decimal(str(order_size_eur))
+            is_ok, required_depth = is_sufficient_depth(
+                depth_score=depth_metrics.depth_score,
+                order_size_quote=order_size_decimal,
+                multiplier=min_depth_multiplier,
+                tolerance_pct=10.0  # 10% tolerance
+            )
 
-            if not has_bid_depth or not has_ask_depth:
-                return False, (
-                    f"Insufficient liquidity: BID {bid_total_eur:.0f}/{required_depth:.0f} EUR, "
-                    f"ASK {ask_total_eur:.0f}/{required_depth:.0f} EUR (need {min_depth_multiplier}x)"
-                ), min(bid_total_eur, ask_total_eur), required_depth
+            # Format log message
+            log_msg = format_depth_log(
+                symbol=symbol,
+                metrics=depth_metrics,
+                order_size=order_size_decimal,
+                multiplier=min_depth_multiplier,
+                is_sufficient=is_ok
+            )
 
-            return True, f"Sufficient depth ({min_depth_multiplier}x confirmed)", min(bid_total_eur, ask_total_eur), required_depth
+            if is_ok:
+                self.logger.debug(f"[DEPTH] {log_msg}")
+                return True, f"Sufficient depth ({min_depth_multiplier}x confirmed)", \
+                    float(depth_metrics.depth_score), float(required_depth)
+            else:
+                self.logger.warning(f"[DEPTH] {log_msg}")
+                return False, \
+                    f"Insufficient liquidity: depth={depth_metrics.depth_score:.1f} " \
+                    f"< required={required_depth:.1f} ({min_depth_multiplier}x)", \
+                    float(depth_metrics.depth_score), float(required_depth)
 
         except Exception as e:
             self.logger.warning(f"[DEPTH] {symbol} - Error checking depth: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
             return True, f"Depth check failed (allowing entry): {e}", 0.0, 0.0
 
     def _get_effective_cfg(self, symbol: str) -> Dict[str, Any]:
@@ -303,9 +350,13 @@ class SmartEntryFilter:
                 passed=depth_ok,
                 operator=">="
             )
-            if not depth_ok:
+            # Only reject if depth check explicitly failed (not if data unavailable)
+            if not depth_ok and depth_available > 0:
                 trace.finalize(accepted=False, rejected_by="depth", final_reason="insufficient depth")
                 return False, f"🧠 {symbol}: NO BUY – {depth_reason}", trace
+            elif not depth_ok:
+                # Depth data unavailable - log warning but allow entry
+                self.logger.debug(f"[DEPTH] {symbol} - Orderbook unavailable, skipping depth check")
 
         # 1) RSI Regime Checks
         # Use rsi_block_min (max overbought threshold) - allows coin profiles to override
@@ -322,7 +373,9 @@ class SmartEntryFilter:
         rsi_extreme_ok = trace_percentage_check(trace, "rsi_extreme", ind.rsi_14, cfg["rsi_extreme_low"], ">=")
         if not rsi_extreme_ok:
             trace.finalize(accepted=False, rejected_by="rsi_extreme", final_reason="falling knife risk")
-            return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} < {cfg['rsi_extreme_low']} (falling knife risk)", trace
+            return False, f"🧠 {symbol}: NO BUY – RSI {
+                ind.rsi_14:.1f} < {
+                cfg['rsi_extreme_low']} (falling knife risk)", trace
 
         # 2) VWAP Mean Reversion Check
         vwap_dev = 0.0
@@ -337,25 +390,33 @@ class SmartEntryFilter:
         wick_ok = trace_percentage_check(trace, "wick_ratio", ind.wick_ratio, cfg["min_wick_ratio"], ">=")
         if not wick_ok:
             trace.finalize(accepted=False, rejected_by="wick_ratio", final_reason="poor candle structure")
-            return False, f"🧠 {symbol}: NO BUY – wick_ratio {ind.wick_ratio:.2f} < {cfg['min_wick_ratio']} (poor structure)", trace
+            return False, f"🧠 {symbol}: NO BUY – wick_ratio {
+                ind.wick_ratio:.2f} < {
+                cfg['min_wick_ratio']} (poor structure)", trace
 
         # 4) ATR Volatility Regime
         atr_min_ok = trace_percentage_check(trace, "atr_min", ind.atr_pct, cfg["min_atr_pct_for_grid"], ">=")
         if not atr_min_ok:
             trace.finalize(accepted=False, rejected_by="atr_min", final_reason="volatility too low")
-            return False, f"🧠 {symbol}: NO BUY – ATR {ind.atr_pct:.2f}% < {cfg['min_atr_pct_for_grid']}% (too low)", trace
+            return False, f"🧠 {symbol}: NO BUY – ATR {
+                ind.atr_pct:.2f}% < {
+                cfg['min_atr_pct_for_grid']}% (too low)", trace
 
         atr_max_ok = trace_percentage_check(trace, "atr_max", ind.atr_pct, cfg["max_atr_pct_for_grid"], "<=")
         if not atr_max_ok:
             trace.finalize(accepted=False, rejected_by="atr_max", final_reason="too chaotic")
-            return False, f"🧠 {symbol}: NO BUY – ATR {ind.atr_pct:.2f}% > {cfg['max_atr_pct_for_grid']}% (too chaotic)", trace
+            return False, f"🧠 {symbol}: NO BUY – ATR {
+                ind.atr_pct:.2f}% > {
+                cfg['max_atr_pct_for_grid']}% (too chaotic)", trace
 
         # 5) 5m Spike Detection (news/chaos filter)
         spike_5m = abs(ind.change_5m_pct)
         spike_ok = trace_percentage_check(trace, "spike_5m", spike_5m, cfg["max_5m_spike_pct"], "<=")
         if not spike_ok:
             trace.finalize(accepted=False, rejected_by="spike_5m", final_reason="sudden price spike")
-            return False, f"🧠 {symbol}: NO BUY – 5m move {ind.change_5m_pct:+.2f}% > ±{cfg['max_5m_spike_pct']}% (spike detected)", trace
+            return False, f"🧠 {symbol}: NO BUY – 5m move {
+                ind.change_5m_pct:+.2f}% > ±{
+                cfg['max_5m_spike_pct']}% (spike detected)", trace
 
         # 6) Trend Acceleration Check (1h vs 4h)
         accel = ind.trend_1h_pct - ind.trend_4h_pct
@@ -363,23 +424,33 @@ class SmartEntryFilter:
         accel_down_ok = trace_percentage_check(trace, "down_acceleration", accel, cfg["max_down_accel_pct"], ">=")
         if not accel_down_ok:
             trace.finalize(accepted=False, rejected_by="down_acceleration", final_reason="falling knife detected")
-            return False, f"🧠 {symbol}: NO BUY – down accel {accel:.2f}% < {cfg['max_down_accel_pct']}% (falling knife)", trace
+            return False, f"🧠 {symbol}: NO BUY – down accel {
+                accel:.2f}% < {
+                cfg['max_down_accel_pct']}% (falling knife)", trace
 
         accel_up_ok = trace_percentage_check(trace, "up_acceleration", accel, cfg["max_up_accel_pct"], "<=")
         if not accel_up_ok:
             trace.finalize(accepted=False, rejected_by="up_acceleration", final_reason="blow-off top risk")
-            return False, f"🧠 {symbol}: NO BUY – up accel {accel:.2f}% > {cfg['max_up_accel_pct']}% (blow-off top risk)", trace
+            return False, f"🧠 {symbol}: NO BUY – up accel {
+                accel:.2f}% > {
+                cfg['max_up_accel_pct']}% (blow-off top risk)", trace
 
         # 7) 24h Trend Sanity Checks
-        trend_24h_max_ok = trace_percentage_check(trace, "trend_24h_max", ind.trend_24h_pct, cfg["max_trend_24h_pct"], "<=")
+        trend_24h_max_ok = trace_percentage_check(
+            trace, "trend_24h_max", ind.trend_24h_pct, cfg["max_trend_24h_pct"], "<=")
         if not trend_24h_max_ok:
             trace.finalize(accepted=False, rejected_by="trend_24h_max", final_reason="extended run")
-            return False, f"🧠 {symbol}: NO BUY – 24h trend {ind.trend_24h_pct:+.2f}% > {cfg['max_trend_24h_pct']}% (extended run)", trace
+            return False, f"🧠 {symbol}: NO BUY – 24h trend {
+                ind.trend_24h_pct:+.2f}% > {
+                cfg['max_trend_24h_pct']}% (extended run)", trace
 
-        trend_24h_min_ok = trace_percentage_check(trace, "trend_24h_min", ind.trend_24h_pct, cfg["min_trend_24h_pct"], ">=")
+        trend_24h_min_ok = trace_percentage_check(
+            trace, "trend_24h_min", ind.trend_24h_pct, cfg["min_trend_24h_pct"], ">=")
         if not trend_24h_min_ok:
             trace.finalize(accepted=False, rejected_by="trend_24h_min", final_reason="capitulation zone")
-            return False, f"🧠 {symbol}: NO BUY – 24h trend {ind.trend_24h_pct:+.2f}% < {cfg['min_trend_24h_pct']}% (capitulation zone)", trace
+            return False, f"🧠 {symbol}: NO BUY – 24h trend {
+                ind.trend_24h_pct:+.2f}% < {
+                cfg['min_trend_24h_pct']}% (capitulation zone)", trace
 
         # All checks passed!
         trace.finalize(accepted=True, final_reason="all SmartEntry filters passed")

@@ -3,7 +3,6 @@ Core data models for Hybrid Grid Bot v2.0
 """
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Dict, List, Optional
 
 
 @dataclass

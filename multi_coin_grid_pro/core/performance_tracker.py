@@ -187,6 +187,13 @@ class PerformanceTracker:
         Returns:
             TradeRecord object
         """
+        # Convert all numeric inputs to Decimal for type safety
+        entry_price = Decimal(str(entry_price)) if not isinstance(entry_price, Decimal) else entry_price
+        exit_price = Decimal(str(exit_price)) if not isinstance(exit_price, Decimal) else exit_price
+        position_size_eur = Decimal(str(position_size_eur)) if not isinstance(position_size_eur, Decimal) else position_size_eur
+        realized_pnl_eur = Decimal(str(realized_pnl_eur)) if not isinstance(realized_pnl_eur, Decimal) else realized_pnl_eur
+        fees_eur = Decimal(str(fees_eur)) if not isinstance(fees_eur, Decimal) else fees_eur
+
         # Classify outcome
         if realized_pnl_eur > Decimal("0.001"):  # >€0.001 = win
             outcome = TradeOutcome.WIN
@@ -216,7 +223,9 @@ class PerformanceTracker:
         self.trade_history.append(trade)
 
         # Update balance tracking for drawdown
-        self._current_balance += realized_pnl_eur
+        # Ensure type safety: convert to Decimal if needed
+        pnl_decimal = Decimal(str(realized_pnl_eur)) if not isinstance(realized_pnl_eur, Decimal) else realized_pnl_eur
+        self._current_balance += pnl_decimal
         if self._current_balance > self._peak_balance:
             self._peak_balance = self._current_balance
 
@@ -418,7 +427,8 @@ class PerformanceTracker:
         Returns:
             PerformanceMetrics for recent window
         """
-        recent_trades = self.trade_history[-last_n_trades:] if len(self.trade_history) >= last_n_trades else self.trade_history
+        recent_trades = self.trade_history[-last_n_trades:] if len(
+            self.trade_history) >= last_n_trades else self.trade_history
 
         if not recent_trades:
             now = datetime.now(timezone.utc)
@@ -480,7 +490,8 @@ class PerformanceTracker:
         report.append("=" * 80)
         report.append("📊 PERFORMANCE REPORT")
         report.append("=" * 80)
-        report.append(f"Period: {metrics.period_start.strftime('%Y-%m-%d %H:%M')} → {metrics.period_end.strftime('%Y-%m-%d %H:%M')}")
+        report.append(
+            f"Period: {metrics.period_start.strftime('%Y-%m-%d %H:%M')} → {metrics.period_end.strftime('%Y-%m-%d %H:%M')}")  # noqa: E501
         report.append("")
 
         # Trade statistics

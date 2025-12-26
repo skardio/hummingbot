@@ -9,7 +9,6 @@ import asyncio
 import logging
 import os
 import sys
-from decimal import Decimal
 from pathlib import Path
 
 # Add hummingbot to path
@@ -39,8 +38,6 @@ logger.info("=" * 70)
 try:
     import ccxt
 
-    from hummingbot.client.hummingbot_application import HummingbotApplication
-    from hummingbot.connector.exchange.kraken.kraken_exchange import KrakenExchange
     logger.info("✓ Hummingbot modules loaded")
 except ImportError as e:
     logger.error(f"❌ Failed to import Hummingbot: {e}")

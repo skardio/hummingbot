@@ -4,7 +4,7 @@ Unit tests for Monitoring Data Collector
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
@@ -12,10 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 try:
     from multi_coin_grid_pro.monitoring.collector import DataCollector
-    from multi_coin_grid_pro.monitoring.database import MonitoringDatabase
 except ImportError:
     from monitoring.collector import DataCollector
-    from monitoring.database import MonitoringDatabase
 
 
 class TestDataCollector:

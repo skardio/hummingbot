@@ -12,7 +12,7 @@ Berekent technische indicators van 5m OHLCV candles:
 
 import logging
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import List
 
 logger = logging.getLogger(__name__)
 

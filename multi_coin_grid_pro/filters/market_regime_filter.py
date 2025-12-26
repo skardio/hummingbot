@@ -13,7 +13,7 @@ Dit is een MACRO filter - checkt VOOR coin selection of trading überhaupt slim 
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
 
@@ -106,7 +106,10 @@ class MarketRegimeFilter:
         logger.info(f"   BTC min trends: 1h={self.config.btc_min_trend_1h}%, "
                     f"4h={self.config.btc_min_trend_4h}%, 24h={self.config.btc_min_trend_24h}%")
         logger.info(f"   Altcoin breadth: min {self.config.altcoin_breadth_min * 100:.0f}% bullish")
-        logger.info(f"   Dump detection: {self.config.btc_dump_threshold_1h}% → {self.config.btc_dump_cooldown_minutes}min cooldown")
+        logger.info(
+            f"   Dump detection: {
+                self.config.btc_dump_threshold_1h}% → {
+                self.config.btc_dump_cooldown_minutes}min cooldown")
 
     def check_market_regime(
         self,
@@ -172,14 +175,18 @@ class MarketRegimeFilter:
             breadth = self._calculate_altcoin_breadth(altcoin_trends)
             breadth_ok = breadth >= self.config.altcoin_breadth_min
             if not breadth_ok:
-                btc_reason = f"Low altcoin breadth ({breadth * 100:.0f}% < {self.config.altcoin_breadth_min * 100:.0f}%)"
+                btc_reason = f"Low altcoin breadth ({
+                    breadth
+                    * 100:.0f}% < {
+                    self.config.altcoin_breadth_min
+                    * 100:.0f}%)"
 
         # Final decision
         is_favorable = btc_ok and breadth_ok
 
         if is_favorable:
             reason = f"✅ Favorable - BTC: 1h={btc_trend_data.trend_1h_pct:.1f}% " \
-                    f"4h={btc_trend_data.trend_4h_pct:.1f}% 24h={btc_trend_data.trend_24h_pct:.1f}%"
+                f"4h={btc_trend_data.trend_4h_pct:.1f}% 24h={btc_trend_data.trend_24h_pct:.1f}%"
             if breadth > 0:
                 reason += f", Breadth: {breadth * 100:.0f}%"
         else:

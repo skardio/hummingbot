@@ -7,12 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from multi_coin_grid_pro.filters.market_regime_filter import (
-    BTCTrendData,
-    MarketRegimeConfig,
-    MarketRegimeFilter,
-    MarketRegimeState,
-)
+from multi_coin_grid_pro.filters.market_regime_filter import BTCTrendData, MarketRegimeConfig, MarketRegimeFilter
 
 
 class TestMarketRegimeFilter:

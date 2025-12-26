@@ -7,18 +7,19 @@ Tests the balance check functionality added to prevent "Insufficient funds" erro
 import sys
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-
 from hummingbot.connector.trading_rule import TradingRule
-from hummingbot.core.data_type.common import OrderType, PriceType, TradeType
+from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
 from hummingbot.strategy_v2.executors.grid_executor.grid_executor import GridExecutor
 from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
 from hummingbot.strategy_v2.models.executors import CloseType
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
 
 # Mark all tests as async
 pytestmark = pytest.mark.asyncio
@@ -82,8 +83,8 @@ class TestGridExecutorBalanceCheck:
     def executor(self, mock_strategy, grid_config, mock_connector):
         """Create executor instance"""
         with patch('hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor.update_metrics'), \
-             patch('hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor.update_position_metrics'), \
-             patch.object(GridExecutor, 'get_price', return_value=Decimal("1.5")):
+                patch('hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor.update_position_metrics'), \
+                patch.object(GridExecutor, 'get_price', return_value=Decimal("1.5")):  # noqa: E501
             executor = GridExecutor(
                 strategy=mock_strategy,
                 config=grid_config,

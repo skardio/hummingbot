@@ -7,9 +7,14 @@ Tests Layer 3 (Price-Based Exit) and Layer 5 (Grid Profit Exit)
 import sys
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock
 
 import pytest
+
+from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
+from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
+from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, RunnableStatus
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -23,12 +28,6 @@ except ImportError:
     except ImportError:
         from controllers.multi_coin_grid_config import MultiCoinGridConfig
         from controllers.multi_coin_grid_controller import MultiCoinGridController
-
-from hummingbot.core.data_type.common import OrderType, TradeType
-from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
-from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
-from hummingbot.strategy_v2.models.executors import CloseType
-from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, RunnableStatus
 
 
 @pytest.fixture

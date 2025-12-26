@@ -9,7 +9,7 @@ Tests the concepts and logic of:
 """
 
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 
 
@@ -347,8 +347,6 @@ class TestPhase3RealWorldScenarios(unittest.TestCase):
     def test_scenario_multi_day_week(self):
         """Scenario: Losing over multiple days in a week"""
         week_start = Decimal("100.0")
-        day1_end = Decimal("98.0")  # -2%
-        day2_end = Decimal("95.0")  # -5% cumulative
         day3_end = Decimal("93.0")  # -7% cumulative
 
         weekly_loss = (week_start - day3_end) / week_start * Decimal("100")

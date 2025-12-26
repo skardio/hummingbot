@@ -4,19 +4,17 @@ Test Telegram Bot
 
 Quick test script to verify Telegram bot is working.
 """
-# Add parent directory to path
+import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import os
-import unittest
-
 from multi_coin_grid_pro.monitoring.config import MonitoringConfig
 from multi_coin_grid_pro.monitoring.database import MonitoringDatabase
+
+# Add parent directory to path
 from multi_coin_grid_pro.monitoring.telegram_bot import TelegramBot
-from multi_coin_grid_pro.monitoring.telegram_notifier import TelegramNotifier
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def test_telegram_bot():

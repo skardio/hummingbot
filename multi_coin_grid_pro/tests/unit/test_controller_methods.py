@@ -78,7 +78,7 @@ def config():
 def controller(config, mock_strategy, mock_market_data_provider, mock_actions_queue, mock_connector):
     """Create a controller instance for testing"""
     with patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'), \
-         patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.CoinDiscovery'):
+            patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.CoinDiscovery'):
         controller = MultiCoinGridController(
             config=config,
             market_data_provider=mock_market_data_provider,
@@ -161,7 +161,8 @@ class TestErrorHandling:
         second_call_time = time.time() - start_time
 
         # Second call should take longer due to rate limiting
-        assert second_call_time >= 1.3, f"Rate limiting not working: second call took {second_call_time:.2f}s (expected >= 1.3s)"
+        assert second_call_time >= 1.3, f"Rate limiting not working: second call took {
+            second_call_time:.2f}s (expected >= 1.3s)"
         assert mock_connector._get_ticker_data.call_count == 2, "Should have made 2 API calls"
 
 
@@ -208,7 +209,8 @@ class TestGridCreation:
         best_trend.trend_score = 2.0
         best_trend.consensus_trend_pct = 2.0  # Must be float, not MagicMock
         best_trend.trend_pct = 2.0  # Must be float, not MagicMock
-        controller.trend_calculator.get_trend = MagicMock(side_effect=lambda coin: active_trend if coin == "ADA-EUR" else best_trend)
+        controller.trend_calculator.get_trend = MagicMock(
+            side_effect=lambda coin: active_trend if coin == "ADA-EUR" else best_trend)
         controller.config.min_switch_interval_seconds = 0
         controller.market_data_provider = MagicMock()
         controller.market_data_provider.time = MagicMock(return_value=1000)
@@ -227,7 +229,8 @@ class TestGridCreation:
         trend = MagicMock()
         trend.volatility = 0.02
         trend.current_price = Decimal("2.0")  # Use Decimal, not MagicMock
-        trend.price_history = [{"price": Decimal("2.0"), "high": Decimal("2.05"), "low": Decimal("1.95"), "timestamp": 1000}] * 20
+        trend.price_history = [{"price": Decimal("2.0"), "high": Decimal(
+            "2.05"), "low": Decimal("1.95"), "timestamp": 1000}] * 20
         trend.consensus_trend_pct = 1.0
         trend.trend_pct = 1.0
         controller.trend_calculator.get_trend = MagicMock(return_value=trend)
@@ -467,6 +470,9 @@ class TestTrendUpdateScheduling:
         controller.config.price_update_interval = 5
         controller._last_trend_update = time.time() - 10
 
+        # Mock _build_orderbook_config to avoid issues
+        controller._build_orderbook_config = MagicMock(return_value=None)
+
         await controller.update_processed_data()
 
         controller.trend_calculator.update_all_trends_v2.assert_awaited_once()
@@ -609,8 +615,8 @@ class TestPaperTradingOrderBook:
 
             # Verify markets were set with common pairs
             assert hasattr(multi_coin_grid_pro.scripts.multi_coin_grid_v2.MultiCoinGridStrategyV2, 'markets')
-            assert "kraken_paper_trade" in multi_coin_grid_pro.scripts.multi_coin_grid_v2.MultiCoinGridStrategyV2.markets
-            markets = multi_coin_grid_pro.scripts.multi_coin_grid_v2.MultiCoinGridStrategyV2.markets["kraken_paper_trade"]
+            assert "kraken_paper_trade" in multi_coin_grid_pro.scripts.multi_coin_grid_v2.MultiCoinGridStrategyV2.markets  # noqa: E501
+            markets = multi_coin_grid_pro.scripts.multi_coin_grid_v2.MultiCoinGridStrategyV2.markets["kraken_paper_trade"]  # noqa: E501
 
             # Verify common pairs are included
             assert isinstance(markets, set)

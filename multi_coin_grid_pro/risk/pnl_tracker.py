@@ -11,14 +11,13 @@ Tracks:
 import logging
 import sys
 import time
-from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Dict, List
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from core.models import Position, TradeFill
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 class RealtimePnLTracker:

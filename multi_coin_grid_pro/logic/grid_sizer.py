@@ -41,7 +41,8 @@ class DynamicGridSizer:
         self.logger.info("📊 DynamicGridSizer v2.0 initialized")
         self.logger.info(f"   Grid range: {self.min_grids}-{self.max_grids} levels")
         self.logger.info(f"   Low vol: <{self.low_vol_atr_pct}% ATR → {self.min_grids} grids")
-        self.logger.info(f"   Mid vol: {self.low_vol_atr_pct}-{self.mid_vol_atr_pct}% → {self.min_grids + 1}-{self.max_grids - 2} grids")
+        self.logger.info(
+            f"   Mid vol: {self.low_vol_atr_pct}-{self.mid_vol_atr_pct}% → {self.min_grids + 1}-{self.max_grids - 2} grids")  # noqa: E501
         self.logger.info(f"   High vol: {self.mid_vol_atr_pct}-{self.high_vol_atr_pct}% → {self.max_grids} grids")
         self.logger.info(f"   Very high: >{self.high_vol_atr_pct}% → {self.max_grids - 2} grids (risk reduction)")
         self.logger.info("=" * 80)

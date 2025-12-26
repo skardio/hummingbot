@@ -169,7 +169,7 @@ class TestPhase2OrderBookDepth(unittest.TestCase):
 
         # Thin markets may not have sufficient depth
         bid_depth = Decimal("2000")
-        ask_depth = Decimal("2000")
+        Decimal("2000")
 
         self.assertFalse(bid_depth >= required_depth)
 

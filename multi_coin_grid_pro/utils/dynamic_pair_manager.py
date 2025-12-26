@@ -14,8 +14,7 @@ This allows the bot to:
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
-from decimal import Decimal
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
@@ -34,7 +33,11 @@ class PairMetrics:
     last_scanned: float = 0.0
     score: float = 0.0  # Composite score for ranking
 
-    def calculate_score(self, volume_weight: float = 0.4, trend_weight: float = 0.4, spread_weight: float = 0.2) -> float:
+    def calculate_score(
+            self,
+            volume_weight: float = 0.4,
+            trend_weight: float = 0.4,
+            spread_weight: float = 0.2) -> float:
         """
         Calculate composite score for pair ranking
 
@@ -50,9 +53,9 @@ class PairMetrics:
         spread_score = max(0, 100 - (self.spread_pct * 100))
 
         self.score = (
-            volume_score * volume_weight +
-            trend_score * trend_weight +
-            spread_score * spread_weight
+            volume_score * volume_weight
+            + trend_score * trend_weight
+            + spread_score * spread_weight
         )
         return self.score
 
@@ -179,7 +182,12 @@ class DynamicPairManager:
 
                 logger.info(f"✅ Full scan complete in {elapsed:.1f}s")
                 logger.info(f"   Total pairs scanned: {scanned_count}")
-                logger.info(f"   Qualified pairs (vol>€{self.min_volume_24h / 1000:.0f}k, spread<{self.max_spread_pct}%): {len(qualified_pairs)}")
+                logger.info(
+                    f"   Qualified pairs (vol>€{
+                        self.min_volume_24h
+                        / 1000:.0f}k, spread<{
+                        self.max_spread_pct}%): {
+                        len(qualified_pairs)}")
 
                 # Log top 10
                 top_10 = sorted(qualified_pairs, key=lambda x: x.score, reverse=True)[:10]
@@ -287,7 +295,6 @@ class DynamicPairManager:
             SOLUSD -> SOL-USD
         """
         # Common Kraken prefixes to strip
-        prefixes = ["XX", "X", "Z"]
 
         # Known quote assets
         quote_assets = ["EUR", "USD", "USDT", "USDC", "BTC", "ETH"]

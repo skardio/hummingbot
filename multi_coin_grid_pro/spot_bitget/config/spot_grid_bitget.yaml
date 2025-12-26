@@ -44,14 +44,14 @@ adaptive_filters:
   # Baseline filters (conservative, used as fallback)
   baseline:
     rsi_buy_min: 25.0
-    rsi_buy_max: 70.0
+    rsi_buy_max: 80.0               # 🔧 FIX: 70→80 (allow trading in CHOP/BEAR when altcoins pumping)
     rsi_extreme_min: 20.0
-    vwap_max_deviation_pct: 3.0
-    max_up_accel_pct: 1.2
-    max_down_accel_pct: -2.0
-    atr_min_pct: 0.15
+    vwap_max_deviation_pct: 5.0     # 🔧 FIX: 3.0→5.0 (allow stronger altcoin moves)
+    max_up_accel_pct: 2.0           # 🔧 FIX: 1.2→2.0 (allow momentum)
+    max_down_accel_pct: -3.0        # 🔧 FIX: -2.0→-3.0 (allow deeper pullbacks)
+    atr_min_pct: 0.12               # 🔧 FIX: 0.15→0.12 (accepteer iets minder volatiele coins)
     atr_max_pct: 6.0
-    spike_5m_max_pct: 2.0
+    spike_5m_max_pct: 2.5           # 🔧 FIX: 2.0→2.5 (allow bigger moves)
     wick_ratio_min: 0.0
     grid_spacing_mult: 1.0
     max_active_grids: 1
@@ -69,30 +69,30 @@ adaptive_filters:
     max_active_grids: 3
     entry_confidence_min: 0.60
 
-  # CHOP regime: strict filters (= baseline)
+  # CHOP regime: strict filters
   CHOP:
-    rsi_buy_max: 70.0
-    vwap_max_deviation_pct: 3.0
-    max_up_accel_pct: 1.2
-    max_down_accel_pct: -2.0
-    atr_min_pct: 0.15
-    spike_5m_max_pct: 2.0
+    rsi_buy_max: 78.0               # 🔧 FIX: 70→78 (allow trading in choppy markets)
+    vwap_max_deviation_pct: 4.5     # 🔧 FIX: 3.0→4.5 (more room for altcoin moves)
+    max_up_accel_pct: 1.8           # 🔧 FIX: 1.2→1.8 (allow some momentum)
+    max_down_accel_pct: -2.5        # 🔧 FIX: -2.0→-2.5 (allow pullbacks)
+    atr_min_pct: 0.12               # 🔧 FIX: 0.15→0.12
+    spike_5m_max_pct: 2.5           # 🔧 FIX: 2.0→2.5
     grid_spacing_mult: 0.8
     max_active_grids: 1
     entry_confidence_min: 0.75
 
-  # BEAR regime: ultra-strict or disabled
+  # BEAR regime: relaxed to allow counter-trend altcoin pumps
   BEAR:
-    rsi_buy_max: 50.0
-    vwap_max_deviation_pct: 1.5
-    max_up_accel_pct: 0.5
-    max_down_accel_pct: -1.0
-    atr_min_pct: 0.20
-    spike_5m_max_pct: 1.0
+    rsi_buy_max: 70.0               # 🔧 FIX: 50→70 (allow counter-trend altcoin pumps)
+    vwap_max_deviation_pct: 3.5     # 🔧 FIX: 1.5→3.5 (allow mean-reversion trades)
+    max_up_accel_pct: 1.5           # 🔧 FIX: 0.5→1.5 (allow counter-trend momentum)
+    max_down_accel_pct: -2.0        # 🔧 FIX: -1.0→-2.0 (allow pullbacks)
+    atr_min_pct: 0.12               # 🔧 FIX: 0.15→0.12
+    spike_5m_max_pct: 2.0           # 🔧 FIX: 1.0→2.0 (allow bigger moves)
     grid_spacing_mult: 1.5
-    max_active_grids: 0          # Disabled
-    entry_confidence_min: 0.90
-    bear_allow_meanrev: false    # Set true to allow mean-reversion trades
+    max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid even in BEAR)
+    entry_confidence_min: 0.80      # 🔧 FIX: 0.90→0.80 (slightly relaxed)
+    bear_allow_meanrev: true        # 🔧 FIX: false→true (allow counter-trend trades)
 
 # === EXCHANGE CONFIGURATION ===
 paper_trading: false              # Set to true for testing
@@ -100,13 +100,16 @@ connector_name: bitget            # Bitget SPOT connector
 quote_asset: USDT                 # Quote currency
 
 # ==============================================================================
-# DYNAMIC PAIR DISCOVERY
+# BITGET SPOT GRID — LIQUID UNIVERSE PRESET
+# Purpose: Stable, high-liquidity trading universe for Bitget
+# Reason: Bitget API has no reliable 24h volume via ticker
+# Strategy: Manual universe + SmartEntry + MTF protection
 # ==============================================================================
 
-use_dynamic_pair_discovery: true   # Dynamic discovery enabled!
-max_coins_to_monitor: 49
+use_dynamic_pair_discovery: true   # ❌ Disable dynamic discovery (volume = 0 issue)
+max_coins_to_monitor: 60            # Manual list size
 exclude_expensive_coins: false
-min_24h_volume_usdt: 50000         # Lowered from 1M to 50K (Bitget has no ticker data)
+min_24h_volume_usdt: 1000000        # $1M minimum (Bitget uses USDT, not EUR)
 
 # Bitget-specific fee overrides (Bitget standard fees)
 bitget_maker_fee_pct: 0.001  # 0.1% maker fee
@@ -130,22 +133,42 @@ blacklist:
   - FIS-USDT
   - NFP-USDT
 
-manual_trading_pairs: []
-  # 🔧 DYNAMIC MODE: Leave empty! Coins are discovered dynamically.
-  # The controller will handle order book initialization automatically.
+manual_trading_pairs: []  # Empty list = dynamic discovery mode (auto-select from all USDT pairs)
 
-max_simultaneous_coins: 1         # Start with 1 coin
+# # --- Tier 1 (Ultra liquid) ---
+#   - BTC-USDT
+#   - ETH-USDT
+
+#   # --- Tier 2 (Very liquid majors) ---
+#   - SOL-USDT
+#   - BNB-USDT
+#   - XRP-USDT
+#   - DOGE-USDT
+
+#   # --- Tier 3 (Liquid large caps) ---
+#   - ADA-USDT
+#   - AVAX-USDT
+#   - LINK-USDT
+#   - DOT-USDT
+
+#   # --- Tier 4 (Optional, still liquid) ---
+#   - LTC-USDT
+#   - BCH-USDT
+#   - ATOM-USDT
+#   - UNI-USDT
+
+max_simultaneous_coins: 1         # Eén coin tegelijk (spot grid discipline)
 
 # ==============================================================================
 # MULTI-TIMEFRAME BUY PROTECTION (PREVENT KAS-EUR DISASTER)
 # ==============================================================================
 
 use_multi_timeframe_buy: true      # ENABLE multi-timeframe checks voor entries
-mtf_1h_min_pct: -0.1               # 1h mag max -0.1% (kleine pullback OK)
-mtf_4h_min_pct: 0.3                # 4h moet ≥ +0.3% (momentum required)
-mtf_24h_min_pct: 0.5               # 24h moet ≥ +0.5% (uptrend required)
-mtf_declining_1h_max: -0.5         # Als 1h < -0.5% EN 4h < 0% → REJECT
-mtf_declining_4h_max: 0.0          # (prevents trading during crashes)
+mtf_1h_min_pct: -2.0               # 🔧 HYBRID: 1h mag -2% pullback (normal in chop)
+mtf_4h_min_pct: -1.0               # 🔧 HYBRID: 4h mag -1% pullback (CHESS: -0.29%)
+mtf_24h_min_pct: -1.0              # 🔧 HYBRID: 24h mag -1% pullback (CHESS: -0.14%)
+mtf_declining_1h_max: -2.5         # Als 1h < -2.5% EN 4h < -1% → REJECT (crash protection)
+mtf_declining_4h_max: -1.0         # (prevents trading during severe crashes)
 
 # ==============================================================================
 # WARMUP TREND OVERRIDE – PRO PULLBACK MODE
@@ -278,16 +301,42 @@ performance_tracking:
   min_trades_per_symbol: 3
 
 # ==============================================================================
+# ORDERBOOK DEPTH-BASED LIQUIDITY PROXY (Phase 2: LIVE - Active Filtering)
+# ==============================================================================
+
+orderbook_liquidity:
+  enabled: true                    # Enable orderbook depth checks
+  mode: live                       # 🚀 LIVE MODE: Active depth filtering (was: shadow = log-only)
+  regime_aware: false              # Phase 4: adaptive thresholds (BULL=8x, CHOP=5x, BEAR=10x)
+  depth_pct_range: 0.5            # ±0.5% around mid price for depth calculation
+  depth_levels: 10                # Top N orderbook levels per side to analyze
+  min_depth_multiplier: 3.0       # Required depth = order_size × multiplier (5x = conservatief)
+  use_for_ranking: false          # Phase 2: disabled (ranking feature)
+  use_for_entry: true             # Phase 1: ACTIVE - reject insufficient depth
+  log_depth_metrics: true         # Log depth metrics for all evaluated coins
+
+# ==============================================================================
+# ORDERBOOK PREFETCH (Phase 2: LIVE - Active Prefetching)
+# ==============================================================================
+
+orderbook_prefetch:
+  enabled: true                    # Enable prefetch observation
+  mode: live                       # 🚀 LIVE MODE: Actually prefetch orderbooks (was: shadow = log-only)
+  top_n: 3                         # Number of top candidates to prefetch
+  max_subscriptions_per_minute: 6  # Rate limit protection
+
+# ==============================================================================
 # SMART ENTRY FILTER v2
 # ==============================================================================
 
 use_smart_entry_filter: true
 
 smart_entry_filter:
-  # RSI
-  rsi_buy_max: 72.0                # 🔧 FIX: 65→72 (bullish markets stay elevated)
+  # RSI - Use adaptive regime filters instead of static values
+  # These are fallback values when adaptive regime detection is disabled
+  rsi_buy_max: 80.0                # Match adaptive baseline (use regime-aware filters when enabled)
   rsi_extreme_low: 25.0
-  rsi_block_min: 80.0              # 🔧 FIX: 75→80 (less blocking in bull runs)
+  rsi_block_min: 80.0
 
   # VWAP / candles
   vwap_max_deviation_pct: 5.0      # 🔧 FIX: 3.0→5.0 (allow stronger moves)
@@ -295,7 +344,7 @@ smart_entry_filter:
 
   # Volatiliteit / ATR
   max_atr_pct_for_grid: 6.0
-  min_atr_pct_for_grid: 0.15       # 🔧 FIX: 0.2→0.15 (allow lower vol coins like CHESS)
+  min_atr_pct_for_grid: 0.10       # 🔧 FIX: 0.2→0.15 (allow lower vol coins like CHESS)
 
   # Short-term spikes
   max_5m_spike_pct: 2.5
@@ -307,7 +356,7 @@ smart_entry_filter:
   min_trend_24h_pct: -10.0
 
   # Slippage Protection (single source of truth)
-  max_entry_spread_pct: 0.3        # 0.3% max spread (tighter for Bitget)
+  max_entry_spread_pct: 0.5        # 0.3% max spread (tighter for Bitget)
   slippage_check_enabled: true
 
   # Order Book Depth Protection
@@ -384,19 +433,20 @@ trend_lookback_mid_minutes: 240
 trend_lookback_long_minutes: 1440
 
 switch_threshold_percent: 3.0
-exit_short_threshold: -1.5
-exit_mid_threshold: -1.2
+exit_short_threshold: -4.0          # 🔧 FIX: -1.5→-4.0 (was TE gevoelig, premature exits!)
+exit_mid_threshold: -3.0            # 🔧 FIX: -1.2→-3.0 (was TE gevoelig, premature exits!)
 
-trend_min_entry_strength: 0.010   # 1.0% min trend strength
+trend_min_change_pct: 0.0015       # 🔧 FIX: Default 0.5→0.0015 (0.15% - logged as "Looking for trend")
+trend_min_entry_strength: 0.0015  # 🔧 FIX: 0.010→0.0015 (0.15% - allow weak trends for more evaluations)
 
 # ==============================================================================
 # COIN ROTATION & MONITORING
 # ==============================================================================
 
-coin_rotation_threshold: 120        # 🚀 FIX: 180→60 (2 min - faster rotation)
+coin_rotation_threshold: 180        # 🚀 FIX: 180→60 (2 min - faster rotation)
 price_update_interval: 30
 
-max_coin_monitoring_seconds: 120   # 🚀 FIX: 300→120 (2 min - faster timeout)
+max_coin_monitoring_seconds: 180   # 🚀 FIX: 300→120 (2 min - faster timeout)
 session_blacklist_duration_seconds: 7200
 
 # ==============================================================================
@@ -404,7 +454,7 @@ session_blacklist_duration_seconds: 7200
 # ==============================================================================
 
 total_amount_quote: 80           # $80 USDT (available balance)
-min_order_amount_quote: 5        # $5 per order
+min_order_amount_quote: 10        # $5 per order
 
 risk_reference_balance_quote: 80   # Match total_amount_quote
 risk_max_balance_per_trade_pct: 0.30  # 30% per trade (safe for new bot)
@@ -446,7 +496,7 @@ order_frequency: 3
 # max_entry_spread_pct: removed (handled in smart_entry_filter)
 
 min_switch_interval_seconds: 600    # 🚀 FIX: 1800→600 (10 min - faster switching)
-min_hold_time_seconds: 300         # 🚀 FIX: 1200→300 (5 min - faster exits!)
+min_hold_time_seconds: 1800         # 🔧 FIX: 300→1800 (30 min - allow grid sells time to execute!)
 min_startup_wait_seconds: 60       # 🚀 FIX: 90→60 (1 min startup delay)
 
 smart_switch_k: 2.0

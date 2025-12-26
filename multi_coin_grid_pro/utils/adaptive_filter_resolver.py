@@ -111,11 +111,12 @@ class AdaptiveFilterResolver:
         """Generate human-readable explanation of active filters."""
         lines = [
             "🎚️  ACTIVE FILTER SET:",
-            f"   RSI range: {self.active_filters.get('rsi_buy_min', 25):.0f}-{self.active_filters.get('rsi_buy_max', 70):.0f}",
+            f"   RSI range: {self.active_filters.get('rsi_buy_min', 25):.0f}-{self.active_filters.get('rsi_buy_max',
+                                                                                                      70):.0f}",
             f"   VWAP deviation: ±{self.active_filters.get('vwap_max_deviation_pct', 3):.1f}%",
             f"   Up accel limit: {self.active_filters.get('max_up_accel_pct', 1.2):.1f}%",
             f"   Down accel limit: {self.active_filters.get('max_down_accel_pct', -2.0):.1f}%",
-            f"   ATR range: {self.active_filters.get('atr_min_pct', 0.15):.2f}%-{self.active_filters.get('atr_max_pct', 6.0):.1f}%",
+            f"   ATR range: {self.active_filters.get('atr_min_pct', 0.15):.2f}%-{self.active_filters.get('atr_max_pct', 6.0):.1f}%",  # noqa: E501
             f"   Grid spacing: {self.active_filters.get('grid_spacing_mult', 1.0):.1f}x",
             f"   Max grids: {self.active_filters.get('max_active_grids', 1)}"
         ]

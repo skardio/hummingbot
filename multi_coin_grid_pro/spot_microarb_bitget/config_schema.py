@@ -10,7 +10,12 @@ from pydantic import BaseModel, Field
 
 class MicroArbBitgetConfig(BaseModel):
     enabled: bool = Field(default=True, description="Enable micro-arb mode")
-    symbols: List[str] = Field(default_factory=lambda: ["BTC-USDT", "ETH-USDT", "SOL-USDT"], description="Tradable symbols")
+    symbols: List[str] = Field(
+        default_factory=lambda: [
+            "BTC-USDT",
+            "ETH-USDT",
+            "SOL-USDT"],
+        description="Tradable symbols")
 
     # Edge
     min_spread_pct: Decimal = Field(default=Decimal("0.35"), description="Minimum spread in % (gross)")

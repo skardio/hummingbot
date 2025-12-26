@@ -289,7 +289,7 @@ DASHBOARD_HTML = """
                             <div class="event-item" title="${message.replace(/"/g, '&quot;')}">
                                 <span class="event-type ${event.event_type}">${event.event_type}</span>
                                 <span>${time}</span>
-                                <span style="margin-left: 10px; word-wrap: break-word; max-width: 800px; display: inline-block;">${displayMessage}</span>
+                                <span style="margin-left: 10px; word-wrap: break-word; max-width: 800px; display: inline-block;">${displayMessage}</span>  # noqa: E501
                             </div>
                         `;
                     }).join('');

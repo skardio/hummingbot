@@ -7,15 +7,15 @@ Unit tests for Phase 1 Fix #2, #3, #4:
 
 import sys
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
+
+from multi_coin_grid_pro.core.drawdown_tracker import DrawdownTracker
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-
-from multi_coin_grid_pro.core.drawdown_tracker import DrawdownTracker
 
 
 class TestPhase1DrawdownTracker(unittest.TestCase):
@@ -232,7 +232,6 @@ class TestPhase1VolatilityPositionSizing(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         # We'll test the logic directly without full controller init
-        pass
 
     def test_high_volatility_reduces_size(self):
         """Test that high volatility (>5%) reduces position size to 67%"""

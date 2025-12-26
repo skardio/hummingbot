@@ -12,6 +12,11 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
+from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
+from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
+from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, RunnableStatus
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 try:
@@ -26,10 +31,6 @@ except ImportError:
         from controllers.multi_coin_grid_config import MultiCoinGridConfig
         from controllers.multi_coin_grid_controller import MultiCoinGridController
 
-from hummingbot.core.data_type.common import OrderType, TradeType
-from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
-from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
-from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, RunnableStatus
 
 # Only mark async tests with asyncio
 # pytestmark = pytest.mark.asyncio  # Removed - only async tests need this
@@ -76,7 +77,7 @@ class TestMultiCoinGridControllerExtended:
     @pytest.fixture
     def controller(self, config, mock_connector, mock_market_data_provider, mock_actions_queue):
         with patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.CoinDiscovery'), \
-             patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'):
+                patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'):
             controller = MultiCoinGridController(
                 config=config,
                 market_data_provider=mock_market_data_provider,

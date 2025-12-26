@@ -267,7 +267,8 @@ class TradeAnalyzer:
                         if new_buy_amt <= Decimal("0.0001"):
                             open_buys[coin].pop(0)
                         else:
-                            open_buys[coin][0] = (new_buy_amt, buy_price, buy_fee - buy_fee_portion, buy_time, buy_symbol)
+                            open_buys[coin][0] = (new_buy_amt, buy_price, buy_fee
+                                                  - buy_fee_portion, buy_time, buy_symbol)
 
             # Add remaining open buy positions
             for coin, buy_list in open_buys.items():
@@ -299,7 +300,7 @@ class TradeAnalyzer:
 
         # Pattern to match trade fills
         trade_pattern = re.compile(
-            r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?(BUY|SELL) order.*?(\d+\.\d+)/[\d.]+ (\w+) has been filled at ([\d.]+) EUR'
+            r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?(BUY|SELL) order.*?(\d+\.\d+)/[\d.]+ (\w+) has been filled at ([\d.]+) EUR'  # noqa: E501
         )
 
         open_buys: Dict[str, List[Trade]] = {}  # coin -> list of open buy orders (FIFO queue)
@@ -555,9 +556,9 @@ class TradeAnalyzer:
         # Status
         lines.append("━━━ <b>STATUS</b> ━━━")
         if report.status.is_running:
-            lines.append(f"✅ Bot draait")
+            lines.append("✅ Bot draait")
         else:
-            lines.append(f"❌ Bot status onbekend")
+            lines.append("❌ Bot status onbekend")
 
         if report.status.active_coin:
             lines.append(f"📍 Actieve coin: <b>{report.status.active_coin}</b>")
@@ -586,7 +587,7 @@ class TradeAnalyzer:
             lines.append("Geen trades gevonden")
         else:
             for i, trade in enumerate(report.trades[-6:], 1):  # Last 6 trades
-                status_emoji = "✅" if trade.is_closed else "⏳"
+                "✅" if trade.is_closed else "⏳"
                 if trade.is_closed:
                     profit_emoji = "📈" if trade.profit > 0 else "📉"
                     lines.append(
@@ -627,7 +628,6 @@ class TradeAnalyzer:
 
     def format_short_report(self, report: AnalysisReport) -> str:
         """Format a shorter summary for quick status"""
-        pnl_emoji = "✅" if report.realized_pnl >= 0 else "❌"
         status_emoji = "🟢" if report.status.is_running and not report.status.is_blocked else "🔴"
 
         lines = [
@@ -640,7 +640,7 @@ class TradeAnalyzer:
             lines.append(f"📍 {report.status.active_coin}")
 
         if report.status.is_blocked:
-            lines.append(f"🛑 Blocked!")
+            lines.append("🛑 Blocked!")
 
         return "\n".join(lines)
 

@@ -7,28 +7,25 @@ import sys
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, PropertyMock, patch
+from unittest.mock import MagicMock, Mock
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-try:
-    from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
-    from multi_coin_grid_pro.scripts.multi_coin_grid_v2 import MultiCoinGridStrategyConfig, MultiCoinGridStrategyV2
-except ImportError:
-    try:
-        from multi_coin_grid_pro.controllers.multi_coin_grid_controller import MultiCoinGridController
-        from multi_coin_grid_pro.scripts.multi_coin_grid_v2 import MultiCoinGridStrategyConfig, MultiCoinGridStrategyV2
-    except ImportError:
-        # Last resort: try relative import
-        from scripts.multi_coin_grid_v2 import MultiCoinGridStrategyV2, MultiCoinGridStrategyConfig
-        from controllers.multi_coin_grid_controller import MultiCoinGridController
 
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
 from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
 from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, RunnableStatus
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+try:
+    from multi_coin_grid_pro.scripts.multi_coin_grid_v2 import MultiCoinGridStrategyConfig
+except ImportError:
+    try:
+        from multi_coin_grid_pro.scripts.multi_coin_grid_v2 import MultiCoinGridStrategyConfig
+    except ImportError:
+        # Last resort: try relative import
+        from scripts.multi_coin_grid_v2 import MultiCoinGridStrategyConfig
 
 
 class TestMultiCoinGridStrategyV2:

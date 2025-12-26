@@ -84,16 +84,18 @@ class MarketRegimeIntegration:
         self,
         min_trend_pct: float,
         exclude_coins: Optional[List[str]] = None,
+        orderbook_config: Optional[dict] = None,
     ) -> Optional[str]:
         """
-        Get best coin with market regime check.
+        Get best coin with market regime check and orderbook depth filtering.
 
         This is the MAIN method to use instead of trend_calculator.get_best_coin().
-        It adds market regime awareness on top of coin-level selection.
+        It adds market regime awareness + depth filtering on top of coin-level selection.
 
         Args:
             min_trend_pct: Minimum trend percentage required
             exclude_coins: Optional list of coin symbols to exclude
+            orderbook_config: Optional dict with depth filtering config (passed to TrendCalculator)
 
         Returns:
             Symbol of best coin or None if market regime is unfavorable
@@ -113,10 +115,11 @@ class MarketRegimeIntegration:
                     logger.info(f"🌍 Market Regime OK: {regime_state.reason}")
                     self._last_favorable_log = regime_state.last_updated
 
-        # Market regime is OK (or disabled) - proceed with normal coin selection
+        # Market regime is OK (or disabled) - proceed with depth-aware coin selection
         best_coin = self.trend_calculator.get_best_coin(
             min_trend_pct=min_trend_pct,
             exclude_coins=exclude_coins,
+            orderbook_config=orderbook_config,
         )
 
         return best_coin

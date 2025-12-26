@@ -17,6 +17,11 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
+from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
+from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
+from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, RunnableStatus
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 try:
@@ -31,10 +36,6 @@ except ImportError:
         from controllers.multi_coin_grid_config import MultiCoinGridConfig
         from controllers.multi_coin_grid_controller import MultiCoinGridController
 
-from hummingbot.core.data_type.common import OrderType, TradeType
-from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
-from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
-from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, RunnableStatus
 
 # Mark all tests in this module as async
 pytestmark = pytest.mark.asyncio
@@ -91,7 +92,7 @@ class TestMultiCoinGridController:
     def controller(self, config, mock_connector, mock_market_data_provider, mock_actions_queue):
         """Create controller instance"""
         with patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.CoinDiscovery'), \
-             patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'):
+                patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'):
             controller = MultiCoinGridController(
                 config=config,
                 market_data_provider=mock_market_data_provider,
@@ -255,7 +256,7 @@ class TestMultiCoinGridController:
         config.manual_trading_pairs = ["XRP-EUR", "ADA-EUR"]
 
         with patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.CoinDiscovery'), \
-             patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'):
+                patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'):
             controller = MultiCoinGridController(
                 config=config,
                 market_data_provider=mock_market_data_provider,
@@ -524,7 +525,6 @@ class TestMultiCoinGridController:
 
     async def test_startup_delay_logs_remaining_time(self, controller, mock_connector):
         """Test that startup delay logs remaining wait time"""
-        import logging
         import time
 
         # Set startup delay to 30 minutes (1800 seconds)
@@ -546,7 +546,7 @@ class TestMultiCoinGridController:
 
         # Capture log output
         with patch.object(controller.logger(), 'info') as mock_log:
-            should_create = controller._should_create_new_grid("XRP-EUR")
+            controller._should_create_new_grid("XRP-EUR")
 
             # Should log remaining time
             assert mock_log.called, "Should log startup delay status"
@@ -574,7 +574,8 @@ class TestMultiCoinGridController:
         controller.coin_error_count[controller.active_coin] += 1
 
         # Simulate the blacklist logic (normally in determine_executor_actions)
-        if controller.active_coin and controller.coin_error_count.get(controller.active_coin, 0) >= controller.max_errors_per_coin:
+        if controller.active_coin and controller.coin_error_count.get(
+                controller.active_coin, 0) >= controller.max_errors_per_coin:
             if controller.active_coin not in controller.auto_blacklisted_coins:
                 controller.auto_blacklisted_coins.add(controller.active_coin)
 
@@ -588,7 +589,7 @@ class TestMultiCoinGridController:
         controller.last_insufficient_balance_time = {}
 
         # Mock trend calculator
-        controller.trend_calculator.get_best_coin = Mock(return_value="GIGA-EUR")
+        controller.trend_calculator.get_best_coin = Mock(return_value="SOL-EUR")
 
         # Simulate coin selection with exclusions
         excluded_coins = set() | controller.auto_blacklisted_coins
@@ -597,12 +598,13 @@ class TestMultiCoinGridController:
             exclude_coins=list(excluded_coins) if excluded_coins else None
         )
 
-        # get_best_coin should be called with excluded coins
+        # Verify get_best_coin was called with excluded coins
         controller.trend_calculator.get_best_coin.assert_called_once()
         call_args = controller.trend_calculator.get_best_coin.call_args
         assert call_args[1]['exclude_coins'] is not None, "Should exclude coins"
         assert "GIGA-EUR" in call_args[1]['exclude_coins'], "Should exclude GIGA-EUR"
         assert "PROBLEMATIC-EUR" in call_args[1]['exclude_coins'], "Should exclude PROBLEMATIC-EUR"
+        assert best_coin == "SOL-EUR", "Should return a non-blacklisted coin"
 
     async def test_insufficient_balance_cooldown(self, controller):
         """Test that coins get cooldown after insufficient balance error"""
@@ -642,7 +644,8 @@ class TestMultiCoinGridController:
                 del controller.last_insufficient_balance_time[coin]
 
         assert controller.active_coin not in coins_in_cooldown, "Coin should not be in cooldown after 6 minutes"
-        assert controller.active_coin not in controller.last_insufficient_balance_time, "Should be removed from tracking"
+        assert controller.active_coin not in controller.last_insufficient_balance_time, \
+            "Should be removed from tracking"
 
     async def test_error_count_tracking_per_coin(self, controller):
         """Test that errors are tracked per coin separately"""
@@ -672,7 +675,8 @@ class TestMultiCoinGridController:
         controller.coin_error_count[controller.active_coin] += 2  # Now 5 total
 
         controller.auto_blacklisted_coins = set()
-        if controller.active_coin and controller.coin_error_count.get(controller.active_coin, 0) >= controller.max_errors_per_coin:
+        if controller.active_coin and controller.coin_error_count.get(
+                controller.active_coin, 0) >= controller.max_errors_per_coin:
             controller.auto_blacklisted_coins.add(controller.active_coin)
 
         assert "GIGA-EUR" in controller.auto_blacklisted_coins, "GIGA-EUR should be blacklisted"
@@ -708,16 +712,18 @@ class TestMultiCoinGridController:
         controller.trend_calculator.get_best_coin = Mock(return_value=None)
 
         # Try to get best coin with exclusions
-        best_coin = controller.trend_calculator.get_best_coin(
+        result = controller.trend_calculator.get_best_coin(
             min_trend_pct=0.15,
             exclude_coins=list(excluded_coins) if excluded_coins else None
         )
 
         # Verify exclusions were passed
+        controller.trend_calculator.get_best_coin.assert_called_once()
         call_args = controller.trend_calculator.get_best_coin.call_args
         excluded_list = call_args[1]['exclude_coins']
         assert "GIGA-EUR" in excluded_list, "Should exclude GIGA-EUR"
         assert "XRP-EUR" in excluded_list, "Should exclude XRP-EUR"
+        assert result is None, "Should return None when no coin is available"
 
     async def test_config_blacklist_excludes_coins(self, controller):
         """Test that coins in config blacklist are excluded from selection"""
@@ -788,7 +794,6 @@ class TestMultiCoinGridController:
         controller._create_stop_action = Mock(return_value=Mock())
 
         # Try to switch to new coin
-        best_coin = "XRP-EUR"
         actions = []
 
         # Simulate switch logic
@@ -825,7 +830,6 @@ class TestMultiCoinGridController:
         controller.trend_calculator.get_trend = Mock(return_value=mock_trend)
 
         # Check buy conditions
-        coin = "DECLINING-EUR"
         declining_trend = mock_trend.trend_60m < -0.5 and mock_trend.trend_240m < 0.0
 
         # Should reject declining trend
@@ -864,7 +868,8 @@ class TestMultiCoinGridController:
         best_trend = Mock()
         best_trend.consensus_trend_pct = 2.0  # Slightly better
 
-        controller.trend_calculator.get_trend = Mock(side_effect=lambda c: active_trend if c == controller.active_coin else best_trend)
+        controller.trend_calculator.get_trend = Mock(
+            side_effect=lambda c: active_trend if c == controller.active_coin else best_trend)
 
         # Check minimum profit logic
         executor_info = controller._get_executor_info(controller.active_executor_id)

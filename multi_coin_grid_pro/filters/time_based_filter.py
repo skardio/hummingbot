@@ -118,11 +118,20 @@ class TimeBasedFilter:
 
         logger.info("⏰ Time-Based Filter: ENABLED")
         if self.config.avoid_low_liquidity_hours:
-            logger.info(f"   Low liquidity hours: {self.config.low_liquidity_hours_utc} UTC → {self.config.low_liquidity_action}")
+            logger.info(
+                f"   Low liquidity hours: {
+                    self.config.low_liquidity_hours_utc} UTC → {
+                    self.config.low_liquidity_action}")
         if self.config.prefer_high_liquidity_hours:
-            logger.info(f"   High liquidity hours: {self.config.high_liquidity_hours_utc} UTC (bonus: {self.config.high_liquidity_bonus:.1%})")
+            logger.info(
+                f"   High liquidity hours: {
+                    self.config.high_liquidity_hours_utc} UTC (bonus: {
+                    self.config.high_liquidity_bonus:.1%})")
         if self.config.weekend_mode != "normal":
-            logger.info(f"   Weekend mode: {self.config.weekend_mode} (risk multiplier: {self.config.weekend_risk_multiplier:.1%})")
+            logger.info(
+                f"   Weekend mode: {
+                    self.config.weekend_mode} (risk multiplier: {
+                    self.config.weekend_risk_multiplier:.1%})")
 
     def check_time_conditions(self, current_time: Optional[datetime] = None) -> TimeBasedDecision:
         """
@@ -159,8 +168,8 @@ class TimeBasedFilter:
 
         # Check holiday
         is_holiday = (
-            self.config.respect_holidays and
-            current_date in self.config.holiday_dates
+            self.config.respect_holidays
+            and current_date in self.config.holiday_dates
         )
 
         # Check weekend

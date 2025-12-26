@@ -73,16 +73,21 @@ def parse_market_regime_config(config: Dict[str, Any]) -> MarketRegimeConfig:
         btc_reference_pair=btc_pair,
         btc_trend_weight=regime_config_dict.get("btc_trend_weight", 0.6),
         # Support both old and new naming conventions
-        btc_min_trend_1h=regime_config_dict.get("btc_trend_1h_min_pct") or regime_config_dict.get("btc_min_trend_1h", -2.0),
-        btc_min_trend_4h=regime_config_dict.get("btc_trend_4h_min_pct") or regime_config_dict.get("btc_min_trend_4h", 0.0),
-        btc_min_trend_24h=regime_config_dict.get("btc_trend_24h_min_pct") or regime_config_dict.get("btc_min_trend_24h", -5.0),
+        btc_min_trend_1h=regime_config_dict.get(
+            "btc_trend_1h_min_pct") or regime_config_dict.get("btc_min_trend_1h", -2.0),
+        btc_min_trend_4h=regime_config_dict.get(
+            "btc_trend_4h_min_pct") or regime_config_dict.get("btc_min_trend_4h", 0.0),
+        btc_min_trend_24h=regime_config_dict.get(
+            "btc_trend_24h_min_pct") or regime_config_dict.get("btc_min_trend_24h", -5.0),
         altcoin_breadth_enabled=regime_config_dict.get("altcoin_breadth_enabled", True),
         altcoin_breadth_min=regime_config_dict.get("altcoin_breadth_min", 0.30),
         altcoin_breadth_pairs=regime_config_dict.get("altcoin_breadth_pairs", None),
         altcoin_breadth_threshold_1h=regime_config_dict.get("altcoin_breadth_threshold_1h", 0.5),
         pause_on_btc_dump=regime_config_dict.get("pause_on_btc_dump", True),
-        btc_dump_threshold_1h=regime_config_dict.get("dump_threshold_pct") or regime_config_dict.get("btc_dump_threshold_1h", -5.0),
-        btc_dump_cooldown_minutes=regime_config_dict.get("dump_pause_minutes") or regime_config_dict.get("btc_dump_cooldown_minutes", 60),
+        btc_dump_threshold_1h=regime_config_dict.get(
+            "dump_threshold_pct") or regime_config_dict.get("btc_dump_threshold_1h", -5.0),
+        btc_dump_cooldown_minutes=regime_config_dict.get(
+            "dump_pause_minutes") or regime_config_dict.get("btc_dump_cooldown_minutes", 60),
         resume_on_recovery=regime_config_dict.get("resume_on_recovery", True),
         recovery_threshold_pct=regime_config_dict.get("recovery_threshold_pct", 2.0),
     )
@@ -107,9 +112,15 @@ def parse_time_based_config(config: Dict[str, Any]) -> TimeBasedConfig:
 
     # Map config.prod.yaml field names to internal names
     # Support both old and new field names for backward compatibility
-    low_liq_hours = time_config_dict.get("low_liquidity_hours") or time_config_dict.get("low_liquidity_hours_utc", [0, 1, 2, 3, 4, 5])
-    high_liq_hours = time_config_dict.get("high_liquidity_hours") or time_config_dict.get("high_liquidity_hours_utc", [13, 14, 15, 16, 17, 18])
-    high_liq_bonus = time_config_dict.get("high_liquidity_bonus_pct", time_config_dict.get("high_liquidity_bonus", 0.0)) / 100.0  # Convert % to decimal
+    low_liq_hours = time_config_dict.get("low_liquidity_hours") or time_config_dict.get(
+        "low_liquidity_hours_utc", [0, 1, 2, 3, 4, 5])
+    high_liq_hours = time_config_dict.get("high_liquidity_hours") or time_config_dict.get(
+        "high_liquidity_hours_utc", [13, 14, 15, 16, 17, 18])
+    high_liq_bonus = time_config_dict.get(
+        "high_liquidity_bonus_pct",
+        time_config_dict.get(
+            "high_liquidity_bonus",
+            0.0)) / 100.0  # Convert % to decimal
 
     # Holiday support: new field names (holidays, holiday_action, holiday_risk_multiplier)
     holidays = time_config_dict.get("holidays") or time_config_dict.get("holiday_dates", [])

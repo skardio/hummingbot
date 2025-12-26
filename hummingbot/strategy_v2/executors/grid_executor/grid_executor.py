@@ -89,6 +89,13 @@ class GridExecutor(ExecutorBase):
         self._close_balance_retry_interval = 1.0  # seconds between balance refresh attempts
         self._close_balance_max_retries = 5  # how many times we wait for locked balances
 
+        # Cancel retry backoff tracking (BITGET FIX)
+        # Prevents excessive cancel retries when exchange is slow to confirm
+        self._cancel_request_times = {}  # order_id -> last cancel request timestamp
+        self._cancel_retry_count = {}    # order_id -> number of cancel attempts
+        self._cancel_min_interval = 10.0  # minimum 10 seconds between cancel retries
+        self._cancel_max_retries = 5     # give up after 5 attempts
+
     @property
     def is_perpetual(self) -> bool:
         """
@@ -1080,7 +1087,34 @@ class GridExecutor(ExecutorBase):
         :param price: The price to be used in the close order.
         :return: None
         """
+        # CRITICAL FIX for Kraken "Insufficient funds" bug:
+        # Cancel open orders first, then wait for exchange to process cancellations
+        # Without this delay, balance remains locked and close order fails
+        import time
+
+        # Count orders to cancel
+        open_order_count = len([
+            level for level in self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]
+            if level.active_open_order
+        ])
+        close_order_count = len([
+            level for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]
+            if level.active_close_order
+        ])
+        total_cancels = open_order_count + close_order_count
+
+        # Cancel orders
         self.cancel_open_orders()
+
+        # Wait for cancellations to be processed by exchange
+        if total_cancels > 0:
+            # Kraken: needs ~2-3 seconds to process cancellations and unlock balance
+            # Bitget: faster but still needs ~1 second
+            wait_time = min(2.0 + (total_cancels * 0.3), 5.0)  # 2s base + 0.3s per order, max 5s
+            self.logger().info(
+                f"⏳ Waiting {wait_time:.1f}s for {total_cancels} order cancellations to unlock balance..."
+            )
+            time.sleep(wait_time)
         min_order_size = getattr(self.trading_rules, "min_order_size", Decimal("0"))
         target_amount = order_amount if order_amount is not None else self.position_size_base
 
@@ -1286,7 +1320,7 @@ class GridExecutor(ExecutorBase):
                         order_id = self.place_order(
                             connector_name=self.config.connector_name,
                             trading_pair=self.config.trading_pair,
-                            order_type=OrderType.LIMIT,
+                            order_type=self.config.triple_barrier_config.take_profit_order_type,
                             amount=order_amount_to_use,
                             price=limit_price,
                             side=self.close_order_side,
@@ -1336,24 +1370,152 @@ class GridExecutor(ExecutorBase):
 
     def cancel_open_orders(self):
         """
-        This method is responsible for canceling the open orders.
+        Cancel open orders with retry backoff to prevent excessive API calls.
+
+        BITGET FIX: Prevents the bot from spamming cancel requests every 6 seconds.
+        Instead, uses exponential backoff (10s, 20s, 30s intervals) between retries.
+        Gives up after 5 attempts to avoid infinite retry loops.
 
         :return: None
         """
+        import time
+
         open_order_placed = [level.active_open_order for level in
                              self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]]
         close_order_placed = [level.active_close_order for level in
                               self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
+
+        current_time = time.time()
+
         for order in open_order_placed + close_order_placed:
-            # TODO: Implement cancel batch orders
-            if order:
-                self._strategy.cancel(
-                    connector_name=self.config.connector_name,
-                    trading_pair=self.config.trading_pair,
-                    order_id=order.order_id
+            if not order:
+                continue
+
+            order_id = order.order_id
+
+            # Check if we've exceeded max retries for this order
+            retry_count = self._cancel_retry_count.get(order_id, 0)
+            if retry_count >= self._cancel_max_retries:
+                self.logger().warning(
+                    f"⚠️  Executor ID: {self.config.id} - Giving up on canceling order {order_id} "
+                    f"after {retry_count} attempts (may already be filled or cancelled)"
                 )
-                self.logger().debug("Removing open order")
-                self.logger().debug(f"Executor ID: {self.config.id} - Canceling open order {order.order_id}")
+                # Remove from tracking to prevent further retries
+                self._cancel_request_times.pop(order_id, None)
+                self._cancel_retry_count.pop(order_id, None)
+                continue
+
+            # Check if enough time has passed since last cancel request (backoff)
+            last_cancel_time = self._cancel_request_times.get(order_id, 0)
+            time_since_last = current_time - last_cancel_time
+
+            # Exponential backoff: 10s, 20s, 30s, 40s, 50s
+            backoff_time = self._cancel_min_interval * (retry_count + 1)
+
+            if time_since_last < backoff_time:
+                # Too soon to retry - skip this order
+                remaining = backoff_time - time_since_last
+                if retry_count > 0:  # Only log for retries, not first attempt
+                    self.logger().debug(
+                        f"Executor ID: {self.config.id} - Skipping cancel retry for {order_id} "
+                        f"(retry {retry_count}, wait {remaining:.1f}s more)"
+                    )
+                continue
+
+            # Send cancel request
+            self._strategy.cancel(
+                connector_name=self.config.connector_name,
+                trading_pair=self.config.trading_pair,
+                order_id=order_id
+            )
+
+            # Update tracking
+            self._cancel_request_times[order_id] = current_time
+            self._cancel_retry_count[order_id] = retry_count + 1
+
+            if retry_count == 0:
+                self.logger().debug(f"Executor ID: {self.config.id} - Canceling open order {order_id}")
+            else:
+                self.logger().info(
+                    f"Executor ID: {self.config.id} - Retry {retry_count + 1}/{self._cancel_max_retries} "
+                    f"canceling order {order_id} (backoff: {backoff_time:.0f}s)"
+                )
+
+    async def cancel_open_orders_and_wait(self, max_wait_seconds: float = 10.0):
+        """
+        Cancel all open orders and wait for confirmations from exchange.
+        This prevents "Insufficient funds" errors when placing close orders immediately after cancelling.
+
+        CRITICAL FIX for Kraken: Kraken locks balances until cancel confirmations are received.
+        Without waiting, close orders fail with "Insufficient funds" even though balance is actually available.
+
+        :param max_wait_seconds: Maximum time to wait for all cancellations (default 10 seconds)
+        :return: None
+        """
+        # Get all orders to cancel
+        open_order_placed = [level.active_open_order for level in
+                             self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]]
+        close_order_placed = [level.active_close_order for level in
+                              self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
+        orders_to_cancel = [order for order in open_order_placed + close_order_placed if order]
+
+        if not orders_to_cancel:
+            self.logger().debug(f"Executor ID: {self.config.id} - No open orders to cancel")
+            return
+
+        # Track which orders need to be cancelled
+        pending_cancels = {order.order_id for order in orders_to_cancel}
+        self.logger().info(
+            f"Executor ID: {self.config.id} - Canceling {len(pending_cancels)} open orders "
+            f"and waiting for confirmations..."
+        )
+
+        # Send cancel requests
+        for order in orders_to_cancel:
+            self._strategy.cancel(
+                connector_name=self.config.connector_name,
+                trading_pair=self.config.trading_pair,
+                order_id=order.order_id
+            )
+            self.logger().debug(f"Executor ID: {self.config.id} - Sent cancel request for {order.order_id}")
+
+        # Wait for cancellations to be confirmed
+        start_time = asyncio.get_event_loop().time()
+        check_interval = 0.5  # Check every 500ms
+
+        while pending_cancels and (asyncio.get_event_loop().time() - start_time) < max_wait_seconds:
+            # Check if orders are still in OPEN_ORDER_PLACED or CLOSE_ORDER_PLACED states
+            still_open = []
+            for level in self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]:
+                if level.active_open_order and level.active_open_order.order_id in pending_cancels:
+                    still_open.append(level.active_open_order.order_id)
+            for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]:
+                if level.active_close_order and level.active_close_order.order_id in pending_cancels:
+                    still_open.append(level.active_close_order.order_id)
+
+            # Update pending list
+            pending_cancels = set(still_open)
+
+            if not pending_cancels:
+                elapsed = asyncio.get_event_loop().time() - start_time
+                self.logger().info(
+                    f"✅ Executor ID: {self.config.id} - All {len(orders_to_cancel)} orders cancelled successfully "
+                    f"in {elapsed:.2f}s"
+                )
+                break
+
+            # Wait before checking again
+            await self._sleep(check_interval)
+
+        # Log results
+        if pending_cancels:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            self.logger().warning(
+                f"⚠️  Executor ID: {self.config.id} - {len(pending_cancels)} orders still pending after {elapsed:.1f}s: "
+                f"{list(pending_cancels)[:5]}{'...' if len(pending_cancels) > 5 else ''}"
+            )
+            # Wait a bit more to allow balance to unlock
+            await self._sleep(2.0)
 
     def get_custom_info(self) -> Dict:
         held_position_value = sum([
@@ -1542,6 +1704,18 @@ class GridExecutor(ExecutorBase):
         """
         This method is responsible for processing the order canceled event
         """
+        # BITGET FIX: Clear cancel retry tracking when order is successfully cancelled
+        order_id = event.order_id
+        if order_id in self._cancel_request_times:
+            retry_count = self._cancel_retry_count.get(order_id, 0)
+            if retry_count > 0:
+                self.logger().debug(
+                    f"✅ Executor ID: {self.config.id} - Order {order_id} cancelled successfully "
+                    f"after {retry_count} attempts"
+                )
+            self._cancel_request_times.pop(order_id, None)
+            self._cancel_retry_count.pop(order_id, None)
+
         self.update_grid_levels()
         levels_open_order_placed = [level for level in self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]]
         levels_close_order_placed = [level for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
@@ -1564,6 +1738,19 @@ class GridExecutor(ExecutorBase):
         This method is responsible for processing the order failed event. Here we will add the InFlightOrder to the
         failed orders list.
         """
+        # BITGET FIX: Clear cancel retry tracking when order fails (including "order not found" errors)
+        order_id = event.order_id
+        if order_id in self._cancel_request_times:
+            # Check if this is an "order not found" error (order already cancelled)
+            error_msg = str(event).lower()
+            if "not found" in error_msg or "not exist" in error_msg:
+                self.logger().debug(
+                    f"✅ Executor ID: {self.config.id} - Order {order_id} already cancelled "
+                    f"(received 'not found' error after {self._cancel_retry_count.get(order_id, 0)} attempts)"
+                )
+            self._cancel_request_times.pop(order_id, None)
+            self._cancel_retry_count.pop(order_id, None)
+
         self.update_grid_levels()
         levels_open_order_placed = [level for level in self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]]
         levels_close_order_placed = [level for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]

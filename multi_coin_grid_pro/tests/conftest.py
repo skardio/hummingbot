@@ -10,6 +10,8 @@ Handles:
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent.resolve()
 if str(project_root) not in sys.path:
@@ -19,9 +21,8 @@ if str(project_root) not in sys.path:
 def hummingbot_available():
     """Check if hummingbot modules are importable"""
     try:
-        import ruamel.yaml
+        pass
 
-        from hummingbot.connector.connector_base import ConnectorBase
         return True
     except (ImportError, KeyError, ModuleNotFoundError):
         return False
@@ -76,8 +77,6 @@ def pytest_configure(config):
 # =============================================================================
 # FIXTURES
 # =============================================================================
-
-import pytest
 
 
 @pytest.fixture

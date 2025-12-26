@@ -91,9 +91,9 @@ class DrawdownTracker:
         if max_daily_loss_eur:
             logger.info(f"💰 Daily euro loss limit: {max_daily_loss_eur} {quote_asset}")
         if portfolio_value_calculator:
-            logger.info(f"✅ Using TOTAL PORTFOLIO VALUE for drawdown (quote + coins)")
+            logger.info("✅ Using TOTAL PORTFOLIO VALUE for drawdown (quote + coins)")
         else:
-            logger.warning(f"⚠️ Using QUOTE ONLY for drawdown - may trigger false positives!")
+            logger.warning("⚠️ Using QUOTE ONLY for drawdown - may trigger false positives!")
 
     def set_portfolio_value_calculator(self, calculator: Callable[[], Decimal]) -> None:
         """
@@ -234,7 +234,8 @@ class DrawdownTracker:
 
         # Check monthly drawdown (percentage)
         if self.monthly_start_balance and self.monthly_start_balance != Decimal("0"):
-            monthly_pnl_pct = (portfolio_value - self.monthly_start_balance) / self.monthly_start_balance * Decimal("100")
+            monthly_pnl_pct = (portfolio_value - self.monthly_start_balance) / \
+                self.monthly_start_balance * Decimal("100")
             if monthly_pnl_pct < -self.max_monthly_loss_pct:
                 reason = (
                     f"Monthly drawdown limit exceeded: {monthly_pnl_pct:.2f}% < -{self.max_monthly_loss_pct}% "
@@ -270,7 +271,7 @@ class DrawdownTracker:
         self.paused_at = datetime.now()
 
         logger.critical(f"🛑 TRADING PAUSED: {reason}")
-        logger.critical(f"🛑 Trading will resume at next period reset (midnight/Monday/1st of month)")
+        logger.critical("🛑 Trading will resume at next period reset (midnight/Monday/1st of month)")
 
     def _check_all_limits_ok(self, portfolio_value: Decimal) -> Tuple[bool, Optional[str]]:
         """
@@ -345,7 +346,7 @@ class DrawdownTracker:
 
         # Check for new week
         if self.last_reset_week and current_week != self.last_reset_week:
-            logger.info(f"📅 NEW WEEK: Weekly counter reset")
+            logger.info("📅 NEW WEEK: Weekly counter reset")
             self.weekly_start_balance = portfolio_value
             self.last_reset_week = current_week
 
@@ -362,7 +363,7 @@ class DrawdownTracker:
 
         # Check for new month
         if self.last_reset_month and current_month != self.last_reset_month:
-            logger.info(f"📅 NEW MONTH: Monthly counter reset")
+            logger.info("📅 NEW MONTH: Monthly counter reset")
             self.monthly_start_balance = portfolio_value
             self.last_reset_month = current_month
 
@@ -408,10 +409,21 @@ class DrawdownTracker:
         if current_balance and self.daily_start_balance:
             portfolio_value = self._get_portfolio_value(current_balance)
             status['current_drawdowns'] = {
-                'daily_pct': float((portfolio_value - self.daily_start_balance) / self.daily_start_balance * 100),
-                'weekly_pct': float((portfolio_value - self.weekly_start_balance) / self.weekly_start_balance * 100) if self.weekly_start_balance else None,
-                'monthly_pct': float((portfolio_value - self.monthly_start_balance) / self.monthly_start_balance * 100) if self.monthly_start_balance else None
-            }
+                'daily_pct': float(
+                    (portfolio_value
+                     - self.daily_start_balance)
+                    / self.daily_start_balance
+                    * 100),
+                'weekly_pct': float(
+                    (portfolio_value
+                     - self.weekly_start_balance)
+                    / self.weekly_start_balance
+                    * 100) if self.weekly_start_balance else None,
+                'monthly_pct': float(
+                    (portfolio_value
+                     - self.monthly_start_balance)
+                    / self.monthly_start_balance
+                    * 100) if self.monthly_start_balance else None}
             status['current_portfolio_value'] = float(portfolio_value)
 
         return status

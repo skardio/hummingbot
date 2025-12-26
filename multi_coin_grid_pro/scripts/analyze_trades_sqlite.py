@@ -254,7 +254,8 @@ def analyze_trades_from_sqlite(hours: int = 8):
 
             if avg_buy_price > 0:
                 total_change = ((avg_sell_price - avg_buy_price) / avg_buy_price) * 100
-                price_change_first_last = ((giga_sells[-1]['price'] - giga_buys[0]['price']) / giga_buys[0]['price']) * 100
+                price_change_first_last = ((giga_sells[-1]['price'] - giga_buys[0]
+                                           ['price']) / giga_buys[0]['price']) * 100
                 print(f"   Totale prijs verandering (gemiddeld): {total_change:+.2f}%")
                 print(f"   Prijs verandering (eerste koop → laatste verkoop): {price_change_first_last:+.2f}%")
 
@@ -277,13 +278,31 @@ def analyze_trades_from_sqlite(hours: int = 8):
             print("\n📋 GIGA-EUR TRADE DETAILS:")
             print("   Alle buys:")
             for i, buy in enumerate(giga_buys[:10], 1):  # Show first 10
-                print(f"   {i}. {format_timestamp(buy['timestamp'])} - {format_price(buy['price'])} - {buy['amount']:.2f} GIGA - {format_price(buy['price'] * buy['amount'])}")
+                print(
+                    f"   {i}. {
+                        format_timestamp(
+                            buy['timestamp'])} - {
+                        format_price(
+                            buy['price'])} - {
+                        buy['amount']:.2f} GIGA - {
+                            format_price(
+                                buy['price']
+                                * buy['amount'])}")
             if len(giga_buys) > 10:
                 print(f"   ... en {len(giga_buys) - 10} meer buys")
 
             print("\n   Alle sells:")
             for i, sell in enumerate(giga_sells[:10], 1):  # Show first 10
-                print(f"   {i}. {format_timestamp(sell['timestamp'])} - {format_price(sell['price'])} - {sell['amount']:.2f} GIGA - {format_price(sell['price'] * sell['amount'])}")
+                print(
+                    f"   {i}. {
+                        format_timestamp(
+                            sell['timestamp'])} - {
+                        format_price(
+                            sell['price'])} - {
+                        sell['amount']:.2f} GIGA - {
+                            format_price(
+                                sell['price']
+                                * sell['amount'])}")
             if len(giga_sells) > 10:
                 print(f"   ... en {len(giga_sells) - 10} meer sells")
 
@@ -314,8 +333,18 @@ def analyze_trades_from_sqlite(hours: int = 8):
             first_sell = sells[0]
             last_sell = sells[-1]
             total_sell_value = sum(s['price'] * s['amount'] for s in sells)
-            print(f"   Eerste verkoop: {format_timestamp(first_sell['timestamp'])} @ {format_price(first_sell['price'])}")
-            print(f"   Laatste verkoop: {format_timestamp(last_sell['timestamp'])} @ {format_price(last_sell['price'])}")
+            print(
+                f"   Eerste verkoop: {
+                    format_timestamp(
+                        first_sell['timestamp'])} @ {
+                    format_price(
+                        first_sell['price'])}")
+            print(
+                f"   Laatste verkoop: {
+                    format_timestamp(
+                        last_sell['timestamp'])} @ {
+                    format_price(
+                        last_sell['price'])}")
             print(f"   Totaal verkocht: {format_price(total_sell_value)}")
 
         if buys and sells:

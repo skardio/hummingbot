@@ -15,9 +15,9 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from risk.pnl_tracker import RealtimePnLTracker
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 class RiskGuardV2:
@@ -158,7 +158,8 @@ class RiskGuardV2:
 
         total_exposure = sum(p.notional_eur for p in self.pnl.positions.values())
         if total_exposure + size_eur > max_total_eur:
-            return False, f"Total exposure €{total_exposure + size_eur:.2f} > max €{max_total_eur:.2f} ({max_total_pct}%)"
+            return False, f"Total exposure €{total_exposure
+                                             + size_eur:.2f} > max €{max_total_eur:.2f} ({max_total_pct}%)"
 
         return True, "Position allowed"
 

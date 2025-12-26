@@ -6,7 +6,7 @@ Discovers tradeable coins on the exchange based on volume and liquidity criteria
 
 import logging
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import List
 
 from hummingbot.connector.connector_base import ConnectorBase
 
@@ -83,18 +83,22 @@ class CoinDiscovery:
 
         # OLD CODE BELOW - keeping for reference
         print(f"\n{'=' * 80}")
-        print(f"🔍 COIN DISCOVERY START")
+        print("🔍 COIN DISCOVERY START")
         print(f"{'=' * 80}")
         logger.info("🔍 Starting coin discovery...")
-        logger.info(f"DEBUG: quote_asset={self.quote_asset}, max_coins={self.max_coins}, min_volume={self.min_24h_volume}")
+        logger.info(
+            f"DEBUG: quote_asset={
+                self.quote_asset}, max_coins={
+                self.max_coins}, min_volume={
+                self.min_24h_volume}")
         logger.info(f"DEBUG: connector type={type(self.connector)}, ready={self.connector.ready}")
         print(f"DEBUG: quote_asset={self.quote_asset}, connector ready={self.connector.ready}")
 
         try:
             # Get ALL trading pairs from the exchange via trading_pair_symbol_map
             # This is the CORRECT way to get all available pairs, not just the ones we're initialized with
-            print(f"   Getting trading_pair_symbol_map from connector...")
-            logger.info(f"   Getting all trading pairs via trading_pair_symbol_map...")
+            print("   Getting trading_pair_symbol_map from connector...")
+            logger.info("   Getting all trading pairs via trading_pair_symbol_map...")
 
             # Wait for the symbol map to be loaded
             trading_pair_map = await self.connector.trading_pair_symbol_map()
@@ -163,7 +167,7 @@ class CoinDiscovery:
                 btc_eth_pairs = [f"BTC/{self.quote_asset}", f"ETH/{self.quote_asset}",
                                  f"BTC-{self.quote_asset}", f"ETH-{self.quote_asset}"]
                 coin_data = [c for c in coin_data if c['symbol'] not in btc_eth_pairs]
-                logger.info(f"   🚫 Excluded BTC/ETH (too expensive)")
+                logger.info("   🚫 Excluded BTC/ETH (too expensive)")
 
             # Sort by price (lowest first - more volatile)
             coin_data.sort(key=lambda x: x['price'])

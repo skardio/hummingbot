@@ -40,7 +40,8 @@ class TestPhase1SlippageProtection(unittest.TestCase):
         self.controller._is_trading_pair_tradeable = MagicMock(return_value=True)
 
         # Bind the method to our mock (so 'self' works correctly)
-        self.check_spread = MultiCoinGridController._check_spread_acceptable.__get__(self.controller, MultiCoinGridController)
+        self.check_spread = MultiCoinGridController._check_spread_acceptable.__get__(
+            self.controller, MultiCoinGridController)
 
     def test_spread_acceptable_tight_spread(self):
         """Test that tight spread (0.3%) is accepted"""

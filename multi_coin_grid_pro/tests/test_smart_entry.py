@@ -7,6 +7,7 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
+from hummingbot.core.data_type.order_book_row import OrderBookRow
 from multi_coin_grid_pro.core.models import CandleIndicators  # noqa: E402
 from multi_coin_grid_pro.logic.smart_entry import SmartEntryBaseConfig, SmartEntryFilter  # noqa: E402
 
@@ -270,7 +271,7 @@ class TestSmartEntryFilter(unittest.TestCase):
         """Test spread check with mock exchange connector"""
         # Create mock exchange with order book
         class MockExchange:
-            def get_order_book(self, symbol):
+            def get_order_book(self, connector_name, trading_pair):
                 return {
                     'bids': [[10.0, 100.0]],  # [price, volume]
                     'asks': [[10.10, 100.0]]  # 1% spread
@@ -281,7 +282,8 @@ class TestSmartEntryFilter(unittest.TestCase):
             self.base_cfg,
             self.coin_profiles,
             self.logger,
-            exchange_connector=MockExchange()
+            exchange_connector=MockExchange(),
+            connector_name="mock_exchange"
         )
 
         indicators = CandleIndicators(
@@ -305,7 +307,7 @@ class TestSmartEntryFilter(unittest.TestCase):
     def test_spread_check_passed(self):
         """Test spread check passes with acceptable spread"""
         class MockExchange:
-            def get_order_book(self, symbol):
+            def get_order_book(self, connector_name, trading_pair):
                 return {
                     'bids': [[10.0, 100.0]],
                     'asks': [[10.02, 100.0]]  # 0.2% spread - OK
@@ -315,7 +317,8 @@ class TestSmartEntryFilter(unittest.TestCase):
             self.base_cfg,
             self.coin_profiles,
             self.logger,
-            exchange_connector=MockExchange()
+            exchange_connector=MockExchange(),
+            connector_name="mock_exchange"
         )
 
         indicators = CandleIndicators(
@@ -334,19 +337,43 @@ class TestSmartEntryFilter(unittest.TestCase):
         self.assertTrue(allowed)
 
     def test_depth_check_insufficient(self):
-        """Test order book depth check rejects insufficient liquidity"""
-        class MockExchange:
-            def get_order_book(self, symbol):
+        """Test order book depth check rejects insufficient liquidity
+
+        Verifies that orderbook depth calculation uses price×amount (quote currency)
+        and correctly rejects orders when depth is insufficient.
+        """
+        from unittest.mock import Mock
+
+        # Create mock that returns proper OrderBookRow objects
+        mock_connector = Mock()
+        mock_orderbook = Mock()
+
+        # Setup orderbook snapshot: 5 BTC @ 10 EUR = 50 EUR depth (INSUFFICIENT for 100 EUR order × 3)
+        mock_orderbook.snapshot = (
+            [OrderBookRow(10.0, 5.0, 1)],  # bids (already imported at module level)
+            [OrderBookRow(10.01, 5.0, 1)]  # asks
+        )
+
+        # Mock connector methods
+        def get_order_book_side_effect(*args):
+            if len(args) == 1:
+                # Depth check path: get_order_book(trading_pair)
+                return mock_orderbook
+            else:
+                # Spread check path: get_order_book(connector_name, trading_pair)
                 return {
-                    'bids': [[10.0, 5.0]],  # Only 50 EUR depth
+                    'bids': [[10.0, 5.0]],
                     'asks': [[10.01, 5.0]]
                 }
+
+        mock_connector.get_order_book = Mock(side_effect=get_order_book_side_effect)
 
         filter_with_exchange = SmartEntryFilter(
             self.base_cfg,
             self.coin_profiles,
             self.logger,
-            exchange_connector=MockExchange()
+            exchange_connector=mock_connector,
+            connector_name="mock_exchange"
         )
 
         indicators = CandleIndicators(
@@ -369,23 +396,42 @@ class TestSmartEntryFilter(unittest.TestCase):
             order_size_eur=100.0,
             trace_enabled=True
         )
-        self.assertFalse(allowed)
+        self.assertFalse(allowed, f"Entry should be blocked: allowed={allowed}, reason={reason}")
         self.assertIn("liquidity", reason.lower())
 
     def test_depth_check_sufficient(self):
-        """Test order book depth check passes with sufficient liquidity"""
-        class MockExchange:
-            def get_order_book(self, symbol):
+        """Test order book depth check passes with sufficient liquidity
+
+        Verifies that orderbook with 500 EUR depth passes check for 100 EUR order × 3.
+        """
+        from unittest.mock import Mock
+
+        mock_connector = Mock()
+        mock_orderbook = Mock()
+
+        # Setup orderbook snapshot: 50 BTC @ 10 EUR = 500 EUR depth (SUFFICIENT)
+        mock_orderbook.snapshot = (
+            [OrderBookRow(10.0, 50.0, 1)],
+            [OrderBookRow(10.01, 50.0, 1)]
+        )
+
+        def get_order_book_side_effect(*args):
+            if len(args) == 1:
+                return mock_orderbook
+            else:
                 return {
-                    'bids': [[10.0, 50.0]],  # 500 EUR depth
+                    'bids': [[10.0, 50.0]],
                     'asks': [[10.01, 50.0]]
                 }
+
+        mock_connector.get_order_book = Mock(side_effect=get_order_book_side_effect)
 
         filter_with_exchange = SmartEntryFilter(
             self.base_cfg,
             self.coin_profiles,
             self.logger,
-            exchange_connector=MockExchange()
+            exchange_connector=mock_connector,
+            connector_name="mock_exchange"
         )
 
         indicators = CandleIndicators(

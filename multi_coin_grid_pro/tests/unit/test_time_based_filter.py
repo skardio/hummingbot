@@ -12,14 +12,7 @@ Tests all time-based trading scenarios:
 
 from datetime import datetime, timezone
 
-import pytest
-
-from multi_coin_grid_pro.filters.time_based_filter import (
-    TimeBasedConfig,
-    TimeBasedDecision,
-    TimeBasedFilter,
-    TradingAction,
-)
+from multi_coin_grid_pro.filters.time_based_filter import TimeBasedConfig, TimeBasedFilter, TradingAction
 
 
 class TestTimeBasedFilterBasics:

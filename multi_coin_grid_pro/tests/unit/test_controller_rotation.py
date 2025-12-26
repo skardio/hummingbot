@@ -4,9 +4,11 @@ Unit tests for MultiCoinGridController rotation and monitoring methods
 import sys
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, RunnableStatus
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -20,9 +22,6 @@ except ImportError:
     except ImportError:
         from controllers.multi_coin_grid_config import MultiCoinGridConfig
         from controllers.multi_coin_grid_controller import MultiCoinGridController
-
-from hummingbot.core.data_type.common import TradeType
-from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, RunnableStatus
 
 
 class TestControllerRotation:
@@ -52,9 +51,8 @@ class TestControllerRotation:
     def controller(self, config, mock_connector):
         """Create controller instance"""
         with patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.CoinDiscovery'), \
-             patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'):
-            from multi_coin_grid_pro.utils.coin_discovery import CoinDiscovery
-            from multi_coin_grid_pro.utils.trend_calculator import TrendCalculator
+                patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'):
+            pass
 
             market_data_provider = MagicMock()
             actions_queue = MagicMock()
@@ -167,7 +165,7 @@ class TestControllerMonitoring:
     @pytest.fixture
     def controller(self, config):
         with patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.CoinDiscovery'), \
-             patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'):
+                patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.TrendCalculator'):
             market_data_provider = MagicMock()
             market_data_provider.time.return_value = 1000.0
             actions_queue = MagicMock()

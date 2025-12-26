@@ -4,6 +4,7 @@ Detects BULL, CHOP, or BEAR market regimes based on multi-timeframe analysis.
 """
 from dataclasses import dataclass
 from datetime import datetime
+
 # from decimal import Decimal  # noqa: F401
 from typing import Dict, List
 
@@ -141,8 +142,8 @@ class RegimeDetector:
         """
         # Use consensus as primary signal (it's already weighted)
         score = (
-            m.consensus * 0.80 +      # Consensus trend (80%)
-            m.atr_expansion * 0.20    # Volatility confirmation (20%)
+            m.consensus * 0.80      # Consensus trend (80%)
+            + m.atr_expansion * 0.20    # Volatility confirmation (20%)
         )
 
         # Apply range efficiency multiplier
@@ -160,8 +161,8 @@ class RegimeDetector:
         """
         # Timeframe alignment: all pointing same direction?
         trend_alignment = 1.0 - (
-            abs(m.trend_1h - m.trend_4h) / 20.0 +
-            abs(m.trend_4h - m.trend_24h) / 20.0
+            abs(m.trend_1h - m.trend_4h) / 20.0
+            + abs(m.trend_4h - m.trend_24h) / 20.0
         ) / 2.0
         trend_alignment = max(0.0, min(1.0, trend_alignment))
 
@@ -170,14 +171,14 @@ class RegimeDetector:
 
         # Volatility confirmation: ATR expanding in trend direction?
         vol_confirm = 1.0 if (
-            (m.consensus > 0 and m.atr_expansion > 0) or
-            (m.consensus < 0 and m.atr_expansion > 0)
+            (m.consensus > 0 and m.atr_expansion > 0)
+            or (m.consensus < 0 and m.atr_expansion > 0)
         ) else 0.5
 
         confidence = (
-            trend_alignment * 0.50 +
-            efficiency * 0.30 +
-            vol_confirm * 0.20
+            trend_alignment * 0.50
+            + efficiency * 0.30
+            + vol_confirm * 0.20
         )
 
         return max(0.0, min(1.0, confidence))

@@ -7,11 +7,11 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from multi_coin_grid_pro.core.models import TradeFill
 from multi_coin_grid_pro.risk.pnl_tracker import RealtimePnLTracker
 from multi_coin_grid_pro.risk.risk_guard import RiskGuardV2
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 class TestRealtimePnLTracker(unittest.TestCase):
@@ -157,8 +157,12 @@ class TestRiskGuardV2(unittest.TestCase):
         self.logger.setLevel(logging.CRITICAL)
 
         class MockAlerter:
-            def critical(self, msg): pass
-            def warning(self, msg): pass
+
+            def critical(self, msg):
+                pass
+
+            def warning(self, msg):
+                pass
 
         self.tracker = RealtimePnLTracker(Decimal("1000"), self.logger)
         self.alerter = MockAlerter()

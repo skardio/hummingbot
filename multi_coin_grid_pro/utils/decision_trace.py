@@ -77,9 +77,22 @@ class FilterCheck:
         symbol = "✅" if self.passed else "❌"
 
         if self.threshold_min is not None and self.threshold_max is not None:
-            return f"{symbol} {self.filter_name}: {self._format(self.value)} in [{self._format(self.threshold_min)}, {self._format(self.threshold_max)}]"
+            return f"{symbol} {
+                self.filter_name}: {
+                self._format(
+                    self.value)} in [{
+                self._format(
+                    self.threshold_min)}, {
+                        self._format(
+                            self.threshold_max)}]"
         elif self.threshold is not None:
-            return f"{symbol} {self.filter_name}: {self._format(self.value)} {self.operator} {self._format(self.threshold)}"
+            return f"{symbol} {
+                self.filter_name}: {
+                self._format(
+                    self.value)} {
+                self.operator} {
+                    self._format(
+                        self.threshold)}"
         else:
             return f"{symbol} {self.filter_name}: {self.reason}"
 
@@ -214,7 +227,7 @@ class PairDecisionTrace:
         Compact single-line log format for production logs.
 
         Example:
-        CHZ-USDT [bitget] REJECTED by RSI | ✅ consensus_trend: 16.25% >= 0.5% | ✅ warmup_1h: -1.00% >= -1.5% | ❌ rsi: 79.3 > 72.0
+        CHZ-USDT [bitget] REJECTED by RSI | ✅ consensus_trend: 16.25% >= 0.5% | ✅ warmup_1h: -1.00% >= -1.5% | ❌ rsi: 79.3 > 72.0  # noqa: E501
         """
         if not self.enabled:
             return ""
@@ -414,7 +427,7 @@ def example_usage():
 
     # VWAP deviation check
     vwap_dev = 5.05
-    vwap_ok = trace.add_check(
+    _ = trace.add_check(
         filter_name="vwap_deviation",
         value=vwap_dev,
         threshold=5.0,

@@ -9,13 +9,14 @@ import sys
 import time
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
+from multi_coin_grid_pro.utils.trend_calculator import CoinTrend, TrendCalculator
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from multi_coin_grid_pro.utils.trend_calculator import CoinTrend, TrendCalculator
 
 # Only mark async tests with asyncio
 # pytestmark = pytest.mark.asyncio  # Removed - only async tests need this mark
@@ -83,9 +84,9 @@ class TestMultiTimeframeTrendCalculation:
         # During warm-up or with limited data, trend_score may be 0.0
         if not trend.long_trend_warmup and trend.trend_1440m != 0.0:
             expected_score = (
-                0.2 * trend.trend_60m +
-                0.4 * trend.trend_240m +
-                0.4 * trend.trend_1440m
+                0.2 * trend.trend_60m
+                + 0.4 * trend.trend_240m
+                + 0.4 * trend.trend_1440m
             )
             assert abs(trend.trend_score - expected_score) < 0.01  # Allow small rounding error
         else:
@@ -207,9 +208,9 @@ class TestMultiTimeframeBuyConditions:
 
         # Should allow buying
         buy_allowed = (
-            trend.trend_1440m > 1.0 and
-            trend.trend_240m > 1.0 and
-            trend.trend_60m >= 0.0
+            trend.trend_1440m > 1.0
+            and trend.trend_240m > 1.0
+            and trend.trend_60m >= 0.0
         )
         assert buy_allowed is True
 
@@ -224,9 +225,9 @@ class TestMultiTimeframeBuyConditions:
         )
 
         buy_allowed = (
-            trend.trend_1440m > 1.0 and
-            trend.trend_240m > 1.0 and
-            trend.trend_60m >= 0.0
+            trend.trend_1440m > 1.0
+            and trend.trend_240m > 1.0
+            and trend.trend_60m >= 0.0
         )
         assert buy_allowed is False
 
@@ -241,9 +242,9 @@ class TestMultiTimeframeBuyConditions:
         )
 
         buy_allowed = (
-            trend.trend_1440m > 1.0 and
-            trend.trend_240m > 1.0 and
-            trend.trend_60m >= 0.0
+            trend.trend_1440m > 1.0
+            and trend.trend_240m > 1.0
+            and trend.trend_60m >= 0.0
         )
         assert buy_allowed is False
 
@@ -258,9 +259,9 @@ class TestMultiTimeframeBuyConditions:
         )
 
         buy_allowed = (
-            trend.trend_1440m > 1.0 and
-            trend.trend_240m > 1.0 and
-            trend.trend_60m >= 0.0
+            trend.trend_1440m > 1.0
+            and trend.trend_240m > 1.0
+            and trend.trend_60m >= 0.0
         )
         assert buy_allowed is False
 
@@ -280,8 +281,8 @@ class TestMultiTimeframeExitConditions:
 
         # Exit conditions: trend_60m < -1% AND trend_240m < +0.5%
         exit_triggered = (
-            trend.trend_60m < -1.0 and
-            trend.trend_240m < 0.5
+            trend.trend_60m < -1.0
+            and trend.trend_240m < 0.5
         )
         assert exit_triggered is True
 
@@ -296,8 +297,8 @@ class TestMultiTimeframeExitConditions:
         )
 
         exit_triggered = (
-            trend.trend_60m < -1.0 and
-            trend.trend_240m < 0.5
+            trend.trend_60m < -1.0
+            and trend.trend_240m < 0.5
         )
         assert exit_triggered is False
 
@@ -312,8 +313,8 @@ class TestMultiTimeframeExitConditions:
         )
 
         exit_triggered = (
-            trend.trend_60m < -1.0 and
-            trend.trend_240m < 0.5
+            trend.trend_60m < -1.0
+            and trend.trend_240m < 0.5
         )
         assert exit_triggered is False
 
@@ -333,8 +334,8 @@ class TestAntiChurnLogic:
 
         # Anti-churn: trend_1440m > +2% AND trend_240m > +0.5% AND -1% <= trend_60m < 0%
         anti_churn_active = (
-            trend.trend_1440m > 2.0 and
-            trend.trend_240m > 0.5 and
+            trend.trend_1440m > 2.0
+            and trend.trend_240m > 0.5 and
             -1.0 <= trend.trend_60m < 0.0
         )
         assert anti_churn_active is True
@@ -350,8 +351,8 @@ class TestAntiChurnLogic:
         )
 
         anti_churn_active = (
-            trend.trend_1440m > 2.0 and
-            trend.trend_240m > 0.5 and
+            trend.trend_1440m > 2.0
+            and trend.trend_240m > 0.5 and
             -1.0 <= trend.trend_60m < 0.0
         )
         assert anti_churn_active is False
@@ -367,8 +368,8 @@ class TestAntiChurnLogic:
         )
 
         anti_churn_active = (
-            trend.trend_1440m > 2.0 and
-            trend.trend_240m > 0.5 and
+            trend.trend_1440m > 2.0
+            and trend.trend_240m > 0.5 and
             -1.0 <= trend.trend_60m < 0.0
         )
         assert anti_churn_active is False

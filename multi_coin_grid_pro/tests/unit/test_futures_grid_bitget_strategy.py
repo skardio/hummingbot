@@ -96,7 +96,7 @@ class TestFuturesGridBitgetController:
         assert result is True, "Futures controller should accept coins with 2.0% 24h, 1.5% 4h, 0.5% 1h trends"
         futures_controller._logger_instance.info.assert_called()
         call_args = str(futures_controller._logger_instance.info.call_args)
-        assert "futures" in call_args.lower() or "approved" in call_args.lower() or "entry confirmed" in call_args.lower()
+        assert "futures" in call_args.lower() or "approved" in call_args.lower() or "entry confirmed" in call_args.lower()  # noqa: E501
 
     def test_futures_multi_timeframe_buy_conditions_warmup_relaxed(self, futures_controller):
         """Test that futures warm-up mode has relaxed requirements"""
@@ -118,7 +118,7 @@ class TestFuturesGridBitgetController:
         assert result is True, "Futures warm-up should accept coins with 1.5% 4h and 0.6% 1h trends"
         futures_controller._logger_instance.info.assert_called()
         call_args = str(futures_controller._logger_instance.info.call_args)
-        assert "futures warm-up" in call_args.lower() or "approved" in call_args.lower() or "warm-up entry allowed" in call_args.lower()
+        assert "futures warm-up" in call_args.lower() or "approved" in call_args.lower() or "warm-up entry allowed" in call_args.lower()  # noqa: E501
 
     def test_futures_multi_timeframe_buy_conditions_rejects_strong_decline(self, futures_controller):
         """Test that futures controller still rejects strongly declining trends"""

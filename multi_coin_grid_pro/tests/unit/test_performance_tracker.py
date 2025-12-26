@@ -16,13 +16,7 @@ from decimal import Decimal
 
 import pytest
 
-from multi_coin_grid_pro.core.performance_tracker import (
-    PerformanceConfig,
-    PerformanceMetrics,
-    PerformanceTracker,
-    TradeOutcome,
-    TradeRecord,
-)
+from multi_coin_grid_pro.core.performance_tracker import PerformanceConfig, PerformanceTracker, TradeOutcome
 
 
 class TestPerformanceTrackerBasics:
@@ -128,7 +122,7 @@ class TestWinRateCalculation:
             tracker.record_trade(
                 symbol="BTC-EUR",
                 entry_time=base_time + timedelta(hours=i),
-                exit_time =base_time + timedelta(hours=i + 1),
+                exit_time=base_time + timedelta(hours=i + 1),
                 entry_price=Decimal("50000"),
                 exit_price=Decimal("50100"),
                 position_size_eur=Decimal("100"),
@@ -156,7 +150,7 @@ class TestWinRateCalculation:
             tracker.record_trade(
                 symbol="BTC-EUR",
                 entry_time=base_time + timedelta(hours=i),
-                exit_time =base_time + timedelta(hours=i + 1),
+                exit_time=base_time + timedelta(hours=i + 1),
                 entry_price=Decimal("50000"),
                 exit_price=Decimal("50100"),
                 position_size_eur=Decimal("100"),
@@ -169,7 +163,7 @@ class TestWinRateCalculation:
             tracker.record_trade(
                 symbol="ETH-EUR",
                 entry_time=base_time + timedelta(hours=i),
-                exit_time =base_time + timedelta(hours=i + 1),
+                exit_time=base_time + timedelta(hours=i + 1),
                 entry_price=Decimal("3000"),
                 exit_price=Decimal("2950"),
                 position_size_eur=Decimal("100"),
@@ -339,7 +333,7 @@ class TestPerformanceThresholds:
             tracker.record_trade(
                 symbol="BTC-EUR",
                 entry_time=base_time + timedelta(hours=i),
-                exit_time =base_time + timedelta(hours=i + 1),
+                exit_time=base_time + timedelta(hours=i + 1),
                 entry_price=Decimal("50000"),
                 exit_price=Decimal("50100"),
                 position_size_eur=Decimal("100"),
@@ -352,7 +346,7 @@ class TestPerformanceThresholds:
             tracker.record_trade(
                 symbol="ETH-EUR",
                 entry_time=base_time + timedelta(hours=i),
-                exit_time =base_time + timedelta(hours=i + 1),
+                exit_time=base_time + timedelta(hours=i + 1),
                 entry_price=Decimal("3000"),
                 exit_price=Decimal("2950"),
                 position_size_eur=Decimal("100"),
@@ -384,7 +378,7 @@ class TestPerformanceThresholds:
             tracker.record_trade(
                 symbol="BTC-EUR",
                 entry_time=base_time + timedelta(hours=i),
-                exit_time =base_time + timedelta(hours=i + 1),
+                exit_time=base_time + timedelta(hours=i + 1),
                 entry_price=Decimal("50000"),
                 exit_price=Decimal("50100"),
                 position_size_eur=Decimal("100"),
@@ -397,7 +391,7 @@ class TestPerformanceThresholds:
             tracker.record_trade(
                 symbol="ETH-EUR",
                 entry_time=base_time + timedelta(hours=i),
-                exit_time =base_time + timedelta(hours=i + 1),
+                exit_time=base_time + timedelta(hours=i + 1),
                 entry_price=Decimal("3000"),
                 exit_price=Decimal("2950"),
                 position_size_eur=Decimal("100"),
@@ -473,7 +467,7 @@ class TestSymbolBreakdown:
             tracker.record_trade(
                 symbol="BTC-EUR",
                 entry_time=base_time + timedelta(hours=i),
-                exit_time =base_time + timedelta(hours=i + 1),
+                exit_time=base_time + timedelta(hours=i + 1),
                 entry_price=Decimal("50000"),
                 exit_price=Decimal("50100"),
                 position_size_eur=Decimal("100"),
@@ -538,7 +532,7 @@ class TestRecentPerformance:
             tracker.record_trade(
                 symbol="ETH-EUR",
                 entry_time=base_time + timedelta(hours=i),
-                exit_time =base_time + timedelta(hours=i + 1),
+                exit_time=base_time + timedelta(hours=i + 1),
                 entry_price=Decimal("3000"),
                 exit_price=Decimal("2950"),
                 position_size_eur=Decimal("100"),
@@ -551,7 +545,7 @@ class TestRecentPerformance:
             tracker.record_trade(
                 symbol="BTC-EUR",
                 entry_time=base_time + timedelta(hours=i),
-                exit_time =base_time + timedelta(hours=i + 1),
+                exit_time=base_time + timedelta(hours=i + 1),
                 entry_price=Decimal("50000"),
                 exit_price=Decimal("50100"),
                 position_size_eur=Decimal("100"),

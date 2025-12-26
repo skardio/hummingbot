@@ -9,11 +9,8 @@ Tests:
 Note: Tests are designed to run without full Hummingbot environment
 """
 
-import asyncio
 import unittest
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from dataclasses import dataclass
 
 # ============================================================================
 # STANDALONE TEST CLASSES (copied from dynamic_pair_manager.py)
@@ -46,9 +43,9 @@ class PairMetrics:
         spread_score = max(0, 100 - (self.spread_pct * 100))
 
         self.score = (
-            volume_score * volume_weight +
-            trend_score * trend_weight +
-            spread_score * spread_weight
+            volume_score * volume_weight
+            + trend_score * trend_weight
+            + spread_score * spread_weight
         )
         return self.score
 
@@ -339,7 +336,6 @@ class TestAsyncDiscovery(unittest.IsolatedAsyncioTestCase):
 
     async def test_mock_api_call(self):
         """Test mocked API call"""
-        import aiohttp
 
         mock_response = {
             "error": [],

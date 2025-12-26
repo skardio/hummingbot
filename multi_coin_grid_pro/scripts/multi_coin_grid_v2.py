@@ -207,12 +207,15 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
         config_data["controller_name"] = controller_name
 
         # Log available connectors for debugging
-        self.logger().info(f"🔍 Strategy connectors available: {list(self.connectors.keys()) if self.connectors else 'NONE'}")
+        self.logger().info(
+            f"🔍 Strategy connectors available: {
+                list(
+                    self.connectors.keys()) if self.connectors else 'NONE'}")
         self.logger().info(f"🔍 Strategy connectors dict type: {type(self.connectors)}, empty: {not self.connectors}")
         self.logger().info(f"🔍 Expected connector name: '{connector_name}'")
 
         if not self.connectors:
-            self.logger().error("❌ WARNING: No connectors available in strategy! Make sure to connect the exchange first:")
+            self.logger().error("❌ WARNING: No connectors available in strategy! Make sure to connect the exchange first:")  # noqa: E501
             self.logger().error(f"   1. In Hummingbot CLI, run: connect {connector_name}")
             self.logger().error("   2. Enter your API keys when prompted")
             self.logger().error("   3. Verify with: list connectors")

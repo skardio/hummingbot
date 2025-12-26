@@ -8,11 +8,8 @@ Extends MultiCoinGridController with Bitget spot-specific logic:
 - Rate limiting for Bitget API
 """
 
-import logging
 from decimal import Decimal
-from typing import Optional
 
-from hummingbot.connector.connector_base import ConnectorBase
 from multi_coin_grid_pro.controllers.multi_coin_grid_controller import MultiCoinGridController
 from multi_coin_grid_pro.spot_bitget.config_schema import SpotGridBitgetConfig
 
@@ -44,7 +41,7 @@ class SpotGridBitgetController(MultiCoinGridController):
         self.logger().info("=" * 80)
         self.logger().info("  BITGET SPOT GRID CONTROLLER INITIALIZED")
         self.logger().info("=" * 80)
-        self.logger().info(f"  Exchange: Bitget SPOT")
+        self.logger().info("  Exchange: Bitget SPOT")
         self.logger().info(f"  Quote Asset: {config.quote_asset}")
         self.logger().info(f"  Capital: {config.total_amount_quote} {config.quote_asset}")
         self.logger().info(f"  Trading Pairs: {len(config.manual_trading_pairs)}")
@@ -98,7 +95,8 @@ class SpotGridBitgetController(MultiCoinGridController):
         order_size_base = order_size_quote / mid_price
 
         # Apply exposure limits
-        max_exposure_quote = Decimal(str(self.config.total_amount_quote)) * Decimal(str(self.config.max_exposure_per_coin_pct))
+        max_exposure_quote = Decimal(str(self.config.total_amount_quote)) * \
+            Decimal(str(self.config.max_exposure_per_coin_pct))
         max_order_size_base = max_exposure_quote / mid_price
 
         # Take minimum
@@ -222,7 +220,7 @@ class SpotGridBitgetController(MultiCoinGridController):
             lines.append(f"     ... and {len(self.config.manual_trading_pairs) - 5} more")
 
         # Risk limits
-        lines.append(f"\n  🛡️  Risk Management:")
+        lines.append("\n  🛡️  Risk Management:")
         lines.append(f"     Stop Loss: {self.config.stop_loss_pct:.1f}%")
         lines.append(f"     Take Profit: {self.config.take_profit_pct:.1f}%")
         lines.append(f"     Max Daily Loss: {self.config.max_daily_loss_usdt} {self.config.quote_asset}")

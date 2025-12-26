@@ -5,7 +5,6 @@ Fetches BTC price and trend data using the existing TrendCalculator infrastructu
 """
 
 import logging
-from decimal import Decimal
 from typing import Optional
 
 from multi_coin_grid_pro.filters.market_regime_filter import BTCTrendData
