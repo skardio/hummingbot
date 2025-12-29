@@ -8,6 +8,7 @@ Hummingbot's Strategy V2 architecture.
 import asyncio
 import logging
 import time
+import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -40,6 +41,9 @@ from multi_coin_grid_pro.core.market_regime_integration import MarketRegimeInteg
 # Feature 1.3: Performance Tracking
 from multi_coin_grid_pro.core.performance_tracker import PerformanceTracker
 
+# Phase 1B: Observability
+from multi_coin_grid_pro.core.reason_codes import ReasonCode, Stage
+
 # Feature 1.2: Time-Based Trading Rules
 from multi_coin_grid_pro.core.time_based_integration import TimeBasedIntegration
 from multi_coin_grid_pro.filters import CandleIndicators, SmartEntryConfig, SmartEntryFilter
@@ -49,6 +53,7 @@ from multi_coin_grid_pro.logic.grid_sizer import DynamicGridSizer as DynamicGrid
 # Hybrid Grid Bot v2.0 - New modular components
 from multi_coin_grid_pro.logic.liquidity_aware_sizer import LiquidityAwareSizing
 from multi_coin_grid_pro.logic.smart_entry import SmartEntryBaseConfig, SmartEntryFilter as SmartEntryFilterV2
+from multi_coin_grid_pro.observability.event_logger import EventLogger
 from multi_coin_grid_pro.risk.pnl_tracker import RealtimePnLTracker
 from multi_coin_grid_pro.risk.risk_guard import RiskGuardV2
 from multi_coin_grid_pro.utils.candle_indicators import CandleIndicatorsCalculator
@@ -193,6 +198,83 @@ class MultiCoinGridController(ControllerBase):
         self._realised_executors_tracked: Dict[str, Decimal] = {}
         self._next_allocation_quote: Optional[Decimal] = None
 
+        # Phase 1C: Observability - EventLogger
+        observability_cfg = getattr(config, 'observability', {})
+
+        # Robust config reading: support both dict and object/dataclass
+        if isinstance(observability_cfg, dict):
+            structured_events_enabled = observability_cfg.get('structured_events_enabled', False)
+        else:
+            structured_events_enabled = getattr(observability_cfg, 'structured_events_enabled', False)
+
+        self.event_logger: Optional[EventLogger] = None
+
+        # Phase 4: Scheduled Reporting - define interval FIRST before using it
+        self._last_report_time: float = 0.0  # Track last time we generated report
+        self._report_interval_minutes: int = getattr(
+            getattr(config, 'observability', {}),
+            'report_interval_minutes',
+            60  # Default: hourly
+        )
+        self._console_reporter = None  # Will be initialized below if observability enabled
+
+        if structured_events_enabled:
+            try:
+                from multi_coin_grid_pro.observability.event_logger import compute_config_hash
+
+                # Robust config reading for nested values
+                if isinstance(observability_cfg, dict):
+                    events_output_dir = observability_cfg.get('events_output_dir', 'logs/events')
+                    buffer_size = observability_cfg.get('buffer_size', 100)
+                else:
+                    events_output_dir = getattr(observability_cfg, 'events_output_dir', 'logs/events')
+                    buffer_size = getattr(observability_cfg, 'buffer_size', 100)
+
+                self.event_logger = EventLogger(
+                    enabled=True,
+                    output_dir=events_output_dir,
+                    buffer_size=buffer_size
+                )
+
+                # Initialize ConsoleReporter for scheduled reports (Phase 4)
+                try:
+                    from pathlib import Path
+
+                    from multi_coin_grid_pro.observability.console_reporter import ConsoleReporter
+                    bot_name = f"{self.config.connector_name}_multi_coin_grid"
+                    self._console_reporter = ConsoleReporter(
+                        Path(events_output_dir),
+                        logger=self.logger(),
+                        bot_name=bot_name,
+                        config=self.config  # Pass full config for threshold analysis in US-E3.x v2 reports
+                    )
+                    self.logger().info(f"✅ ConsoleReporter initialized for {bot_name} (interval={self._report_interval_minutes}m)")
+                except Exception as e:
+                    self.logger().warning(f"ConsoleReporter initialization failed: {e}")
+
+                # Emit config_loaded event with hash
+                config_hash = compute_config_hash(config, logger=self.logger())
+                self.event_logger.emit_config_loaded(
+                    config_hash=config_hash,
+                    config_keys={
+                        "connector": config.connector_name,
+                        "quote_asset": config.quote_asset,
+                        "max_simultaneous_coins": getattr(config, 'max_simultaneous_coins', 1),
+                        "use_smart_entry_filter": getattr(config, 'use_smart_entry_filter', False),
+                        "use_multi_timeframe": getattr(config, 'use_multi_timeframe', False),
+                    }
+                )
+
+                self.logger().info(f"✅ EventLogger initialized (buffer={buffer_size}, dir={events_output_dir})")
+            except Exception as e:
+                self.logger().error(f"Failed to initialize EventLogger: {e}")
+                self.event_logger = None
+        else:
+            self.logger().info("ℹ️  Structured events disabled (observability.structured_events_enabled=false)")
+
+        # Phase 1C: Correlation tracking (for observability)
+        self._last_smart_entry_trace = None  # Stores last trace for correlation_id propagation
+
         # PHASE 1 FIX #2 & #3: Drawdown tracking
         max_daily_loss_eur = getattr(config, 'max_daily_loss_eur', None)
         if max_daily_loss_eur:
@@ -273,12 +355,14 @@ class MultiCoinGridController(ControllerBase):
                 'max_monthly_loss_pct': float(getattr(config, 'max_monthly_loss_pct', 12.0)),
                 'max_daily_loss_eur': float(getattr(config, 'max_daily_loss_eur', 0)) if getattr(config,
                                                                                                  'max_daily_loss_eur', None) else None,  # noqa: E501
-                'max_exposure_per_coin_pct': float(getattr(config, 'max_exposure_per_coin_pct', 40)),
-                'max_total_exposure_pct': float(getattr(config, 'max_total_exposure_pct', 80)),
+                # Convert fractional percentages (0.15 = 15%) to integer form (15) for RiskGuard
+                'max_exposure_per_coin_pct': float(getattr(config, 'max_exposure_per_coin_pct', 0.40)) * 100,
+                'max_total_exposure_pct': float(getattr(config, 'max_total_exposure_pct', 0.80)) * 100,
             },
             pnl_tracker=self.pnl_tracker_v2,
             alerter=self.telegram_alerter,
-            logger=self.logger()
+            logger=self.logger(),
+            event_logger=self.event_logger  # Pass EventLogger for Phase 2 observability
         )
 
         # SmartEntry Filter v2.0 (with coin profiles)
@@ -446,17 +530,76 @@ class MultiCoinGridController(ControllerBase):
             self.logger().info("📊 Feature 1.3: Performance Tracker ENABLED")
         self.logger().info("=" * 80)
 
+    def stop(self):
+        """
+        Explicit cleanup on controller shutdown.
+
+        Phase 1C: Flush EventLogger if present to ensure all events are written.
+        Call this from strategy stop() or cleanup path.
+        """
+        try:
+            if hasattr(self, 'event_logger') and self.event_logger:
+                self.event_logger.close()
+                self.logger().info("✅ EventLogger flushed and closed")
+        except Exception as e:
+            self.logger().error(f"Error closing EventLogger: {e}")
+
     def _log_decision_trace(self, trace: PairDecisionTrace):
         """
         Log decision trace based on config settings.
 
+        Phase 1C: Also emit structured events if EventLogger is enabled.
+
+        Correlation ID Pattern:
+            - Generated per candidate evaluation (e.g., UUID at start of determine_executor_actions)
+            - Stored in trace.correlation_id (single source of truth)
+            - Passed via trace through all stages (SmartEntry, MTF, Risk, Execution)
+            - No global state (_current_correlation_id) - explicit parameter passing only
+            - Links all rejection/acceptance events for same trading decision
+
         Args:
-            trace: PairDecisionTrace instance with all filter checks
+            trace: PairDecisionTrace instance with stage, reason_code, correlation_id populated
         """
         if not trace.enabled:
             return
 
-        # Only log if configured
+        # Phase 1C: Emit structured event if configured
+        # Fix: Only require trace.stage (success has no reason_code)
+        if self.event_logger and trace.stage:
+            try:
+                if trace.accepted:
+                    self.event_logger.emit_gate_passed(
+                        correlation_id=trace.correlation_id or "unknown",
+                        symbol=trace.trading_pair,
+                        stage=trace.stage,
+                        metadata={
+                            "exchange": trace.exchange,
+                            "strategy": trace.strategy,
+                            "final_reason": trace.final_reason or "all checks passed"
+                        }
+                    )
+                else:
+                    # Denied events MUST have reason_code
+                    if trace.reason_code:
+                        self.event_logger.emit_gate_denied(
+                            correlation_id=trace.correlation_id or "unknown",
+                            symbol=trace.trading_pair,
+                            stage=trace.stage,
+                            reason_code=trace.reason_code,
+                            reason_msg=trace.final_reason or "rejected",
+                            metadata={
+                                "exchange": trace.exchange,
+                                "strategy": trace.strategy,
+                                "rejected_by": trace.rejected_by
+                            }
+                        )
+                    else:
+                        self.logger().warning(f"Denied event missing reason_code: {trace.trading_pair}")
+            except Exception as e:
+                # Event emission errors should never break trading
+                self.logger().error(f"Error emitting structured event: {e}")
+
+        # Original logging behavior
         should_log = (
             (trace.accepted and self.debug_trace_log_accepted)
             or (not trace.accepted and self.debug_trace_log_rejected)
@@ -1082,6 +1225,22 @@ class MultiCoinGridController(ControllerBase):
                 except Exception as e:
                     self.logger().error(f"❌ Feature 1.3: Failed to generate performance report: {e}")
 
+        # ===== PHASE 4 (US-E3): SCHEDULED "WHY NO TRADE?" REPORTING =====
+        if self._console_reporter and self._report_interval_minutes > 0:
+            current_time = time.time()
+            time_since_last_report = current_time - self._last_report_time
+            report_interval = self._report_interval_minutes * 60  # Convert to seconds
+
+            if time_since_last_report >= report_interval:
+                try:
+                    self.logger().info("\n" + "=" * 80)
+                    self.logger().info(f"📊 WHY NO TRADE REPORT (every {self._report_interval_minutes}m)")
+                    self.logger().info("=" * 80)
+                    self._console_reporter.report_summary(hours=1)
+                    self._last_report_time = current_time
+                except Exception as e:
+                    self.logger().error(f"❌ US-E3: Failed to generate scheduled report: {e}")
+
         # CRITICAL FIX: Always update trends and determine actions, even if mdp_ready is False
         # Market data provider might not be ready if no candle feeds are configured,
         # but we still need to update price data for trend calculation and coin selection
@@ -1633,13 +1792,15 @@ class MultiCoinGridController(ControllerBase):
         spread_limit = 0.005  # 0.5%
 
         # Find new coins not yet monitored, sorted by volume (highest first)
-        # Filter by: not monitored, not blacklisted, meets volume threshold, meets spread threshold
+        # Filter by: not monitored, not blacklisted (config + runtime), meets volume threshold, meets spread threshold
         candidate_pairs = []
         for pair in self.all_available_pairs:
             if pair in self.monitored_coins:
                 continue  # Already monitored
             if pair in blacklist:
-                continue  # Blacklisted
+                continue  # Blacklisted in config
+            if pair in self.auto_blacklisted_coins:
+                continue  # Auto-blacklisted at runtime (NL-restrictions, error loops, etc.)
             if pair not in self.pair_volumes:
                 continue  # No volume data
             if self.pair_volumes[pair] < min_volume:
@@ -1852,15 +2013,51 @@ class MultiCoinGridController(ControllerBase):
             # Calculate how many slots are available
             available_slots = self.max_simultaneous_coins - len(self.active_coins)
 
+            # Add currently active coins to exclusion list (avoid selecting coins we're already trading)
+            excluded_coins_with_active = excluded_coins | set(self.active_coins.keys())
+
             if available_slots <= 0:
+                # ENHANCED: Get top candidate BEFORE rejecting, so we can see what we missed
+                orderbook_config = self._build_orderbook_config()
+
+                # Get top 3 candidates even though we have no slots (for observability)
+                missed_candidates = self.trend_calculator.get_top_n_coins(
+                    n=3,
+                    min_trend_pct=float(self.config.trend_min_change_pct),
+                    exclude_coins=list(excluded_coins_with_active) if excluded_coins_with_active else None,
+                    orderbook_config=orderbook_config,
+                )
+
                 self.logger().info(
                     f"📊 Multi-coin mode: All {self.max_simultaneous_coins} slots filled "
                     f"({list(self.active_coins.keys())}) - no room for new coins"
                 )
+
+                if missed_candidates:
+                    self.logger().info(f"   📉 Missed opportunities: {missed_candidates}")
+
+                # Phase 3: Emit SLOT_FULL event for observability
+                # This helps identify capacity constraints in production
+                correlation_id = str(uuid.uuid4())
+
+                # Use first missed candidate as symbol (if any), otherwise N/A
+                missed_symbol = missed_candidates[0] if missed_candidates else "N/A"
+
+                self._emit_execution_denial(
+                    symbol=missed_symbol,
+                    reason_code=ReasonCode.SLOT_FULL,
+                    reason_msg=f"All {self.max_simultaneous_coins} slots filled",
+                    correlation_id=correlation_id,
+                    metadata={
+                        "max_slots": self.max_simultaneous_coins,
+                        "active_coins": list(self.active_coins.keys()),
+                        "missed_candidates": missed_candidates[:3],  # Top 3 missed opportunities
+                        "timestamp": self.market_data_provider.time()
+                    }
+                )
+
                 top_coins = []  # No slots available
             else:
-                # Add currently active coins to exclusion list (avoid selecting coins we're already trading)
-                excluded_coins_with_active = excluded_coins | set(self.active_coins.keys())
 
                 # NEW: Clean up expired session blacklist entries en add to exclusion
                 current_time = self.market_data_provider.time()
@@ -1914,13 +2111,30 @@ class MultiCoinGridController(ControllerBase):
 
             # For compatibility with existing single-coin logic, set best_coin to first coin
             # (We'll process all coins in the loop below)
-            best_coin = top_coins[0] if top_coins else None
+            # 🔧 FIX: Use helper to skip coins with active grids
+            best_coin = self.pick_first_inactive(top_coins) if top_coins else None
 
-            # Double-check: reject if somehow a blacklisted coin was selected
-            if best_coin and best_coin in config_blacklist:
+            # Double-check: reject if somehow a blacklisted coin was selected (config or runtime)
+            if best_coin and (best_coin in config_blacklist or best_coin in self.auto_blacklisted_coins):
+                blacklist_type = "config" if best_coin in config_blacklist else "runtime (NL-restriction/error-loop)"
                 self.logger().warning(
-                    f"🚨 CRITICAL: {best_coin} is in blacklist but was selected! Rejecting..."
+                    f"🚨 CRITICAL: {best_coin} is in blacklist ({blacklist_type}) but was selected! Rejecting..."
                 )
+
+                # Phase 3: Emit BLACKLIST denial event
+                correlation_id = str(uuid.uuid4())
+                self._emit_execution_denial(
+                    symbol=best_coin,
+                    reason_code=ReasonCode.BLACKLIST,
+                    reason_msg=f"{best_coin} is in {blacklist_type} blacklist",
+                    correlation_id=correlation_id,
+                    metadata={
+                        "blacklist_type": blacklist_type,
+                        "blacklist_size": len(config_blacklist),
+                        "timestamp": self.market_data_provider.time()
+                    }
+                )
+
                 best_coin = None
 
             # SMART SELECTION: Check SmartEntry BEFORE finalizing coin selection
@@ -1936,6 +2150,11 @@ class MultiCoinGridController(ControllerBase):
                 if hasattr(self.trend_calculator, '_debug_info'):
                     top_10 = self.trend_calculator._debug_info.get('top_10', [])
                     for i, (fallback_coin, fallback_trend) in enumerate(top_10[1:], start=2):
+                        # 🔧 FIX: Skip if coin already has active grid
+                        if fallback_coin in self.active_coins:
+                            self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (already active)")
+                            continue
+
                         if fallback_coin in excluded_coins or fallback_coin in config_blacklist:
                             self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (blacklist)")
                             continue
@@ -1976,6 +2195,11 @@ class MultiCoinGridController(ControllerBase):
                 if hasattr(self.trend_calculator, '_debug_info'):
                     top_10 = self.trend_calculator._debug_info.get('top_10', [])
                     for i, (fallback_coin, fallback_trend) in enumerate(top_10[1:], start=2):
+                        # 🔧 FIX: Skip if coin already has active grid
+                        if fallback_coin in self.active_coins:
+                            self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (already active)")
+                            continue
+
                         if fallback_coin in excluded_coins or fallback_coin in config_blacklist:
                             self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (blacklist)")
                             continue
@@ -2009,34 +2233,80 @@ class MultiCoinGridController(ControllerBase):
             # Phase 2.5: Apply multi-timeframe buy conditions if enabled (only if not already checked above)
             if best_coin and use_multi_timeframe and rejection_reason is None:
                 if not self._check_multi_timeframe_buy_conditions(best_coin):
+                    # Phase 1C: Instrument MTF rejection inline (no helper method)
                     # Get rejection reason from trend data
                     trend_obj = self.trend_calculator.get_trend(best_coin)
+                    reason_code = ReasonCode.MTF_INSUFFICIENT  # Default
+
                     if trend_obj and hasattr(trend_obj, 'trend_240m') and hasattr(trend_obj, 'trend_60m'):
                         if hasattr(trend_obj, 'long_trend_warmup') and trend_obj.long_trend_warmup:
                             if trend_obj.trend_240m <= 0.75:
                                 rejection_reason = f"4h trend ({
                                     trend_obj.trend_240m:+.2f}%) <= +0.75% (warm-up requires > +0.75%)"
+                                reason_code = ReasonCode.MTF_INSUFFICIENT
                             elif trend_obj.trend_60m < 0.15:
+                                # Fix #4: < 0.15 is insufficient, not crash
                                 rejection_reason = f"1h trend ({
                                     trend_obj.trend_60m:+.2f}%) < +0.15% (warm-up requires >= +0.15%)"
+                                reason_code = ReasonCode.MTF_INSUFFICIENT
                             else:
                                 rejection_reason = "Warm-up mode: trends niet sterk genoeg"
+                                reason_code = ReasonCode.MTF_INSUFFICIENT
                         else:
                             if trend_obj.trend_1440m <= 1.0:
                                 rejection_reason = f"24h trend ({trend_obj.trend_1440m:+.2f}%) <= +1%"
+                                reason_code = ReasonCode.MTF_INSUFFICIENT
                             elif trend_obj.trend_240m <= 1.0:
                                 rejection_reason = f"4h trend ({trend_obj.trend_240m:+.2f}%) <= +1%"
+                                reason_code = ReasonCode.MTF_INSUFFICIENT
                             elif trend_obj.trend_60m < 0.0:
+                                # Fix #4: Only negative trends are crashes
                                 rejection_reason = f"1h trend ({trend_obj.trend_60m:+.2f}%) < 0% (crash detected)"
+                                reason_code = ReasonCode.MTF_CRASH_DETECTED
                             else:
                                 rejection_reason = "Multi-timeframe buy conditions niet voldaan"
+                                reason_code = ReasonCode.MTF_INSUFFICIENT
                     else:
                         rejection_reason = "Multi-timeframe data niet beschikbaar"
+                        reason_code = ReasonCode.MTF_INSUFFICIENT
+
+                    # Phase 1C: Create trace inline and populate stage + reason_code
+                    # Fix #1: Reuse correlation_id from SmartEntry trace (single source of truth)
+                    last_trace = getattr(self, '_last_smart_entry_trace', None)
+                    correlation_id = last_trace.correlation_id if last_trace and last_trace.correlation_id else str(__import__('uuid').uuid4())
+
+                    mtf_trace = PairDecisionTrace(
+                        trading_pair=best_coin,
+                        exchange=self.config.connector_name,
+                        enabled=True,
+                        strategy="spot_grid"
+                    )
+                    mtf_trace.finalize(accepted=False, rejected_by="mtf", final_reason=rejection_reason)
+                    mtf_trace.reason_code = reason_code.value
+                    mtf_trace.stage = Stage.MTF.value
+                    mtf_trace.correlation_id = correlation_id  # Fix #1: Reuse correlation_id
+
+                    # Event emission happens centrally in _log_decision_trace()
+                    self._log_decision_trace(mtf_trace)
 
                     self.logger().warning(
                         f"❌ {best_coin} does not meet multi-timeframe buy conditions - will retry next cycle"
                     )
                     best_coin = None
+                else:
+                    # Fix #2: MTF passed - emit gate_passed event
+                    last_trace = getattr(self, '_last_smart_entry_trace', None)
+                    if last_trace and last_trace.correlation_id:
+                        mtf_pass_trace = PairDecisionTrace(
+                            trading_pair=best_coin,
+                            exchange=self.config.connector_name,
+                            enabled=True,
+                            strategy="spot_grid"
+                        )
+                        mtf_pass_trace.finalize(accepted=True, final_reason="MTF buy conditions passed")
+                        mtf_pass_trace.stage = Stage.MTF.value
+                        mtf_pass_trace.correlation_id = last_trace.correlation_id
+                        self._log_decision_trace(mtf_pass_trace)
 
             # Log debug info from trend_calculator
             if hasattr(self.trend_calculator, '_debug_info'):
@@ -2234,51 +2504,17 @@ class MultiCoinGridController(ControllerBase):
         if not best_coin:
             self.logger().info(f"❌ No coin found with trend >= {self.config.trend_min_change_pct}%")
 
-            # CRITICAL FIX: Only stop executor if PRO EXIT SYSTEM triggers OR active coin has severe negative trend
-            # DO NOT stop just because no better coin is found - let the active coin continue trading!
-            if self.active_coin and self.active_executor_id:
-                active_trend = self.trend_calculator.get_trend(self.active_coin)
-                if active_trend:
-                    # Phase 2.5: Use multi-timeframe trends if available
-                    if use_multi_timeframe and hasattr(active_trend, 'trend_60m') and active_trend.trend_60m != 0.0:
-                        # Use 60m trend for panic detection (more responsive)
-                        active_trend_value = active_trend.trend_60m
-                    else:
-                        active_trend_value = active_trend.consensus_trend_pct if active_trend.consensus_trend_pct != 0.0 else active_trend.trend_pct  # noqa: E501
+            # PHASE 2 FIX: "No better coin" does NOT force close!
+            # Risk management (stop loss, P&L targets) controls exits, NOT coin selection
+            # Coin selection only decides what NEW positions to open
 
-                    # Only stop if active coin has SEVERE negative trend (< -1%)
-                    # This prevents premature exits when active coin is still performing well
-                    negative_trend_threshold = -1.0  # -1% threshold
+            if self.active_coin:
+                self.logger().info(
+                    f"✅ No better coin found, but keeping {self.active_coin} running. "
+                    f"Risk management will handle exit if needed."
+                )
 
-                    if active_trend_value < negative_trend_threshold:
-                        # Active coin is losing badly and no better coin available - FORCE stop
-                        self.logger().critical(
-                            f"🚨 PANIC STOP: Active coin {self.active_coin} has negative trend ({active_trend_value:+.2f}%) "  # noqa: E501
-                            f"< {negative_trend_threshold}% and no better coin available - FORCING stop to limit losses"
-                        )
-                        if self._is_executor_actually_active():
-                            try:
-                                stop_action = self._create_stop_action()
-                                if stop_action:
-                                    actions.append(stop_action)
-                                else:
-                                    self.logger().warning("⚠️  Failed to create stop action")
-                            except Exception as e:
-                                self.logger().error(f"❌ Error creating stop action: {e}")
-                                import traceback
-                                self.logger().error(traceback.format_exc())
-                        return actions
-                    else:
-                        # Active coin is still performing well (or neutral) - KEEP IT RUNNING
-                        # Don't stop just because no better coin was found!
-                        self.logger().info(
-                            f"✅ Keeping active coin {self.active_coin} running (trend: {active_trend_value:+.2f}%) - "
-                            f"no better coin found, but active coin is still performing well"
-                        )
-                        # Return empty actions - let the active executor continue
-                        return actions
-
-            # No active coin - nothing to do
+            # Just pause new entries - don't touch active positions!
             return actions
 
         # Check if risk controls allow new entries
@@ -2576,6 +2812,14 @@ class MultiCoinGridController(ControllerBase):
                         self.max_simultaneous_coins} coins = €{
                         per_coin_capital:.2f} per coin")
 
+                # 🔧 RACE CONDITION GUARD: Final check before creating grid
+                # Even with filtering, coin could become active between selection and creation
+                if best_coin in self.active_coins:
+                    self.logger().warning(
+                        f"⏭️  {best_coin} became active just now (race condition) - skipping create"
+                    )
+                    return actions
+
                 grid_action = self._create_grid_action(best_coin, adjusted_size)
                 if grid_action:
                     actions.append(grid_action)
@@ -2781,6 +3025,33 @@ class MultiCoinGridController(ControllerBase):
         if not active_executor:
             # Executor doesn't exist or is not active - check why it failed
             failed_executor = self._get_executor_info(self.active_executor_id)
+
+            # CRITICAL: Check for NL-restriction errors FIRST (immediate blacklist, no retry)
+            # Note: Check custom_info for nl_restricted flag set by executor
+            if failed_executor and failed_executor.custom_info.get('nl_restricted'):
+                restricted_coin = failed_executor.custom_info.get('nl_restricted_coin') or self.active_coin
+                if restricted_coin:
+                    self.logger().warning(
+                        f"\ud83d\udeab NL-RESTRICTION DETECTED: {restricted_coin} is restricted for NL accounts\\n"
+                        f"   \u2192 AUTO-BLACKLISTING immediately to prevent retries"
+                    )
+                    # Add to auto-blacklist (runtime)
+                    self.auto_blacklisted_coins.add(restricted_coin)
+                    # Add to persistent config blacklist
+                    if hasattr(self.config, 'blacklist'):
+                        if self.config.blacklist is None:
+                            self.config.blacklist = []
+                        if restricted_coin not in self.config.blacklist:
+                            self.config.blacklist.append(restricted_coin)
+                            self.logger().info(f"\u2705 Added {restricted_coin} to persistent config blacklist")
+                        # Reset error counter (not needed for NL-restrictions, but clean up)
+                        if restricted_coin in self.coin_error_count:
+                            del self.coin_error_count[restricted_coin]
+                        # Clear state and continue to next coin
+                        self.active_coin = None
+                        self.active_executor_id = None
+                        self.global_risk_manager.reset_exposure()
+                        return
 
             # Track errors for this coin (for automatic blacklisting)
             if self.active_coin:
@@ -3002,6 +3273,18 @@ class MultiCoinGridController(ControllerBase):
         """
         now = self.market_data_provider.time()
 
+        # 🔧 CLEANUP: Remove terminated/failed executors from active_coins
+        # This prevents "ghost actives" where bot thinks coin is active but it's not
+        for executor in self.executors_info:
+            if not executor.is_active and executor.status == RunnableStatus.TERMINATED:
+                trading_pair = getattr(getattr(executor, "config", None), "trading_pair", None)
+                if trading_pair and trading_pair in self.active_coins:
+                    if self.active_coins[trading_pair] == executor.id:
+                        del self.active_coins[trading_pair]
+                        self.logger().info(
+                            f"🧹 Cleanup: Removed {trading_pair} from active_coins (executor terminated)"
+                        )
+
         # Track realised PnL for terminated executors exactly once
         for executor in self.executors_info:
             if executor.status == RunnableStatus.TERMINATED:
@@ -3124,6 +3407,9 @@ class MultiCoinGridController(ControllerBase):
         """
         Phase 1.4: Check if position limits allow creating executor for this coin
 
+        Phase 2: Integrated with RiskGuard v2.0 + EventLogger for observability.
+        Emits gate_denied events with stage=RISK when limits exceeded.
+
         Note: Since we only have 1 active executor at a time, we mainly check:
         - Max exposure per coin (if switching to same coin)
         - Max total exposure (should always be <= 1 executor worth)
@@ -3135,6 +3421,11 @@ class MultiCoinGridController(ControllerBase):
             True if position limits allow, False otherwise
         """
         try:
+            import uuid
+
+            # Generate correlation ID for this Risk stage check
+            correlation_id = str(uuid.uuid4())
+
             # Calculate new exposure
             requested_allocation = self._next_allocation_quote if self._next_allocation_quote else Decimal(
                 str(self.config.total_amount_quote))
@@ -3144,6 +3435,35 @@ class MultiCoinGridController(ControllerBase):
             # For now, use grid amount as capital reference
             # In future, could get actual account balance
             total_capital = self.config.risk_reference_balance
+
+            # Phase 2: Use RiskGuard v2.0 for exposure checks + event emission
+            allowed, reason = self.risk_guard_v2.can_open_position(
+                symbol=symbol,
+                size_eur=new_exposure,
+                correlation_id=correlation_id
+            )
+
+            if not allowed:
+                self.logger().warning(f"⚠️  RiskGuard denied position: {reason}")
+                return False
+
+            # Emit gate_passed event for successful risk check
+            if self.event_logger and self.event_logger.enabled:
+                self.event_logger.emit_gate_passed(
+                    correlation_id=correlation_id,
+                    symbol=symbol,
+                    stage=Stage.RISK,
+                    metadata={
+                        "exchange": self.config.connector_name,
+                        "strategy": "spot_grid",
+                        "final_reason": "risk limits passed",
+                        "position_size_eur": float(new_exposure),
+                        "current_coin_exposure": float(current_coin_exposure),
+                        "total_capital": float(total_capital)
+                    }
+                )
+
+            # Legacy code below (kept for backward compatibility, but RiskGuard already checked this)
 
             # Since we only have 1 executor at a time, check:
             # 1. If switching to same coin, check max per coin limit
@@ -3191,6 +3511,66 @@ class MultiCoinGridController(ControllerBase):
             self.logger().error(traceback.format_exc())
             # On error, allow (fail open) - but log it
             return True
+
+    def _emit_execution_denial(
+        self,
+        symbol: str,
+        reason_code: ReasonCode,
+        reason_msg: str,
+        correlation_id: str,
+        metadata: Dict[str, Any]
+    ) -> None:
+        """
+        Phase 3: Emit execution stage denial event.
+
+        Args:
+            symbol: Trading pair symbol
+            reason_code: Execution denial reason code
+            reason_msg: Human-readable reason
+            correlation_id: UUID for event correlation
+            metadata: Additional context
+        """
+        if not hasattr(self, 'event_logger') or not self.event_logger or not self.event_logger.enabled:
+            return
+
+        self.event_logger.emit_gate_denied(
+            correlation_id=correlation_id,
+            symbol=symbol,
+            stage=Stage.EXECUTION,
+            reason_code=reason_code,
+            reason_msg=reason_msg,
+            metadata=metadata
+        )
+
+    def _emit_regime_denial(
+        self,
+        symbol: str,
+        reason_code: ReasonCode,
+        reason_msg: str,
+        correlation_id: str,
+        metadata: Dict[str, Any]
+    ) -> None:
+        """
+        Phase 3: Emit regime stage denial event.
+
+        Args:
+            symbol: Trading pair symbol
+            reason_code: Regime denial reason code
+            reason_msg: Human-readable reason
+            correlation_id: UUID for event correlation
+            metadata: Additional context
+        """
+        if not hasattr(self, 'event_logger') or not self.event_logger or not self.event_logger.enabled:
+            return
+
+        self.event_logger.emit_gate_denied(
+            correlation_id=correlation_id,
+            symbol=symbol,
+            stage=Stage.REGIME,
+            reason_code=reason_code,
+            reason_msg=reason_msg,
+            metadata=metadata
+        )
 
     def _update_exposure_tracking(self, symbol: str, amount: Decimal) -> None:
         """
@@ -3244,6 +3624,22 @@ class MultiCoinGridController(ControllerBase):
         # MULTI-COIN: Check if best_coin is already trading
         if best_coin in self.active_coins:
             self.logger().info(f"✅ {best_coin} already has active executor - keep running")
+
+            # Phase 3: Emit ALREADY_TRADING event
+            correlation_id = str(uuid.uuid4())
+            self._emit_execution_denial(
+                symbol=best_coin,
+                reason_code=ReasonCode.ALREADY_TRADING,
+                reason_msg=f"{best_coin} already has active executor",
+                correlation_id=correlation_id,
+                metadata={
+                    "active_coins": list(self.active_coins.keys()),
+                    "slot_count": len(self.active_coins),
+                    "max_slots": self.max_simultaneous_coins,
+                    "timestamp": self.market_data_provider.time()
+                }
+            )
+
             return False
 
         # MULTI-COIN: Check if we have room for more coins
@@ -3277,6 +3673,22 @@ class MultiCoinGridController(ControllerBase):
                     f"⏰ Startup delay active - waiting {remaining / 60:.1f} more minutes "
                     f"({remaining:.0f} seconds) before first trade"
                 )
+
+                # Phase 3: Emit STARTUP_DELAY event
+                correlation_id = str(uuid.uuid4())
+                self._emit_execution_denial(
+                    symbol=best_coin,
+                    reason_code=ReasonCode.STARTUP_DELAY,
+                    reason_msg=f"Startup delay active - {remaining / 60:.1f} min remaining",
+                    correlation_id=correlation_id,
+                    metadata={
+                        "time_since_start_sec": time_since_start,
+                        "min_startup_wait_sec": min_startup_wait,
+                        "remaining_sec": remaining,
+                        "timestamp": time.time()
+                    }
+                )
+
                 return False
 
             # Startup delay passed - allow first trade
@@ -3870,6 +4282,29 @@ class MultiCoinGridController(ControllerBase):
             self.logger().debug(f"⚠️  Error calculating ATR for {symbol}: {e}")
             return None
 
+    # ===== MULTI-COIN: Duplicate Grid Prevention =====
+    def pick_first_inactive(self, coins: List[str]) -> Optional[str]:
+        """
+        Select first coin from list that doesn't have an active grid and isn't blacklisted.
+
+        Args:
+            coins: List of candidate coins (ordered by preference)
+
+        Returns:
+            First coin without active grid and not blacklisted, or None if all are active/blacklisted
+        """
+        for coin in coins:
+            # Skip if already has active grid
+            if coin in self.active_coins:
+                self.logger().debug(f"⏭️  {coin} already has active grid (executor_id={self.active_coins[coin][:8]}...) - skipping")
+                continue
+            # Skip if auto-blacklisted (NL-restrictions, error loops, etc.)
+            if coin in self.auto_blacklisted_coins:
+                self.logger().debug(f"🚫 {coin} is auto-blacklisted (NL-restriction/error-loop) - skipping")
+                continue
+            return coin
+        return None
+
     # ===== HYBRID GRID: SmartEntry Filter Integration =====
     def _check_smart_entry_filter(self, symbol: str) -> bool:
         """
@@ -4008,6 +4443,9 @@ class MultiCoinGridController(ControllerBase):
                 order_size_eur=order_size_eur,
             )
 
+            # Fix #1: Store trace for correlation_id propagation to MTF
+            self._last_smart_entry_trace = trace
+
             # Log decision trace
             self._log_decision_trace(trace)
 
@@ -4050,6 +4488,9 @@ class MultiCoinGridController(ControllerBase):
                 exchange=self.config.connector_name,
                 trace_enabled=self.debug_trace_enabled
             )
+
+            # Fix #1: Store trace for correlation_id propagation to MTF
+            self._last_smart_entry_trace = trace
 
             # Log decision trace
             self._log_decision_trace(trace)
@@ -6079,3 +6520,80 @@ class MultiCoinGridController(ControllerBase):
         """
         exit_reason = self.should_exit_position(coin)
         return exit_reason is not None
+    # ===== PHASE 4 (US-E3): ON-DEMAND REPORTING METHODS =====
+
+    def report_why_no_trade(self, hours: int = 1):
+        """
+        Generate on-demand "Why No Trade?" report.
+
+        US-E3: Shows rejection reasons breakdown for last N hours.
+
+        Args:
+            hours: Number of hours to analyze (default: 1)
+        """
+        if not self._console_reporter:
+            self.logger().warning("⚠️  ConsoleReporter not initialized. Enable observability.structured_events_enabled in config.")
+            return
+
+        try:
+            self.logger().info("\n" + "=" * 80)
+            self.logger().info(f"📊 WHY NO TRADE REPORT (Last {hours}h)")
+            self.logger().info("=" * 80)
+            self._console_reporter.report_summary(hours=hours)
+        except Exception as e:
+            self.logger().error(f"❌ Failed to generate report: {e}")
+
+    def report_by_stage(self, hours: int = 6):
+        """
+        Generate rejection breakdown by pipeline stage.
+
+        US-E3: Shows which stage (SMART_ENTRY, MTF, RISK, EXECUTION) blocks most.
+
+        Args:
+            hours: Number of hours to analyze (default: 6)
+        """
+        if not self._console_reporter:
+            self.logger().warning("⚠️  ConsoleReporter not initialized. Enable observability in config.")
+            return
+
+        try:
+            self._console_reporter.report_by_stage(hours=hours)
+        except Exception as e:
+            self.logger().error(f"❌ Failed to generate stage report: {e}")
+
+    def report_by_symbol(self, hours: int = 6, top_n: int = 10):
+        """
+        Generate top rejected symbols report.
+
+        US-E3: Shows which coins get rejected most often.
+
+        Args:
+            hours: Number of hours to analyze (default: 6)
+            top_n: Number of top symbols to show (default: 10)
+        """
+        if not self._console_reporter:
+            self.logger().warning("⚠️  ConsoleReporter not initialized. Enable observability in config.")
+            return
+
+        try:
+            self._console_reporter.report_by_symbol(hours=hours, top_n=top_n)
+        except Exception as e:
+            self.logger().error(f"❌ Failed to generate symbol report: {e}")
+
+    def report_full_dashboard(self, hours: int = 24):
+        """
+        Generate comprehensive observability dashboard.
+
+        US-E3: Shows all reports (summary, by_stage, by_symbol).
+
+        Args:
+            hours: Number of hours to analyze (default: 24)
+        """
+        if not self._console_reporter:
+            self.logger().warning("⚠️  ConsoleReporter not initialized. Enable observability in config.")
+            return
+
+        try:
+            self._console_reporter.report_full_dashboard(hours=hours)
+        except Exception as e:
+            self.logger().error(f"❌ Failed to generate dashboard: {e}")

@@ -56,6 +56,7 @@ blacklist:
   - M-EUR
   - Q-EUR          # Kraken blokkeert Q-EUR trading voor NL accounts
 
+
 # ==============================================================================
 # ADAPTIVE REGIME DETECTION & FILTERS (Phase 2: Active)
 # ==============================================================================
@@ -163,7 +164,7 @@ manual_trading_pairs: []  # null = dynamic discovery mode
   # - BAT-EUR
   # - KAS-EUR
 
-max_simultaneous_coins: 1          # Eén coin tegelijk → rustiger risico
+max_simultaneous_coins: 1          # Phase 3.5 validation: start conservatief (24-48h), dan opschalen naar 2
 
 # ==============================================================================
 # MULTI-TIMEFRAME BUY PROTECTION (PREVENT KAS-EUR DISASTER)
@@ -568,15 +569,15 @@ session_blacklist_duration_seconds: 7200  # 2 uur blacklist, dan weer proberen
 # CAPITAL & RISK MANAGEMENT
 # ==============================================================================
 
-total_amount_quote: 80
+total_amount_quote: 30             # Per coin: €30 × 2 (internal) = €60 totaal (Phase 3.5: 1 coin max)
 min_order_amount_quote: 10
 
-risk_reference_balance_quote: 100
-risk_max_balance_per_trade_pct: 80
-risk_max_total_open_risk_pct: 85
+risk_reference_balance_quote: 150  # €150 reference (buffer voor veiligheid)
+risk_max_balance_per_trade_pct: 40  # 40% van €150 = €60 per coin
+risk_max_total_open_risk_pct: 40   # 40% van €150 = €60 totaal (Phase 3.5: 1 coin × €60)
 
-max_exposure_per_coin_pct: 25
-max_total_exposure_pct: 60
+max_exposure_per_coin_pct: 40      # Each coin: 40% van €150 = €60
+max_total_exposure_pct: 40        # Totaal: 40% van €150 = €60 (Phase 3.5: 1 coin max)
 
 stop_loss_pct: 0.05                # 5% globale SL per positie
 take_profit_pct: 0.02              # 2% globale TP
@@ -626,3 +627,14 @@ debug_trace_enabled: true
 debug_trace_format: compact
 debug_trace_log_accepted: false
 debug_trace_log_rejected: true
+
+# ==============================================================================
+# OBSERVABILITY (Phase 1A - Structured Events)
+# ==============================================================================
+
+observability:
+  structured_events_enabled: true  # ENABLED for testing Phase 1C
+  events_output_dir: "logs/events"
+  buffer_size: 100
+  why_no_trade_report_enabled: false  # Phase 1B (future)
+  report_interval_seconds: 3600

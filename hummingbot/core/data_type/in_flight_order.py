@@ -78,8 +78,25 @@ class TradeUpdate(NamedTuple):
         return instance
 
     def to_json(self) -> Dict[str, Any]:
+        # BUGFIX: Normalize timestamp to milliseconds to prevent SQLite INTEGER overflow
+        fill_ts = self.fill_timestamp
+        # Handle string timestamps
+        if isinstance(fill_ts, str):
+            fill_ts = float(fill_ts)
+        fill_ts = float(fill_ts)
+
+        if fill_ts >= 1e18:  # Nanoseconds or larger
+            normalized_ts = int(fill_ts / 1e6) if fill_ts < 1e21 else int(fill_ts / 1e9)
+        elif fill_ts >= 1e15:  # Microseconds
+            normalized_ts = int(fill_ts / 1e3)
+        elif fill_ts >= 1e12:  # Already milliseconds
+            normalized_ts = int(fill_ts)
+        else:  # Seconds - convert to milliseconds
+            normalized_ts = int(fill_ts * 1e3)
+
         json_dict = self._asdict()
         json_dict.update({
+            "fill_timestamp": normalized_ts,
             "fill_price": str(self.fill_price),
             "fill_base_amount": str(self.fill_base_amount),
             "fill_quote_amount": str(self.fill_quote_amount),
@@ -259,6 +276,25 @@ class InFlightOrder:
         Returns this InFlightOrder as a JSON object.
         :return: JSON object
         """
+        # BUGFIX: Normalize timestamps to milliseconds to prevent SQLite INTEGER overflow
+        # SQLite INTEGER max: 9,223,372,036,854,775,807 (9.2 quintillion)
+        # When timestamps are stored in JSON and later inserted into SQLite, they must fit in INTEGER range
+        def normalize_timestamp(ts):
+            # Handle string timestamps (convert to float first)
+            if isinstance(ts, str):
+                ts = float(ts)
+            ts = float(ts)  # Ensure it's a number
+
+            if ts >= 1e18:  # Nanoseconds or larger (19+ digits)
+                # For very large values (picoseconds), divide more aggressively
+                return int(ts / 1e6) if ts < 1e21 else int(ts / 1e9)
+            elif ts >= 1e15:  # Microseconds (16-18 digits)
+                return int(ts / 1e3)  # microseconds -> milliseconds
+            elif ts >= 1e12:  # Already milliseconds (13-15 digits)
+                return int(ts)
+            else:  # Seconds (< 13 digits) - convert to milliseconds
+                return int(ts * 1e3)
+
         return {
             "client_order_id": self.client_order_id,
             "exchange_order_id": self.exchange_order_id,
@@ -272,8 +308,8 @@ class InFlightOrder:
             "last_state": str(self.current_state.value),
             "leverage": str(self.leverage),
             "position": self.position.value,
-            "creation_timestamp": self.creation_timestamp,
-            "last_update_timestamp": self.last_update_timestamp,
+            "creation_timestamp": normalize_timestamp(self.creation_timestamp),
+            "last_update_timestamp": normalize_timestamp(self.last_update_timestamp),
             "order_fills": {key: fill.to_json() for key, fill in self.order_fills.items()},
             "cumulative_fee_paid_base": float(self.cumulative_fee_paid(self.base_asset)),
             "cumulative_fee_paid_quote": float(self.cumulative_fee_paid(self.quote_asset)),

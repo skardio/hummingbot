@@ -374,7 +374,14 @@ class MarketsRecorder:
             return
 
         base_asset, quote_asset = evt.trading_pair.split("-")
-        timestamp = int(evt.creation_timestamp * 1e3)
+        # BUGFIX: Normalize timestamp to milliseconds to prevent SQLite INTEGER overflow
+        # SQLite INTEGER max: 9,223,372,036,854,775,807 (9.2 quintillion)
+        # Typical timestamp in ms: ~1,735,430,400,000 (Dec 2025)
+        raw_timestamp = evt.creation_timestamp
+        if raw_timestamp > 1e12:  # Already in milliseconds or larger
+            timestamp = int(raw_timestamp) if raw_timestamp < 9e18 else int(time.time() * 1e3)
+        else:  # Seconds - convert to milliseconds
+            timestamp = int(raw_timestamp * 1e3)
         event_type: MarketEvent = self.market_event_tag_map[event_tag]
 
         with self._sql_manager.get_new_session() as session:
@@ -412,7 +419,15 @@ class MarketsRecorder:
             return
 
         base_asset, quote_asset = evt.trading_pair.split("-")
-        timestamp: int = int(evt.timestamp * 1e3) if evt.timestamp is not None else self.db_timestamp
+        # BUGFIX: Protect against overflow - normalize timestamp to milliseconds
+        if evt.timestamp is not None:
+            raw_timestamp = evt.timestamp
+            if raw_timestamp > 1e12:  # Already in milliseconds or larger
+                timestamp = int(raw_timestamp) if raw_timestamp < 9e18 else self.db_timestamp
+            else:  # Seconds - convert to milliseconds
+                timestamp = int(raw_timestamp * 1e3)
+        else:
+            timestamp = self.db_timestamp
         event_type: MarketEvent = self.market_event_tag_map[event_tag]
         order_id: str = evt.order_id
 

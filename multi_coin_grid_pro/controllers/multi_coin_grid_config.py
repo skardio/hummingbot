@@ -975,6 +975,17 @@ class MultiCoinGridConfig(ControllerConfigBase):
         description="If 1h declining AND 4h < this, reject entry (prevents trading during crashes)"
     )
 
+    # Phase 1C: Observability Configuration
+    observability: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Observability config (optional): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Observability settings (structured_events_enabled, events_output_dir, buffer_size)"
+    )
+
     @property
     def triple_barrier_config(self) -> TripleBarrierConfig:
         """

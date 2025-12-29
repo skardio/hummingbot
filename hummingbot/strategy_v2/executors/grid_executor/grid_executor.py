@@ -96,6 +96,14 @@ class GridExecutor(ExecutorBase):
         self._cancel_min_interval = 10.0  # minimum 10 seconds between cancel retries
         self._cancel_max_retries = 5     # give up after 5 attempts
 
+        # NL-RESTRICTION DETECTION: Track Kraken NL-restricted coins
+        self._nl_restricted = False  # Flag: This executor hit NL-restriction error
+        self._nl_restricted_coin = None  # Which coin was restricted
+
+        # Phase 1+3: Closing state management (prevent double sell bug)
+        self._closing_in_progress = False  # Guard flag to prevent duplicate close orders
+        self._close_order_id = None  # Track active close order ID
+
     @property
     def is_perpetual(self) -> bool:
         """
@@ -197,8 +205,14 @@ class GridExecutor(ExecutorBase):
                 price=mid_price,
             )
         adjusted_order_candidates = self.adjust_order_candidates(self.config.connector_name, [order_candidate])
+        self.logger().info(f"[BUDGET DEBUG] {self.config.trading_pair}: original amount={order_candidate.amount}, adjusted amount={adjusted_order_candidates[0].amount}, price={mid_price}")
         if adjusted_order_candidates[0].amount == Decimal("0"):
             # Log detailed error info
+            connector = self.connectors.get(self.config.connector_name)
+            if connector:
+                quote_asset = self.config.trading_pair.split("-")[1]
+                available_balance = connector.get_available_balance(quote_asset)
+                self.logger().error(f"[BUDGET] {self.config.trading_pair}: Available {quote_asset} balance: {available_balance}, Required: {self.config.total_amount_quote}")
             if self.is_perpetual:
                 connector = self.connectors.get(self.config.connector_name)
                 if connector:
@@ -386,8 +400,9 @@ class GridExecutor(ExecutorBase):
     def is_active(self):
         """
         Returns whether the executor is open or trading.
+        Phase 3: CLOSING is still "active" (has open position being closed)
         """
-        return self._status in [RunnableStatus.RUNNING, RunnableStatus.NOT_STARTED, RunnableStatus.SHUTTING_DOWN]
+        return self._status in [RunnableStatus.RUNNING, RunnableStatus.NOT_STARTED, RunnableStatus.CLOSING, RunnableStatus.SHUTTING_DOWN]
 
     async def control_task(self):
         """
@@ -417,6 +432,69 @@ class GridExecutor(ExecutorBase):
                     trading_pair=self.config.trading_pair,
                     order_id=orders_id_to_cancel
                 )
+        elif self.status == RunnableStatus.CLOSING:
+            # Phase 3: State machine - check if close order is filled
+            if self._close_order and self._close_order_id:
+                # PRIMARY: Check order status (more reliable than balance)
+                try:
+                    connector = self.connectors[self.config.connector_name]
+                    # Try to get order from connector's order tracker
+                    in_flight_order = connector.in_flight_orders.get(self._close_order_id)
+
+                    if in_flight_order:
+                        if in_flight_order.is_done:  # FILLED, CANCELED, or FAILED
+                            if in_flight_order.is_filled:
+                                self.logger().info(
+                                    f"✅ PHASE 3.5: Close order FILLED via order status check "
+                                    f"(order_id: {self._close_order_id}, state: {in_flight_order.current_state})"
+                                )
+                                self._status = RunnableStatus.SHUTTING_DOWN
+                                self._closing_in_progress = False
+                                return
+                            elif in_flight_order.is_cancelled or in_flight_order.is_failure:
+                                self.logger().warning(
+                                    f"⚠️  PHASE 3.5: Close order {in_flight_order.current_state} "
+                                    f"(order_id: {self._close_order_id}) - resetting guard to allow retry"
+                                )
+                                self._closing_in_progress = False  # Allow retry
+                                self._close_order_id = None
+                                return
+                        else:
+                            # Order still pending
+                            self.logger().debug(
+                                f"⏳ Close order still pending (order_id: {self._close_order_id}, "
+                                f"state: {in_flight_order.current_state})"
+                            )
+
+                    # SECONDARY: Balance sanity check (in case order status not available)
+                    trading_pair_parts = self.config.trading_pair.split("-")
+                    if len(trading_pair_parts) >= 2:
+                        base_asset = trading_pair_parts[0]
+                        available_balance = self._coerce_to_decimal(
+                            connector.get_available_balance(base_asset)
+                        )
+                        min_order_size = getattr(self.trading_rules, "min_order_size", Decimal("0"))
+
+                        # Only if balance is truly dust (< 10% of min), force transition
+                        if available_balance < min_order_size * Decimal("0.1"):
+                            self.logger().info(
+                                f"✅ PHASE 3.5: Position closed by BALANCE FALLBACK check "
+                                f"(remaining: {available_balance} {base_asset} < dust threshold {min_order_size * Decimal('0.1')})"
+                            )
+                            self._status = RunnableStatus.SHUTTING_DOWN
+                            self._closing_in_progress = False
+                        else:
+                            self.logger().debug(
+                                f"⏳ PHASE 3.5: Close order pending - order_id: {self._close_order_id}, "
+                                f"balance: {available_balance} {base_asset}, min_order: {min_order_size} {base_asset}"
+                            )
+                except Exception as e:
+                    self.logger().warning(f"⚠️  Could not check close progress: {e}")
+            else:
+                # No close order tracked - transition to shutting down
+                self.logger().warning("⚠️  In CLOSING state but no close order tracked - transitioning to SHUTTING_DOWN")
+                self._status = RunnableStatus.SHUTTING_DOWN
+                self._closing_in_progress = False
         elif self.status == RunnableStatus.SHUTTING_DOWN:
             await self.control_shutdown_process()
         self.evaluate_max_retries()
@@ -662,7 +740,45 @@ class GridExecutor(ExecutorBase):
     def adjust_and_place_close_order(self, level: GridLevel):
         order_candidate = self._get_close_order_candidate(level)
         self.adjust_order_candidates(self.config.connector_name, [order_candidate])
+
+        # BUG FIX: Check available balance before placing close order
+        # Prevents infinite "Insufficient funds" retries when actual balance < order amount
         if order_candidate.amount > 0:
+            try:
+                # Get actual available balance
+                base_asset = self.config.trading_pair.split("-")[0]
+                available_balance = self._strategy.connectors[self.config.connector_name].get_available_balance(base_asset)
+
+                # If available balance is less than order amount, adjust to available balance
+                if available_balance < order_candidate.amount:
+                    min_order_size = self._strategy.market_data_provider.get_order_size_quantum(
+                        self.config.connector_name, self.config.trading_pair, order_candidate.amount
+                    )
+
+                    if available_balance >= min_order_size:
+                        self.logger().warning(
+                            f"⚠️ Executor {self.config.id[:8]}... Adjusting close order: "
+                            f"requested {order_candidate.amount} {base_asset}, "
+                            f"available {available_balance} {base_asset}, "
+                            f"using available balance"
+                        )
+                        order_candidate.amount = available_balance
+                    else:
+                        self.logger().error(
+                            f"❌ Executor {self.config.id[:8]}... Cannot place close order: "
+                            f"available balance ({available_balance} {base_asset}) "
+                            f"< minimum order size ({min_order_size} {base_asset}). "
+                            f"Resetting level to prevent infinite retries."
+                        )
+                        # Reset the level to prevent infinite retry loop
+                        level.reset_close_order()
+                        return
+            except Exception as e:
+                self.logger().warning(
+                    f"⚠️ Could not verify balance before placing close order: {e}. "
+                    f"Proceeding with order placement (may fail)..."
+                )
+
             order_id = self.place_order(
                 connector_name=self.config.connector_name,
                 trading_pair=self.config.trading_pair,
@@ -684,6 +800,29 @@ class GridExecutor(ExecutorBase):
             entry_price = self.current_open_quote * (1 - self.config.safe_extra_spread) if level.side == TradeType.BUY else self.current_open_quote * (1 + self.config.safe_extra_spread)
         else:
             entry_price = level.price
+
+        # GUARDRAIL B: Never place entry orders with negative edge
+        # Entry must have minimum spread buffer from mid price
+        mid_price = self.mid_price
+        min_edge_pct = Decimal("0.0008")  # 0.08% minimum edge (covers fees + slippage)
+
+        if level.side == TradeType.BUY:
+            max_buy_price = mid_price * (Decimal("1") - min_edge_pct)
+            if entry_price > max_buy_price:
+                self.logger().debug(
+                    f"GUARDRAIL: Adjusting buy price from €{entry_price:.6f} to €{max_buy_price:.6f} "
+                    f"(mid €{mid_price:.6f} - {min_edge_pct * 100:.2f}%)"
+                )
+                entry_price = max_buy_price
+        else:  # SELL
+            min_sell_price = mid_price * (Decimal("1") + min_edge_pct)
+            if entry_price < min_sell_price:
+                self.logger().debug(
+                    f"GUARDRAIL: Adjusting sell price from €{entry_price:.6f} to €{min_sell_price:.6f} "
+                    f"(mid €{mid_price:.6f} + {min_edge_pct * 100:.2f}%)"
+                )
+                entry_price = min_sell_price
+
         if self.is_perpetual:
             return PerpetualOrderCandidate(
                 trading_pair=self.config.trading_pair,
@@ -710,6 +849,24 @@ class GridExecutor(ExecutorBase):
             take_profit_price = self.current_close_quote * (
                 1 + self.config.safe_extra_spread) if level.side == TradeType.BUY else self.current_close_quote * (
                 1 - self.config.safe_extra_spread)
+
+        # GUARDRAIL A: Never sell below breakeven (entry + fees + min profit buffer)
+        # Prevents "buy high / sell low" grid placement errors
+        if level.side == TradeType.BUY:  # We're selling after a buy
+            # Calculate minimum acceptable sell price
+            entry_price = level.price
+            fee_buffer_pct = Decimal("0.0010")  # 0.10% for round-trip fees
+            min_profit_pct = Decimal("0.0015")  # 0.15% minimum profit
+            min_acceptable_price = entry_price * (Decimal("1") + fee_buffer_pct + min_profit_pct)
+
+            if take_profit_price < min_acceptable_price:
+                self.logger().warning(
+                    f"⚠️ GUARDRAIL: Blocking sell order below breakeven! "
+                    f"Take profit €{take_profit_price:.6f} < minimum €{min_acceptable_price:.6f} "
+                    f"(entry €{entry_price:.6f} + fees + buffer). "
+                    f"Using minimum price instead."
+                )
+                take_profit_price = min_acceptable_price
         # BUG FIX: Validate trading_pair format before splitting to avoid IndexError
         trading_pair_parts_fee = self.config.trading_pair.split("-")
         base_asset_fee = trading_pair_parts_fee[0] if len(trading_pair_parts_fee) > 0 else None
@@ -1087,6 +1244,19 @@ class GridExecutor(ExecutorBase):
         :param price: The price to be used in the close order.
         :return: None
         """
+        # PHASE 1+3: DOUBLE SELL GUARD - Prevent duplicate close orders
+        if self._closing_in_progress:
+            self.logger().warning(
+                f"⚠️  Close already in progress (order_id: {self._close_order_id}) - "
+                f"skipping duplicate close request"
+            )
+            return
+
+        # Phase 3: Set CLOSING state before any operations
+        self._closing_in_progress = True
+        self._status = RunnableStatus.CLOSING
+        self.logger().info(f"🔒 Executor state: CLOSING (close_type: {close_type})")
+
         # CRITICAL FIX for Kraken "Insufficient funds" bug:
         # Cancel open orders first, then wait for exchange to process cancellations
         # Without this delay, balance remains locked and close order fails
@@ -1116,7 +1286,50 @@ class GridExecutor(ExecutorBase):
             )
             time.sleep(wait_time)
         min_order_size = getattr(self.trading_rules, "min_order_size", Decimal("0"))
-        target_amount = order_amount if order_amount is not None else self.position_size_base
+
+        # PHASE 1 FIX: Get FRESH balance from exchange (not cached position_size)
+        # This prevents "Insufficient funds" from trying to sell already-sold inventory
+        trading_pair_parts = self.config.trading_pair.split("-")
+        if len(trading_pair_parts) < 2:
+            self.logger().error(f"❌ Invalid trading_pair format: {self.config.trading_pair}")
+            self._closing_in_progress = False  # Reset guard
+            return
+        base_asset = trading_pair_parts[0]
+
+        try:
+            available_balance = self._coerce_to_decimal(
+                self.connectors[self.config.connector_name].get_available_balance(base_asset)
+            )
+
+            # CRITICAL: Use min(executor position, available balance) to prevent oversell
+            # If multiple executors share same base asset, don't sell other executors' positions!
+            if order_amount is not None:
+                target_amount = min(order_amount, available_balance)
+            else:
+                # Use SMALLER of: executor's position OR wallet balance (safety!)
+                target_amount = min(self.position_size_base, available_balance)
+
+            # PHASE 3.5: Log all 3 values for production monitoring (oversell detection)
+            self.logger().info(
+                f"📊 Close amount calculation: executor_position={self.position_size_base:.6f} {base_asset}, "
+                f"wallet_available={available_balance:.6f}, target={target_amount:.6f} (using MIN for safety)"
+            )
+
+            # PHASE 3.5: Log oversell protection (production monitoring)
+            self.logger().info(
+                f"🛡️  OVERSELL PROTECTION: "
+                f"position_size={self.position_size_base} {base_asset}, "
+                f"available_balance={available_balance} {base_asset}, "
+                f"target_amount={target_amount} {base_asset} "
+                f"(using MIN to protect other executors)"
+            )
+
+        except Exception as e:
+            self.logger().error(f"❌ Could not get fresh balance: {e}. Using cached position_size as fallback.")
+            # Phase 3: Reset guard on exception to allow retry
+            self._closing_in_progress = False
+            self._close_order_id = None
+            target_amount = order_amount if order_amount is not None else self.position_size_base
 
         if target_amount >= min_order_size:
             # CRITICAL FIX: Ensure we have a valid price for market orders
@@ -1170,48 +1383,35 @@ class GridExecutor(ExecutorBase):
                     )
                     return
 
-            # FIX: Check available balance before placing market order to prevent "Insufficient funds" errors
-            # BUG FIX: Validate trading_pair format before splitting to avoid IndexError
-            trading_pair_parts_balance = self.config.trading_pair.split("-")
-            if len(trading_pair_parts_balance) < 2:
-                self.logger().error(f"❌ Invalid trading_pair format: {self.config.trading_pair}")
-                return
-            base_asset = trading_pair_parts_balance[0]
-            try:
-                available_balance = self._coerce_to_decimal(
-                    self.connectors[self.config.connector_name].get_available_balance(base_asset)
-                )
-                if available_balance < target_amount:
-                    self.logger().error(
-                        f"❌ INSUFFICIENT BALANCE: Cannot place close order - "
-                        f"Available: {available_balance} {base_asset}, "
-                        f"Required: {target_amount} {base_asset}"
-                    )
-                    # Adjust amount to available balance if possible
-                    if available_balance >= min_order_size:
-                        self.logger().warning(
-                            f"⚠️  Adjusting order amount from {target_amount} to {available_balance} {base_asset}"
-                        )
-                        order_amount_to_use = available_balance
-                    else:
-                        self.logger().error(
-                            f"❌ Available balance ({available_balance}) below minimum order size "
-                            f"({min_order_size}) - cannot place order"
-                        )
-                        return
-                else:
-                    order_amount_to_use = target_amount
-            except Exception as e:
+            # Phase 1+3: Check if remaining amount is worth closing (dust handling)
+            if target_amount < min_order_size:
                 self.logger().warning(
-                    f"⚠️  Could not check balance before placing close order: {e}. "
-                    f"Proceeding with order placement..."
+                    f"⚠️  Remaining amount {target_amount} {base_asset} below min order size "
+                    f"({min_order_size}) - marking as CLOSED_WITH_DUST"
                 )
-                order_amount_to_use = target_amount
+                self._status = RunnableStatus.TERMINATED
+                self._closing_in_progress = False
+                self.close_type = close_type
+                self.logger().info(f"✅ Executor closed with dust (<{min_order_size} {base_asset})")
+                return
 
-            # CRITICAL FIX: Use LIMIT orders instead of MARKET orders for better execution prices
-            # Only use MARKET orders for emergency exits (stop-loss, time-limit)
-            # For regular exits (early_stop, trend_exit), use LIMIT orders to avoid slippage and high fees
-            use_limit_order = close_type not in [CloseType.STOP_LOSS, CloseType.TIME_LIMIT]
+            order_amount_to_use = target_amount
+
+            # PHASE 1 FIX: PANIC = MARKET ORDER (not LIMIT)
+            # When bot panics (stop_loss, early_stop), we need EXIT CERTAINTY, not maker fees
+            # Maker fees save ~0.0075% but 10s delay can cost 0.5%+ in fast-moving market
+            # Only use LIMIT orders for regular take-profit exits where we have time
+            use_limit_order = close_type not in [CloseType.STOP_LOSS, CloseType.TIME_LIMIT, CloseType.EARLY_STOP]
+
+            # PHASE 3.5: Log invariants (production monitoring)
+            order_type_chosen = "LIMIT_MAKER" if use_limit_order else "MARKET"
+            self.logger().info(
+                f"📋 CLOSE DECISION: "
+                f"close_type={close_type}, "
+                f"use_limit_order={use_limit_order}, "
+                f"order_type={order_type_chosen}, "
+                f"amount={order_amount_to_use} {base_asset}"
+            )
 
             if use_limit_order:
                 # Use LIMIT order with current market price (will execute at limit or better)
@@ -1349,10 +1549,14 @@ class GridExecutor(ExecutorBase):
                         position_action=PositionAction.CLOSE,
                     )
             else:
-                # Emergency exits (stop-loss, time-limit) still use MARKET orders for speed
+                # Phase 1: PANIC EXITS use MARKET for certainty (stop_loss, time_limit, early_stop)
                 self.logger().info(
-                    f"🚨 Placing MARKET close order (emergency): {order_amount_to_use} {base_asset} "
-                    f"@ €{price:.6f} (market order - emergency exit)"
+                    f"🚨 PHASE 1: MARKET close order (panic/emergency): {order_amount_to_use} {base_asset} "
+                    f"@ €{price:.6f} (close_type: {close_type})"
+                )
+                self.logger().warning(
+                    "⚡ Using MARKET order for exit certainty. Taker fee (~0.01%) is acceptable "
+                    "vs delay risk (10s can cost 0.5%+ in panic)"
                 )
                 order_id = self.place_order(
                     connector_name=self.config.connector_name,
@@ -1363,10 +1567,20 @@ class GridExecutor(ExecutorBase):
                     side=self.close_order_side,
                     position_action=PositionAction.CLOSE,
                 )
+
+            # Phase 3: Track close order in state machine
             self._close_order = TrackedOrder(order_id=order_id)
+            self._close_order_id = order_id
+            self.logger().info(f"🔒 Close order placed: {order_id} (state: CLOSING)")
             self.logger().debug(f"Executor ID: {self.config.id} - Placing close order {order_id}")
+        else:
+            # No amount to close - mark as complete
+            self.logger().info("✅ No position to close (amount < min_order_size)")
+            self._status = RunnableStatus.TERMINATED
+            self._closing_in_progress = False
+
         self.close_type = close_type
-        self._status = RunnableStatus.SHUTTING_DOWN
+        # Phase 3: State already set to CLOSING above, will transition to SHUTTING_DOWN on fill
 
     def cancel_open_orders(self):
         """
@@ -1751,6 +1965,39 @@ class GridExecutor(ExecutorBase):
             self._cancel_request_times.pop(order_id, None)
             self._cancel_retry_count.pop(order_id, None)
 
+        # CRITICAL: Check for Kraken NL-restriction errors first
+        # Pattern: "EAccount:Invalid permissions:STBL trading restricted for NL."
+        error_msg_full = str(event)  # Preserve case for matching
+        error_msg = error_msg_full.lower()
+
+        # Detect NL-restriction pattern
+        is_nl_restricted = (
+            "trading restricted for nl" in error_msg
+            or ("invalid permissions" in error_msg and "trading restricted" in error_msg)
+        )
+
+        if is_nl_restricted:
+            # Extract coin from trading pair (e.g., "STBL-EUR" -> "STBL-EUR")
+            trading_pair = self.config.trading_pair
+            self.logger().warning(
+                f"🚫 NL-RESTRICTION: {trading_pair} is restricted for NL accounts on Kraken\n"
+                f"   Error: {error_msg_full}\n"
+                f"   This coin will be auto-blacklisted to prevent retries."
+            )
+            # Mark this executor with NL-restriction flag for controller to detect
+            self._nl_restricted = True
+            self._nl_restricted_coin = trading_pair
+            # Also store in custom_info so ExecutorInfo can access it
+            self._custom_info['nl_restricted'] = True
+            self._custom_info['nl_restricted_coin'] = trading_pair
+            # Terminate executor immediately - no point retrying
+            self._status = RunnableStatus.TERMINATED
+            return  # Skip normal error processing
+
+        # BUG FIX: Check if this is an "Insufficient funds" error on close orders
+        # If so, mark the level for early shutdown to prevent infinite retries
+        is_insufficient_funds = ("insufficient" in error_msg and ("fund" in error_msg or "balance" in error_msg))
+
         self.update_grid_levels()
         levels_open_order_placed = [level for level in self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]]
         levels_close_order_placed = [level for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
@@ -1764,9 +2011,29 @@ class GridExecutor(ExecutorBase):
                 self._failed_orders.append(level.active_close_order.order_id)
                 self.max_close_creation_timestamp = 0
                 level.reset_close_order()
+
+                # BUG FIX: If this is an insufficient funds error, log warning and mark executor for shutdown
+                # This prevents infinite retry loops with wrong amounts
+                if is_insufficient_funds:
+                    self.logger().warning(
+                        f"⚠️ Executor {self.config.id[:8]}... Close order failed with 'Insufficient funds'. "
+                        f"This likely means position was already sold. Resetting close state."
+                    )
+                    # Phase 3+: Reset guard to allow retry with fresh balance check
+                    self._closing_in_progress = False
+                    self._close_order_id = None
+
         if self._close_order and event.order_id == self._close_order.order_id:
             self._failed_orders.append(self._close_order.order_id)
             self._close_order = None
+
+            # BUG FIX: Same insufficient funds handling for main close order
+            if is_insufficient_funds:
+                self.logger().warning(
+                    f"⚠️ Executor {self.config.id[:8]}... Main close order failed with 'Insufficient funds'. "
+                    f"Marking executor as complete to prevent retries."
+                )
+                self._status = RunnableStatus.TERMINATED
 
     def update_position_metrics(self):
         """

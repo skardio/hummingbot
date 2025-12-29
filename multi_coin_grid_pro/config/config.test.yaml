@@ -84,3 +84,11 @@ blacklist:
   - ACA-EUR
   - USELESS-EUR
   - CC-EUR
+
+# Observability (Phase 1A)
+observability:
+  structured_events_enabled: true  # TEST: Enable for validation
+  events_output_dir: "logs/events"
+  buffer_size: 100
+  why_no_trade_report_enabled: false
+  report_interval_seconds: 3600

@@ -17,6 +17,8 @@ from typing import Optional
 
 from risk.pnl_tracker import RealtimePnLTracker
 
+from multi_coin_grid_pro.core.reason_codes import ReasonCode, Stage
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
@@ -38,7 +40,8 @@ class RiskGuardV2:
         cfg: dict,
         pnl_tracker: RealtimePnLTracker,
         alerter,
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        event_logger=None  # EventLogger instance (optional)
     ):
         """
         Initialize Risk Guard
@@ -48,11 +51,13 @@ class RiskGuardV2:
             pnl_tracker: PnL tracker instance
             alerter: Telegram alerter for critical notifications
             logger: Optional logger instance
+            event_logger: Optional EventLogger for structured events
         """
         self.cfg = cfg
         self.pnl = pnl_tracker
         self.alerter = alerter
         self.logger = logger or logging.getLogger(__name__)
+        self.event_logger = event_logger  # Can be None if observability disabled
 
         # Risk limits
         self.max_daily_loss_pct = cfg.get("max_daily_loss_pct", 3.0)
@@ -131,26 +136,53 @@ class RiskGuardV2:
         self.logger.critical(f"   Unrealized P&L: €{summary['unrealized_pnl']:+.2f}")
         self.logger.critical(f"   Fees paid: €{summary['fees_paid']:.2f}")
 
-    def can_open_position(self, symbol: str, size_eur: Decimal) -> tuple[bool, str]:
+    def can_open_position(
+        self,
+        symbol: str,
+        size_eur: Decimal,
+        correlation_id: Optional[str] = None
+    ) -> tuple[bool, str]:
         """
         Check if opening a new position is allowed
 
         Args:
             symbol: Trading pair
             size_eur: Position size in EUR
+            correlation_id: Optional correlation ID for event tracking
 
         Returns:
             Tuple of (allowed, reason)
         """
         if not self.trading_enabled:
-            return False, f"Kill switch active: {self.kill_reason}"
+            reason = f"Kill switch active: {self.kill_reason}"
+            self._emit_risk_denial(
+                symbol=symbol,
+                reason_code=ReasonCode.DAILY_LOSS_LIMIT,  # Kill switch from daily loss
+                reason_msg=reason,
+                correlation_id=correlation_id,
+                metadata={"size_eur": float(size_eur)}
+            )
+            return False, reason
 
         # Check max exposure per coin
         max_per_coin_pct = self.cfg.get("max_exposure_per_coin_pct", 40)
         max_per_coin_eur = self.pnl.starting_balance * Decimal(str(max_per_coin_pct)) / 100
 
         if size_eur > max_per_coin_eur:
-            return False, f"Position size €{size_eur:.2f} > max €{max_per_coin_eur:.2f} ({max_per_coin_pct}%)"
+            reason = f"Position size €{size_eur:.2f} > max €{max_per_coin_eur:.2f} ({max_per_coin_pct}%)"
+            self._emit_risk_denial(
+                symbol=symbol,
+                reason_code=ReasonCode.EXPOSURE_LIMIT,
+                reason_msg=reason,
+                correlation_id=correlation_id,
+                metadata={
+                    "size_eur": float(size_eur),
+                    "max_per_coin_eur": float(max_per_coin_eur),
+                    "max_per_coin_pct": max_per_coin_pct,
+                    "exposure_type": "per_coin"
+                }
+            )
+            return False, reason
 
         # Check total exposure
         max_total_pct = self.cfg.get("max_total_exposure_pct", 80)
@@ -158,8 +190,21 @@ class RiskGuardV2:
 
         total_exposure = sum(p.notional_eur for p in self.pnl.positions.values())
         if total_exposure + size_eur > max_total_eur:
-            return False, f"Total exposure €{total_exposure
-                                             + size_eur:.2f} > max €{max_total_eur:.2f} ({max_total_pct}%)"
+            reason = f"Total exposure €{total_exposure + size_eur:.2f} > max €{max_total_eur:.2f} ({max_total_pct}%)"
+            self._emit_risk_denial(
+                symbol=symbol,
+                reason_code=ReasonCode.EXPOSURE_LIMIT,
+                reason_msg=reason,
+                correlation_id=correlation_id,
+                metadata={
+                    "size_eur": float(size_eur),
+                    "current_total_exposure": float(total_exposure),
+                    "max_total_eur": float(max_total_eur),
+                    "max_total_pct": max_total_pct,
+                    "exposure_type": "total"
+                }
+            )
+            return False, reason
 
         return True, "Position allowed"
 
@@ -169,3 +214,33 @@ class RiskGuardV2:
         self.kill_reason = None
         self.logger.warning("⚠️  Kill switch MANUALLY RESET - trading re-enabled")
         self.alerter.warning("Kill switch manually reset - trading re-enabled")
+
+    def _emit_risk_denial(
+        self,
+        symbol: str,
+        reason_code: ReasonCode,
+        reason_msg: str,
+        correlation_id: Optional[str] = None,
+        metadata: Optional[dict] = None
+    ):
+        """
+        Emit gate_denied event for risk rejection.
+
+        Args:
+            symbol: Trading pair
+            reason_code: ReasonCode enum value
+            reason_msg: Human-readable reason
+            correlation_id: Optional correlation ID
+            metadata: Optional metadata dict
+        """
+        if not self.event_logger or not self.event_logger.enabled:
+            return
+
+        self.event_logger.emit_gate_denied(
+            correlation_id=correlation_id,
+            symbol=symbol,
+            stage=Stage.RISK,
+            reason_code=reason_code,
+            reason_msg=reason_msg,
+            metadata=metadata or {}
+        )

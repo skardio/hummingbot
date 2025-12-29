@@ -187,8 +187,8 @@ class TestGridExecutorBalanceCheck:
         assert call_args[1]['amount'] == Decimal("50.0"), "Should use original amount on error"
 
     async def test_balance_check_logs_warning_on_adjustment(self, executor, mock_connector):
-        """Test that balance check logs warning when adjusting amount"""
-        # Setup: insufficient balance
+        """Test that balance check logs info when using min(position, balance)"""
+        # Setup: insufficient balance (Phase 3.5: uses min(position_size, available_balance))
         mock_connector.get_available_balance.return_value = Decimal("30.0")
         executor.position_size_base = Decimal("50.0")
         executor.trading_rules.min_order_size = Decimal("10.0")
@@ -197,42 +197,44 @@ class TestGridExecutorBalanceCheck:
         executor.place_order = Mock(return_value="order_123")
         executor.cancel_open_orders = Mock()
 
-        # Capture log output
-        with patch.object(executor.logger(), 'warning') as mock_warning:
+        # Capture log output (Phase 3.5: logs info with production format)
+        with patch.object(executor.logger(), 'info') as mock_info:
             executor.place_close_order_and_cancel_open_orders(
                 close_type=CloseType.EARLY_STOP,
                 price=Decimal("1.55")
             )
 
-            # Verify warning was logged
-            assert mock_warning.called, "Should log warning when adjusting amount"
-            warning_calls = [str(call) for call in mock_warning.call_args_list]
-            assert any("Adjusting order amount" in str(call) or "adjusting" in str(call).lower()
-                       for call in warning_calls), "Should log adjustment warning"
+            # Verify info was logged with Phase 3.5 format
+            assert mock_info.called, "Should log info with close amount calculation"
+            info_calls = [str(call) for call in mock_info.call_args_list]
+            assert any("Close amount calculation" in str(call) or "executor_position" in str(call)
+                       for call in info_calls), "Should log Phase 3.5 close amount calculation"
 
     async def test_balance_check_logs_error_on_insufficient(self, executor, mock_connector):
-        """Test that balance check logs error when balance is insufficient"""
-        # Setup: balance below minimum
+        """Test that balance check terminates with TERMINATED status when balance is dust"""
+        # Setup: balance below minimum (Phase 3.5: terminates with TERMINATED status)
         mock_connector.get_available_balance.return_value = Decimal("5.0")
         executor.position_size_base = Decimal("50.0")
         executor.trading_rules.min_order_size = Decimal("10.0")
 
-        # Mock place_order and logger
+        # Mock place_order
         executor.place_order = Mock(return_value="order_123")
         executor.cancel_open_orders = Mock()
 
-        # Capture log output
-        with patch.object(executor.logger(), 'error') as mock_error:
-            executor.place_close_order_and_cancel_open_orders(
-                close_type=CloseType.EARLY_STOP,
-                price=Decimal("1.55")
-            )
+        # Call place_close_order_and_cancel_open_orders
+        executor.place_close_order_and_cancel_open_orders(
+            close_type=CloseType.EARLY_STOP,
+            price=Decimal("1.55")
+        )
 
-            # Verify error was logged
-            assert mock_error.called, "Should log error when balance insufficient"
-            error_calls = [str(call) for call in mock_error.call_args_list]
-            assert any("insufficient" in str(call).lower() or "below minimum" in str(call).lower()
-                       for call in error_calls), "Should log insufficient balance error"
+        # Verify order was NOT placed (dust handling)
+        executor.place_order.assert_not_called()
+
+        # Verify executor status is TERMINATED (Phase 3.5: CLOSED_WITH_DUST)
+        from hummingbot.strategy_v2.models.base import RunnableStatus
+        assert executor._status == RunnableStatus.TERMINATED, "Should be TERMINATED when dust"
+        assert executor._closing_in_progress is False, "Should reset closing guard"
+        assert executor.close_type == CloseType.EARLY_STOP, "Should set close_type"
 
 
 if __name__ == "__main__":

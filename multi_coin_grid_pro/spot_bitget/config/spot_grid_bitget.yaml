@@ -17,6 +17,17 @@ debug_trace_log_accepted: false    # Only log rejections (reduces noise)
 debug_trace_log_rejected: true     # Always log rejections
 
 # ==============================================================================
+# OBSERVABILITY (Phase 1A - Structured Events)
+# ==============================================================================
+
+observability:
+  structured_events_enabled: true   # ✅ ENABLED: Track all decisions for analysis
+  events_output_dir: "logs/events"
+  buffer_size: 100
+  why_no_trade_report_enabled: false  # Phase 1B (future)
+  report_interval_seconds: 3600
+
+# ==============================================================================
 # ADAPTIVE REGIME DETECTION (Phase 1: Logging Only)
 # ==============================================================================
 
@@ -157,7 +168,7 @@ manual_trading_pairs: []  # Empty list = dynamic discovery mode (auto-select fro
 #   - ATOM-USDT
 #   - UNI-USDT
 
-max_simultaneous_coins: 1         # Eén coin tegelijk (spot grid discipline)
+max_simultaneous_coins: 1         # 🎯 PRODUCTION: 1 coin × $70 USDT = $70 total
 
 # ==============================================================================
 # MULTI-TIMEFRAME BUY PROTECTION (PREVENT KAS-EUR DISASTER)
@@ -405,13 +416,13 @@ coin_profiles:
 grid_range_pct_down: 1.5
 grid_range_pct_up: 10.0
 
-num_grids: 7
+num_grids: 7                      # 70 USDT ÷ 7 grids = $10 per grid (exact minimum)
 
 use_dynamic_grid_sizer: true
 
 dynamic_grid_sizer:
   min_grids: 4
-  max_grids: 7
+  max_grids: 7                    # Match static num_grids
   low_vol_atr_pct: 0.7
   mid_vol_atr_pct: 2.0
   high_vol_atr_pct: 4.0
@@ -453,15 +464,15 @@ session_blacklist_duration_seconds: 7200
 # CAPITAL & RISK MANAGEMENT
 # ==============================================================================
 
-total_amount_quote: 80           # $80 USDT (available balance)
-min_order_amount_quote: 10        # $5 per order
+total_amount_quote: 70            # 🎯 PRODUCTION: $70 per coin (1 coin × $70 = $70 total)
+risk_reference_balance_quote: 70  # Total budget: 70 USDT
+min_order_amount_quote: 10        # $10 per order
 
-risk_reference_balance_quote: 80   # Match total_amount_quote
-risk_max_balance_per_trade_pct: 0.30  # 30% per trade (safe for new bot)
-risk_max_total_open_risk_pct: 0.60   # 60% total (first week preset)
+risk_max_balance_per_trade_pct: 100.0  # 100% per trade (1 coin × 100% = 100%)
+risk_max_total_open_risk_pct: 100.0    # 100% total (1 coin)
 
-max_exposure_per_coin_pct: 0.35    # 35% max per coin (1 coin focus)
-max_total_exposure_pct: 0.60      # 60% max total (safe for new bot)
+max_exposure_per_coin_pct: 100.0   # 100% per coin (1 coin only)
+max_total_exposure_pct: 100.0      # 100% max total
 
 stop_loss_pct: 0.05               # 5% SL
 take_profit_pct: 0.02             # 2% TP

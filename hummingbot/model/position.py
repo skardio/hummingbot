@@ -20,11 +20,11 @@ class Position(HummingbotBase):
     side = Column(Text, nullable=False)
     trading_pair = Column(Text, nullable=False)
     timestamp = Column(BigInteger, nullable=False)
-    volume_traded_quote = Column(SqliteDecimal(6), nullable=False)
-    amount = Column(SqliteDecimal(6), nullable=False)
-    breakeven_price = Column(SqliteDecimal(6), nullable=False)
-    unrealized_pnl_quote = Column(SqliteDecimal(6), nullable=False)
-    cum_fees_quote = Column(SqliteDecimal(6), nullable=False)
+    volume_traded_quote = Column(SqliteDecimal(18), nullable=False)  # Increased from 6 to 18 for precision
+    amount = Column(SqliteDecimal(18), nullable=False)  # Increased from 6 to 18 for precision
+    breakeven_price = Column(SqliteDecimal(18), nullable=False)  # Increased from 6 to 18 for precision
+    unrealized_pnl_quote = Column(SqliteDecimal(18), nullable=False)  # Increased from 6 to 18 for precision
+    cum_fees_quote = Column(SqliteDecimal(18), nullable=False)  # Increased from 6 to 18 for precision
 
     def __repr__(self) -> str:
         return (f"Position(id='{self.id}', controller_id='{self.controller_id}', "

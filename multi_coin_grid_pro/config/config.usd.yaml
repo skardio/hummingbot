@@ -473,3 +473,14 @@ min_startup_wait_seconds: 90       # 60 → 90: net iets meer data voor eerste e
 
 smart_switch_k: 2.0
 switch_cost_multiplier: 2.5
+
+# ==============================================================================
+# OBSERVABILITY (Phase 1A)
+# ==============================================================================
+
+observability:
+  structured_events_enabled: false  # Safe default: off
+  events_output_dir: "logs/events"
+  buffer_size: 100
+  why_no_trade_report_enabled: false
+  report_interval_seconds: 3600

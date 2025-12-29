@@ -135,6 +135,11 @@ class PairDecisionTrace:
     strategy: str = "spot_grid"
     slot_index: Optional[int] = None
 
+    # ===== Phase 1A: Observability Fields =====
+    correlation_id: Optional[str] = None  # Intent correlation ID
+    stage: Optional[str] = None  # Pipeline stage (SMART_ENTRY/MTF/RISK/EXECUTION)
+    reason_code: Optional[str] = None  # Structured ReasonCode from reason_codes.py
+
     def add_check(
         self,
         filter_name: str,

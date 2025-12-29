@@ -23,6 +23,7 @@ from typing import Any, Dict, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.models import CandleIndicators  # noqa: E402
+from core.reason_codes import ReasonCode, Stage  # noqa: E402
 from utils.decision_trace import PairDecisionTrace, trace_percentage_check, trace_range_check  # noqa: E402
 
 
@@ -308,12 +309,19 @@ class SmartEntryFilter:
             - trace: Optional decision trace (None if trace_enabled=False)
         """
         # Create trace (zero overhead if disabled)
+        # Fix #1: Generate correlation_id here (single source of truth per evaluation)
+        import uuid
+        correlation_id = str(uuid.uuid4()) if trace_enabled else None
+
         trace = PairDecisionTrace(
             trading_pair=symbol,
             exchange=exchange,
             enabled=trace_enabled,
             strategy="spot_grid"
         )
+        if trace_enabled and correlation_id:
+            trace.correlation_id = correlation_id
+            trace.stage = Stage.SMART_ENTRY.value  # Fix #2: Set stage early for pass/fail
 
         cfg = self._get_effective_cfg(symbol)
 
@@ -334,6 +342,8 @@ class SmartEntryFilter:
             )
             if not spread_ok:
                 trace.finalize(accepted=False, rejected_by="spread", final_reason="spread too wide")
+                trace.reason_code = ReasonCode.SPREAD_TOO_WIDE.value
+                trace.stage = Stage.SMART_ENTRY.value
                 return False, f"🧠 {symbol}: NO BUY – {spread_reason}", trace
 
         # 0B) Order Book Depth Check
@@ -353,6 +363,8 @@ class SmartEntryFilter:
             # Only reject if depth check explicitly failed (not if data unavailable)
             if not depth_ok and depth_available > 0:
                 trace.finalize(accepted=False, rejected_by="depth", final_reason="insufficient depth")
+                trace.reason_code = ReasonCode.DEPTH_INSUFFICIENT.value
+                trace.stage = Stage.SMART_ENTRY.value
                 return False, f"🧠 {symbol}: NO BUY – {depth_reason}", trace
             elif not depth_ok:
                 # Depth data unavailable - log warning but allow entry
@@ -363,16 +375,22 @@ class SmartEntryFilter:
         rsi_block_ok = trace_range_check(trace, "rsi_block", ind.rsi_14, 0, cfg["rsi_block_min"])
         if not rsi_block_ok:
             trace.finalize(accepted=False, rejected_by="rsi_block", final_reason="overbought")
+            trace.reason_code = ReasonCode.RSI_OVERBOUGHT.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} >= {cfg['rsi_block_min']} (overbought)", trace
 
         rsi_buy_ok = trace_percentage_check(trace, "rsi_buy_max", ind.rsi_14, cfg["rsi_buy_max"], "<=")
         if not rsi_buy_ok:
             trace.finalize(accepted=False, rejected_by="rsi_buy_max", final_reason="overbought")
+            trace.reason_code = ReasonCode.RSI_OVERBOUGHT.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} > {cfg['rsi_buy_max']} (overbought)", trace
 
         rsi_extreme_ok = trace_percentage_check(trace, "rsi_extreme", ind.rsi_14, cfg["rsi_extreme_low"], ">=")
         if not rsi_extreme_ok:
             trace.finalize(accepted=False, rejected_by="rsi_extreme", final_reason="falling knife risk")
+            trace.reason_code = ReasonCode.RSI_OVERSOLD.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – RSI {
                 ind.rsi_14:.1f} < {
                 cfg['rsi_extreme_low']} (falling knife risk)", trace
@@ -384,12 +402,16 @@ class SmartEntryFilter:
         vwap_ok = trace_percentage_check(trace, "vwap_deviation", abs(vwap_dev), cfg["vwap_max_deviation_pct"], "<=")
         if not vwap_ok:
             trace.finalize(accepted=False, rejected_by="vwap_deviation", final_reason="too far from VWAP")
+            trace.reason_code = ReasonCode.VWAP_DEVIATION_TOO_HIGH.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – VWAP dev {vwap_dev:+.2f}% > ±{cfg['vwap_max_deviation_pct']}%", trace
 
         # 3) Wick Structure Check (candle quality)
         wick_ok = trace_percentage_check(trace, "wick_ratio", ind.wick_ratio, cfg["min_wick_ratio"], ">=")
         if not wick_ok:
             trace.finalize(accepted=False, rejected_by="wick_ratio", final_reason="poor candle structure")
+            trace.reason_code = ReasonCode.WICK_RATIO_LOW.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – wick_ratio {
                 ind.wick_ratio:.2f} < {
                 cfg['min_wick_ratio']} (poor structure)", trace
@@ -398,6 +420,8 @@ class SmartEntryFilter:
         atr_min_ok = trace_percentage_check(trace, "atr_min", ind.atr_pct, cfg["min_atr_pct_for_grid"], ">=")
         if not atr_min_ok:
             trace.finalize(accepted=False, rejected_by="atr_min", final_reason="volatility too low")
+            trace.reason_code = ReasonCode.ATR_TOO_LOW.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – ATR {
                 ind.atr_pct:.2f}% < {
                 cfg['min_atr_pct_for_grid']}% (too low)", trace
@@ -405,6 +429,8 @@ class SmartEntryFilter:
         atr_max_ok = trace_percentage_check(trace, "atr_max", ind.atr_pct, cfg["max_atr_pct_for_grid"], "<=")
         if not atr_max_ok:
             trace.finalize(accepted=False, rejected_by="atr_max", final_reason="too chaotic")
+            trace.reason_code = ReasonCode.ATR_TOO_HIGH.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – ATR {
                 ind.atr_pct:.2f}% > {
                 cfg['max_atr_pct_for_grid']}% (too chaotic)", trace
@@ -414,6 +440,8 @@ class SmartEntryFilter:
         spike_ok = trace_percentage_check(trace, "spike_5m", spike_5m, cfg["max_5m_spike_pct"], "<=")
         if not spike_ok:
             trace.finalize(accepted=False, rejected_by="spike_5m", final_reason="sudden price spike")
+            trace.reason_code = ReasonCode.SPIKE_5M_EXCESSIVE.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – 5m move {
                 ind.change_5m_pct:+.2f}% > ±{
                 cfg['max_5m_spike_pct']}% (spike detected)", trace
@@ -424,6 +452,8 @@ class SmartEntryFilter:
         accel_down_ok = trace_percentage_check(trace, "down_acceleration", accel, cfg["max_down_accel_pct"], ">=")
         if not accel_down_ok:
             trace.finalize(accepted=False, rejected_by="down_acceleration", final_reason="falling knife detected")
+            trace.reason_code = ReasonCode.ACCEL_FALLING_KNIFE.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – down accel {
                 accel:.2f}% < {
                 cfg['max_down_accel_pct']}% (falling knife)", trace
@@ -431,6 +461,8 @@ class SmartEntryFilter:
         accel_up_ok = trace_percentage_check(trace, "up_acceleration", accel, cfg["max_up_accel_pct"], "<=")
         if not accel_up_ok:
             trace.finalize(accepted=False, rejected_by="up_acceleration", final_reason="blow-off top risk")
+            trace.reason_code = ReasonCode.ACCEL_BLOWOFF.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – up accel {
                 accel:.2f}% > {
                 cfg['max_up_accel_pct']}% (blow-off top risk)", trace
@@ -440,6 +472,8 @@ class SmartEntryFilter:
             trace, "trend_24h_max", ind.trend_24h_pct, cfg["max_trend_24h_pct"], "<=")
         if not trend_24h_max_ok:
             trace.finalize(accepted=False, rejected_by="trend_24h_max", final_reason="extended run")
+            trace.reason_code = ReasonCode.TREND_24H_OUT_OF_RANGE.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – 24h trend {
                 ind.trend_24h_pct:+.2f}% > {
                 cfg['max_trend_24h_pct']}% (extended run)", trace
@@ -448,11 +482,14 @@ class SmartEntryFilter:
             trace, "trend_24h_min", ind.trend_24h_pct, cfg["min_trend_24h_pct"], ">=")
         if not trend_24h_min_ok:
             trace.finalize(accepted=False, rejected_by="trend_24h_min", final_reason="capitulation zone")
+            trace.reason_code = ReasonCode.TREND_24H_OUT_OF_RANGE.value
+            trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – 24h trend {
                 ind.trend_24h_pct:+.2f}% < {
                 cfg['min_trend_24h_pct']}% (capitulation zone)", trace
 
         # All checks passed!
+        # Fix #2: Stage already set at trace creation, no reason_code on success
         trace.finalize(accepted=True, final_reason="all SmartEntry filters passed")
         return True, (
             f"✅ {symbol}: BUY ALLOWED – SmartEntry v2.0 passed "

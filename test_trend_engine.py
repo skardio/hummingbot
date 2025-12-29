@@ -17,20 +17,17 @@ import time
 from decimal import Decimal
 from pathlib import Path
 
+from multi_coin_grid_pro.utils.trend_calculator import (
+    MIN_CANDLES_FOR_WARMUP,
+    MIN_TREND_THRESHOLD,
+    TARGET_HISTORICAL_CANDLES,
+)
+
 # Add project root to path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 # Import directly from trend_calculator
-from multi_coin_grid_pro.utils.trend_calculator import (
-    MIN_CANDLES_FOR_WARMUP,
-    MIN_TREND_THRESHOLD,
-    TARGET_HISTORICAL_CANDLES,
-    CandleData,
-    CoinTrend,
-    TrendSelection,
-    TrendStatus,
-)
 
 # Configure logging
 logging.basicConfig(

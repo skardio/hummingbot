@@ -12,12 +12,12 @@ class MarketData(HummingbotBase):
         Index("timestamp", "exchange", "trading_pair"),
     )
 
-    timestamp = Column(SqliteDecimal(6), primary_key=True, nullable=False)
+    timestamp = Column(SqliteDecimal(18), primary_key=True, nullable=False)  # Increased from 6 to 18 for precision
     exchange = Column(Text, nullable=False)
     trading_pair = Column(Text, nullable=False)
-    mid_price = Column(SqliteDecimal(6), nullable=False)
-    best_bid = Column(SqliteDecimal(6), nullable=False)
-    best_ask = Column(SqliteDecimal(6), nullable=False)
+    mid_price = Column(SqliteDecimal(18), nullable=False)  # Increased from 6 to 18 for precision
+    best_bid = Column(SqliteDecimal(18), nullable=False)  # Increased from 6 to 18 for precision
+    best_ask = Column(SqliteDecimal(18), nullable=False)  # Increased from 6 to 18 for precision
     order_book = Column(JSON)
 
     def __repr__(self) -> str:

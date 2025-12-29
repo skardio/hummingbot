@@ -33,11 +33,11 @@ class TradeFill(HummingbotBase):
     order_id = Column(Text, ForeignKey("Order.id"), primary_key=True, nullable=False)
     trade_type = Column(Text, nullable=False)
     order_type = Column(Text, nullable=False)
-    price = Column(SqliteDecimal(6), nullable=False)
-    amount = Column(SqliteDecimal(6), nullable=False)
+    price = Column(SqliteDecimal(8), nullable=False)  # 8 decimals is sufficient for crypto prices (e.g., 1.12345678)
+    amount = Column(SqliteDecimal(8), nullable=False)  # 8 decimals for amounts
     leverage = Column(Integer, nullable=False, default=1)
     trade_fee = Column(JSON, nullable=False)
-    trade_fee_in_quote = Column(SqliteDecimal(6))
+    trade_fee_in_quote = Column(SqliteDecimal(8))  # 8 decimals for fees
     exchange_trade_id = Column(Text, primary_key=True, nullable=False)
     position = Column(Text, nullable=True, default=PositionAction.NIL.value)
     order = relationship("Order", back_populates="trade_fills")

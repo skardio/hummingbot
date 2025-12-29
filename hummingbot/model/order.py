@@ -1,16 +1,7 @@
-from typing import (
-    Dict,
-    Any
-)
+from typing import Any, Dict
 
 import numpy
-from sqlalchemy import (
-    BigInteger,
-    Column,
-    Index,
-    Integer,
-    Text,
-)
+from sqlalchemy import BigInteger, Column, Index, Integer, Text
 from sqlalchemy.orm import relationship
 
 from hummingbot.model import HummingbotBase
@@ -37,9 +28,9 @@ class Order(HummingbotBase):
     quote_asset = Column(Text, nullable=False)
     creation_timestamp = Column(BigInteger, nullable=False)
     order_type = Column(Text, nullable=False)
-    amount = Column(SqliteDecimal(6), nullable=False)
+    amount = Column(SqliteDecimal(8), nullable=False)  # 8 decimals for amounts
     leverage = Column(Integer, nullable=False, default=1)
-    price = Column(SqliteDecimal(6), nullable=False)
+    price = Column(SqliteDecimal(8), nullable=False)  # 8 decimals for prices
     last_status = Column(Text, nullable=False)
     last_update_timestamp = Column(BigInteger, nullable=False)
     exchange_order_id = Column(Text, nullable=True)

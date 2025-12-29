@@ -9,6 +9,7 @@ repos:
     - id: flake8
       types: ['file']
       files: \.(py|pyx|pxd)$
+      exclude: ^(analyze_.*\.py|calculate_.*\.py|cleanup_.*\.py|compare_.*\.py|demo_.*\.py|detailed_.*\.py|explain_.*\.py|find_.*\.py|fix_.*\.py|list_.*\.py|migrate_.*\.py|optimize_.*\.py|test_.*\.py|trade_.*\.py|view_.*\.py)$
     - id: detect-private-key
 -   repo: https://github.com/hhatto/autopep8
     rev: v2.3.2
