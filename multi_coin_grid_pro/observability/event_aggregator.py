@@ -144,10 +144,8 @@ class EventAggregator:
         if date is None:
             date = datetime.now()
 
-        # Start from beginning of the day or X hours ago
-        start_time = date.replace(hour=0, minute=0, second=0, microsecond=0)
-        if hours < 24:
-            start_time = date - timedelta(hours=hours)
+        # Start from X hours ago
+        start_time = date - timedelta(hours=hours)
 
         summaries = []
 
