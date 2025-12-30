@@ -5608,6 +5608,13 @@ class MultiCoinGridController(ControllerBase):
             keep_position=False,  # Don't keep position on stop
             leverage=leverage,  # Use derivative_leverage from config (for futures) or 1 (for spot)
             deduct_base_fees=True,  # Deduct fees paid in base asset from sell amount (e.g., PEAQ fees for PEAQ-USDT)
+            # Story A1: Pass timeout config to executor via custom_info
+            custom_info={
+                "no_fill_timeout_sec": self.config.no_fill_timeout_sec,
+                "no_progress_timeout_sec": self.config.no_progress_timeout_sec,
+                "max_hold_time_sec": self.config.max_hold_time_seconds,  # Reuse existing config
+                "close_grace_sec": self.config.close_grace_sec,
+            }
         )
 
         # Ensure controller_id is set (fallback to controller_name if id is None)
@@ -6186,15 +6193,30 @@ class MultiCoinGridController(ControllerBase):
             time_since_switch = self.market_data_provider.time() - self.last_switch_time
             self._compute_trend_strength(trend)
 
+            # Calculate price change for logging
+            price_change_pct = float((current_price - entry_price) / entry_price * 100)
+
             # ---------------------------------------
             # LAYER 1: HOLD TIME FILTER
             # ---------------------------------------
             min_hold_time = float(self.risk_manager.min_hold_seconds)
+            max_hold_time = float(getattr(self.risk_manager, 'max_hold_seconds', 0))
 
             # CRITICAL FIX: Hard minimum hold time for trend exits (defaults to half the min hold, minimum 10 minutes)
             # Only emergency exits can bypass this
             hard_min_hold_time = float(max(600.0, min_hold_time))
             in_hard_grace_period = time_since_switch < hard_min_hold_time
+
+            # NEW: Check max hold time (force rotation to better opportunities)
+            if max_hold_time > 0 and time_since_switch >= max_hold_time:
+                self.logger().warning(
+                    f"[EXIT] ⏰ {coin} MAX HOLD TIME EXCEEDED:\n"
+                    f"   Hold Time: {time_since_switch / 3600:.1f} hours (max: {max_hold_time / 3600:.1f}h)\n"
+                    f"   Price Change: {price_change_pct:+.2f}%\n"
+                    f"   [REASON] Position held too long - forcing rotation to find better opportunities\n"
+                    f"   (Prevents 21h+ stuck positions like VSN-EUR case)"
+                )
+                return "max_hold_time_exit"
 
             if in_hard_grace_period:
                 # Still in hard grace period - only allow emergency exits

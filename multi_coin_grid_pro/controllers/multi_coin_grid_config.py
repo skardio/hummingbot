@@ -327,6 +327,46 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    max_hold_time_seconds: int = Field(
+        default=0,  # 0 = unlimited, else force rotation after X seconds (prevents 21h+ stuck positions)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum hold time before force rotation (seconds, 0=unlimited): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ==============================================================================
+    # STORY A1: MULTI-TIMEOUT LIFECYCLE (Professional Rotation)
+    # ==============================================================================
+
+    no_fill_timeout_sec: int = Field(
+        default=1200,  # 20 minutes - no fills at all → cancel + close
+        client_data=ClientFieldData(
+            prompt=lambda mi: "No-fill timeout (seconds, 0=disabled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    no_progress_timeout_sec: int = Field(
+        default=3600,  # 1 hour - no new progress → start unwind
+        client_data=ClientFieldData(
+            prompt=lambda mi: "No-progress timeout (seconds, 0=disabled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    close_grace_sec: int = Field(
+        default=120,  # 2 minutes for graceful close (maker) before aggressive (market)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Close grace period (seconds): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     smart_switch_k: float = Field(
         default=1.75,  # Volatility multiplier for smart switch threshold (Phase 3.1)
         client_data=ClientFieldData(
@@ -1041,6 +1081,7 @@ class MultiCoinGridConfig(ControllerConfigBase):
             max_balance_risk_per_trade_pct=self.risk_max_balance_per_trade_pct,
             max_total_open_risk_pct=self.risk_max_total_open_risk_pct,
             min_hold_seconds=self.min_hold_time_seconds,
+            max_hold_seconds=self.max_hold_time_seconds,  # NEW: Force rotation after max hold time
             exit_cooldown_seconds=self.risk_exit_cooldown_minutes * 60,
             symbol_switch_cooldown_seconds=self.risk_symbol_switch_cooldown_minutes * 60,
             consecutive_loss_cooldown_seconds=self.risk_consecutive_loss_cooldown_minutes * 60,

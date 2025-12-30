@@ -36,6 +36,7 @@ class RiskLimits:
     exit_cooldown_seconds: int
     symbol_switch_cooldown_seconds: int
     consecutive_loss_cooldown_seconds: int
+    max_hold_seconds: int = 0  # 0 = unlimited (backwards compatible) - STORY A1
 
 
 @dataclass

@@ -104,6 +104,18 @@ class GridExecutor(ExecutorBase):
         self._closing_in_progress = False  # Guard flag to prevent duplicate close orders
         self._close_order_id = None  # Track active close order ID
 
+        # ==============================================================================
+        # STORY A1: Multi-Timeout Lifecycle Tracking
+        # ==============================================================================
+        self._start_timestamp = self._strategy.current_timestamp  # Executor start time
+        self._last_fill_timestamp = None  # Last fill event (any grid level)
+        self._last_progress_timestamp = None  # Last closed level (TP sell filled)
+        self._last_timeout_summary_log = 0  # Rate limit for summary logs (1 per 30s)
+        self._timeout_close_triggered = False  # Guard: prevent double close from timeouts
+        self._timeout_close_type = None  # Which timeout triggered: NO_FILL / NO_PROGRESS / HARD_CAP
+        self._force_aggressive_close = False  # Bounded close: escalate to market order after grace period
+        # ==============================================================================
+
     @property
     def is_perpetual(self) -> bool:
         """
@@ -404,6 +416,137 @@ class GridExecutor(ExecutorBase):
         """
         return self._status in [RunnableStatus.RUNNING, RunnableStatus.NOT_STARTED, RunnableStatus.CLOSING, RunnableStatus.SHUTTING_DOWN]
 
+    # ==============================================================================
+    # STORY A1: Multi-Timeout Lifecycle Methods
+    # ==============================================================================
+
+    def _check_timeout_triggers(self) -> bool:
+        """
+        Check if any timeout has been exceeded and trigger close if needed.
+
+        Returns:
+            bool: True if timeout triggered close, False otherwise
+        """
+        # Skip if already closing or timeout already triggered
+        if self._timeout_close_triggered or self.status != RunnableStatus.RUNNING:
+            return False
+
+        # Get timeout config from controller config (via executor config custom_info)
+        custom_info = self.config.custom_info or {}
+        no_fill_timeout = custom_info.get('no_fill_timeout_sec', 1200)  # Default 20 min
+        no_progress_timeout = custom_info.get('no_progress_timeout_sec', 3600)  # Default 1h
+        max_hold_time = custom_info.get('max_hold_time_sec', 14400)  # Default 4h
+
+        now = self._strategy.current_timestamp
+        age_sec = now - self._start_timestamp
+        since_last_fill = (now - self._last_fill_timestamp) if self._last_fill_timestamp else age_sec
+        since_last_progress = (now - self._last_progress_timestamp) if self._last_progress_timestamp else age_sec
+
+        # Log summary every 30 seconds (rate limited)
+        if now - self._last_timeout_summary_log >= 30:
+            open_orders_count = len(self.levels_by_state.get(GridLevelStates.OPEN_ORDER_PLACED, []))
+            self.logger().info(
+                f"⏱️  Grid timeout check: {self.config.trading_pair} | "
+                f"age={age_sec / 60:.1f}m | since_fill={since_last_fill / 60:.1f}m | "
+                f"since_progress={since_last_progress / 60:.1f}m | open_orders={open_orders_count} | "
+                f"inventory={float(self.position_size_base):.4f}"
+            )
+            self._last_timeout_summary_log = now
+
+        # Check 1: No-fill timeout (no fills at all)
+        if no_fill_timeout > 0 and self._last_fill_timestamp is None and age_sec >= no_fill_timeout:
+            self.logger().warning(
+                f"⏰ NO_FILL_TIMEOUT triggered: {self.config.trading_pair} | "
+                f"age={age_sec / 60:.1f}m >= {no_fill_timeout / 60:.1f}m | No fills received | "
+                f"Cancelling orders + closing executor"
+            )
+            self._timeout_close_triggered = True
+            self._timeout_close_type = CloseType.NO_FILL_TIMEOUT
+            self.close_type = CloseType.NO_FILL_TIMEOUT
+            # Cancel all open orders and mark for shutdown (no inventory to unwind)
+            self.cancel_open_orders()
+            self._status = RunnableStatus.SHUTTING_DOWN
+            return True
+
+        # Check 2: No-progress timeout (stalled - have fills but no completed levels)
+        if no_progress_timeout > 0 and since_last_progress >= no_progress_timeout:
+            self.logger().warning(
+                f"⏰ NO_PROGRESS_TIMEOUT triggered: {self.config.trading_pair} | "
+                f"since_progress={since_last_progress / 60:.1f}m >= {no_progress_timeout / 60:.1f}m | "
+                f"Grid stalled - starting unwind"
+            )
+            self._timeout_close_triggered = True
+            self._timeout_close_type = CloseType.NO_PROGRESS_TIMEOUT
+            self.close_type = CloseType.NO_PROGRESS_TIMEOUT
+            # Start graceful close (cancel orders + unwind inventory)
+            self.cancel_open_orders()
+            self._status = RunnableStatus.CLOSING
+            return True
+
+        # Check 3: Hard cap (max hold time)
+        if max_hold_time > 0 and age_sec >= max_hold_time:
+            self.logger().warning(
+                f"⏰ HARD_CAP_TIME_LIMIT triggered: {self.config.trading_pair} | "
+                f"age={age_sec / 60:.1f}m >= {max_hold_time / 60:.1f}m | "
+                f"Maximum hold time exceeded - forcing rotation"
+            )
+            self._timeout_close_triggered = True
+            self._timeout_close_type = CloseType.HARD_CAP_TIME_LIMIT
+            self.close_type = CloseType.HARD_CAP_TIME_LIMIT
+            # Start graceful close (cancel orders + unwind inventory)
+            self.cancel_open_orders()
+            self._status = RunnableStatus.CLOSING
+            return True
+
+        return False
+
+    def _check_bounded_close_escalation(self) -> bool:
+        """
+        Story A1: Check if we should escalate from graceful close to aggressive close.
+        Returns True if escalation triggered (forces market order).
+        """
+        if not self._timeout_close_triggered or self.status != RunnableStatus.CLOSING:
+            return False
+
+        # Get close_grace_sec from config
+        custom_info = self.config.custom_info or {}
+        close_grace_sec = custom_info.get('close_grace_sec', 120)  # Default 2 min
+
+        # Check if close order is stuck (no fill after grace period)
+        if self._close_order and self._close_order_id:
+            try:
+                connector = self.connectors[self.config.connector_name]
+                in_flight_order = connector.in_flight_orders.get(self._close_order_id)
+
+                if in_flight_order and not in_flight_order.is_done:
+                    # Check how long order has been open
+                    order_age = self._strategy.current_timestamp - in_flight_order.creation_timestamp
+
+                    if order_age >= close_grace_sec:
+                        self.logger().warning(
+                            f"⚠️  Story A1 Bounded Close: Graceful close failed after {order_age:.0f}s "
+                            f"(grace period: {close_grace_sec}s) | "
+                            f"Cancelling maker order + forcing aggressive close for {self.config.trading_pair}"
+                        )
+                        # Cancel stuck order
+                        self._strategy.cancel(
+                            connector_name=self.config.connector_name,
+                            trading_pair=self.config.trading_pair,
+                            order_id=self._close_order_id
+                        )
+                        # Reset close tracking to allow aggressive close
+                        self._closing_in_progress = False
+                        self._close_order_id = None
+                        # Set flag to force market order on next close attempt
+                        self._force_aggressive_close = True
+                        return True
+            except Exception as e:
+                self.logger().warning(f"⚠️  Could not check bounded close escalation: {e}")
+
+        return False
+
+    # ==============================================================================
+
     async def control_task(self):
         """
         This method is responsible for controlling the task based on the status of the executor.
@@ -413,6 +556,10 @@ class GridExecutor(ExecutorBase):
         self.update_grid_levels()
         self.update_metrics()
         if self.status == RunnableStatus.RUNNING:
+            # Story A1: Check timeout triggers FIRST (before triple barrier)
+            if self._check_timeout_triggers():
+                return  # Timeout triggered, skip normal control logic
+
             if self.control_triple_barrier():
                 self.cancel_open_orders()
                 self._status = RunnableStatus.SHUTTING_DOWN
@@ -433,6 +580,11 @@ class GridExecutor(ExecutorBase):
                     order_id=orders_id_to_cancel
                 )
         elif self.status == RunnableStatus.CLOSING:
+            # Story A1: Check if we should escalate to aggressive close
+            if self._check_bounded_close_escalation():
+                # Escalation triggered - bounded close will force market order on next iteration
+                return
+
             # Phase 3: State machine - check if close order is filled
             if self._close_order and self._close_order_id:
                 # PRIMARY: Check order status (more reliable than balance)
@@ -604,6 +756,9 @@ class GridExecutor(ExecutorBase):
                 self.levels_by_state[GridLevelStates.COMPLETE].remove(level)
                 level.reset_level()
                 self.levels_by_state[GridLevelStates.NOT_ACTIVE].append(level)
+
+                # STORY A1: Update last_progress_timestamp (completed level = progress)
+                self._last_progress_timestamp = self._strategy.current_timestamp
 
     async def control_shutdown_process(self):
         """
@@ -1244,6 +1399,18 @@ class GridExecutor(ExecutorBase):
         :param price: The price to be used in the close order.
         :return: None
         """
+        # Story A1: Bounded close - force market order if escalation triggered
+        if self._force_aggressive_close:
+            self.logger().warning(
+                "⚠️  Story A1 Bounded Close: Forcing MARKET order for aggressive close "
+                "(graceful LIMIT order failed after grace period)"
+            )
+            # Force market order by setting appropriate close_type
+            # PANIC EXITS (stop_loss, time_limit, early_stop) already use MARKET orders
+            # We use TIME_LIMIT as it triggers market order path
+            close_type = CloseType.HARD_CAP_TIME_LIMIT  # Forces market order
+            self._force_aggressive_close = False  # Reset flag
+
         # PHASE 1+3: DOUBLE SELL GUARD - Prevent duplicate close orders
         if self._closing_in_progress:
             self.logger().warning(
@@ -1906,6 +2073,9 @@ class GridExecutor(ExecutorBase):
         is not available.
         """
         self.update_tracked_orders_with_order_id(event.order_id)
+
+        # STORY A1: Update last_fill_timestamp (any fill = activity)
+        self._last_fill_timestamp = self._strategy.current_timestamp
 
     def process_order_completed_event(self, _, market, event: Union[BuyOrderCompletedEvent, SellOrderCompletedEvent]):
         """

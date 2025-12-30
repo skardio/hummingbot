@@ -164,18 +164,17 @@ manual_trading_pairs: []  # null = dynamic discovery mode
   # - BAT-EUR
   # - KAS-EUR
 
-max_simultaneous_coins: 1          # Phase 3.5 validation: start conservatief (24-48h), dan opschalen naar 2
 
 # ==============================================================================
 # MULTI-TIMEFRAME BUY PROTECTION (PREVENT KAS-EUR DISASTER)
 # ==============================================================================
 
 use_multi_timeframe_buy: true      # ENABLE multi-timeframe checks voor entries
-mtf_1h_min_pct: -2.0               # 🔧 HYBRID: 1h mag -2% pullback (normal in chop)
-mtf_4h_min_pct: -1.0               # 🔧 HYBRID: 4h mag -1% pullback (CHESS: -0.29%)
-mtf_24h_min_pct: -1.0              # 🔧 HYBRID: 24h mag -1% pullback (CHESS: -0.14%)
-mtf_declining_1h_max: -2.5         # Als 1h < -2.5% EN 4h < -1% → REJECT (crash protection)
-mtf_declining_4h_max: -1.0         # (prevents trading during severe crashes)
+mtf_1h_min_pct: -3.0               # 🔧 RELAXED: 1h mag -3% pullback (catch strong consensus opportunities)
+mtf_4h_min_pct: -2.5               # 🔧 RELAXED: 4h mag -2.5% pullback (allows rotation to better coins)
+mtf_24h_min_pct: -2.5              # 🔧 RELAXED: 24h mag -2.5% pullback (STBL-EUR fix: -2.55% was blocked)
+mtf_declining_1h_max: -4.0         # Als 1h < -4% EN 4h < -2% → REJECT (crash protection)
+mtf_declining_4h_max: -2.0         # (prevents trading during severe crashes)
 
 # ==============================================================================
 # WARMUP TREND OVERRIDE – PRO PULLBACK MODE
@@ -324,14 +323,14 @@ performance_tracking:
 # ==============================================================================
 
 orderbook_liquidity:
-  enabled: true                    # Enable orderbook depth checks
-  mode: live                       # 🚀 LIVE MODE: Active depth filtering (was: shadow = log-only)
+  enabled: true                    # ✅ RE-ENABLED: Fixed "unknown ≠ illiquid" bug in trend_calculator
+  mode: live                       # 🚀 LIVE MODE: Active depth filtering (unknown data doesn't block)
   regime_aware: false              # Phase 4: adaptive thresholds (BULL=8x, CHOP=5x, BEAR=10x)
   depth_pct_range: 0.5            # ±0.5% around mid price for depth calculation
   depth_levels: 10                # Top N orderbook levels per side to analyze
   min_depth_multiplier: 5.0       # Required depth = order_size × multiplier (5x = conservatief)
   use_for_ranking: false          # Phase 2: disabled (ranking feature)
-  use_for_entry: true             # Phase 1: ACTIVE - reject insufficient depth
+  use_for_entry: true             # ✅ ENABLED: Only blocks on confirmed insufficient depth
   log_depth_metrics: true         # Log depth metrics for all evaluated coins
 
 # ==============================================================================
@@ -568,16 +567,17 @@ session_blacklist_duration_seconds: 7200  # 2 uur blacklist, dan weer proberen
 # ==============================================================================
 # CAPITAL & RISK MANAGEMENT
 # ==============================================================================
+max_simultaneous_coins: 2          # ✅ INCREASED: Allow 2 coins for better diversification & opportunity cost tracking
 
-total_amount_quote: 30             # Per coin: €30 × 2 (internal) = €60 totaal (Phase 3.5: 1 coin max)
+total_amount_quote: 60             # Per coin: €60 × 2 coins = €120 totaal (2 coins simultaan)
 min_order_amount_quote: 10
 
 risk_reference_balance_quote: 150  # €150 reference (buffer voor veiligheid)
-risk_max_balance_per_trade_pct: 40  # 40% van €150 = €60 per coin
-risk_max_total_open_risk_pct: 40   # 40% van €150 = €60 totaal (Phase 3.5: 1 coin × €60)
+risk_max_balance_per_trade_pct: 80  # 80% van €150 = €120 totaal (2 coins × €60 each)
+risk_max_total_open_risk_pct: 80   # 80% van €150 = €120 totaal (2 coins × €60)
 
-max_exposure_per_coin_pct: 40      # Each coin: 40% van €150 = €60
-max_total_exposure_pct: 40        # Totaal: 40% van €150 = €60 (Phase 3.5: 1 coin max)
+max_exposure_per_coin_pct: 80      # Each coin: max 80% (2 coins = €60 each)
+max_total_exposure_pct: 80        # Totaal: 80% van €150 = €120 (2 coins × €60)
 
 stop_loss_pct: 0.05                # 5% globale SL per positie
 take_profit_pct: 0.02              # 2% globale TP
@@ -613,6 +613,21 @@ order_frequency: 3
 
 min_switch_interval_seconds: 600    # 🚀 FIX: 1800→600 (10 min - faster switching)
 min_hold_time_seconds: 1800        # 🔧 FIX: 300→1800 (30 min - allow grid sells time to execute!)
+max_hold_time_seconds: 14400      # ✅ NEW: 4 hours max hold → force rotation to better opportunities (prevents 21h+ stuck positions)
+
+# ==============================================================================
+# STORY A1: MULTI-TIMEOUT LIFECYCLE (Professional Rotation)
+# ==============================================================================
+# Professional timeout strategy prevents stuck positions like VSN-EUR 21h issue
+# Three-layer timeout system:
+#   1. no_fill_timeout_sec: No fills → cancel orders + close (lightweight)
+#   2. no_progress_timeout_sec: Stalled progress → start unwind
+#   3. max_hold_time_seconds: Hard cap → forced rotation
+# ==============================================================================
+
+no_fill_timeout_sec: 1200         # ⏰ 20 min - no fills → cancel + close (no inventory)
+no_progress_timeout_sec: 3600     # ⏰ 1 hour - no new fills → start unwind
+close_grace_sec: 120              # ⏰ 2 min - graceful close window (maker → market fallback)
 
 min_startup_wait_seconds: 60       # 🚀 FIX: 90→60 (1 min startup delay)
 

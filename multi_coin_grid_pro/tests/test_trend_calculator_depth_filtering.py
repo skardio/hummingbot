@@ -265,7 +265,7 @@ class TestTrendCalculatorDepthFiltering(unittest.TestCase):
     def test_get_top_n_coins_skips_coins_without_orderbook(
         self, mock_get_orderbook
     ):
-        """Test that coins without orderbook data are skipped"""
+        """Test that coins without orderbook data are NOT filtered (PRO RULE: unknown ≠ illiquid)"""
 
         def orderbook_side_effect(conn, symbol):
             if symbol == "SHIB-EUR":
@@ -285,8 +285,9 @@ class TestTrendCalculatorDepthFiltering(unittest.TestCase):
             orderbook_config=self.orderbook_config
         )
 
-        # SHIB should be filtered out (no valid orderbook)
-        self.assertNotIn("SHIB-EUR", top_coins)
+        # PRO RULE: SHIB should NOT be filtered out (unknown orderbook ≠ illiquid)
+        # Unknown data allows entry, only confirmed insufficient depth blocks
+        self.assertIn("SHIB-EUR", top_coins)
 
     def test_orderbook_config_missing_order_size(self):
         """Test that missing order_size disables depth filtering"""

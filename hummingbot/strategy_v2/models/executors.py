@@ -16,6 +16,11 @@ class CloseType(Enum):
     FAILED = 8
     COMPLETED = 9
     POSITION_HOLD = 10
+    # Story A1: Multi-Timeout Lifecycle
+    NO_FILL_TIMEOUT = 11           # No fills after no_fill_timeout_sec → cancel + close
+    NO_PROGRESS_TIMEOUT = 12       # No progress after no_progress_timeout_sec → unwind
+    HARD_CAP_TIME_LIMIT = 13       # Hit max_hold_time_seconds → forced unwind
+    RISK_KILL_SWITCH = 14          # Global risk manager triggered → emergency unwind
 
 
 class TrackedOrder:

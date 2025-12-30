@@ -1058,29 +1058,32 @@ class TrendCalculator:
                     # Get orderbook snapshot
                     orderbook = get_orderbook_snapshot(self.connector, symbol)
                     if not orderbook or not orderbook.snapshot_uid:
+                        # ✅ PRO RULE: Unknown data NEVER blocks, only confirmed illiquidity blocks
                         if shadow_mode:
                             logger.info(f"👻 Shadow: {symbol} - No orderbook data (would skip if filtering)")
                         elif depth_filtering_enabled:
-                            logger.debug(f"🚫 {symbol}: No orderbook data, skipping")
-                            depth_filtered_count += 1
-                            continue
+                            logger.debug(f"⚠️  {symbol}: No orderbook data (UNKNOWN ≠ ILLIQUID) - allowing entry")
+                            # Don't block - unknown is not the same as illiquid
+                        # Continue to normal evaluation (fall through)
 
-                    # Calculate depth metrics
-                    depth_metrics = calculate_orderbook_depth(
-                        bids=orderbook.bids,
-                        asks=orderbook.asks,
-                        mid_price=orderbook.bids[0].price if orderbook.bids else Decimal("0"),
-                        pct_range=depth_pct_range,
-                        max_levels=depth_levels
-                    )
+                    else:
+                        # We have orderbook data - check if depth is sufficient
+                        # Calculate depth metrics
+                        depth_metrics = calculate_orderbook_depth(
+                            bids=orderbook.bids,
+                            asks=orderbook.asks,
+                            mid_price=orderbook.bids[0].price if orderbook.bids else Decimal("0"),
+                            pct_range=depth_pct_range,
+                            max_levels=depth_levels
+                        )
 
-                    # Check if depth is sufficient
-                    required_depth = calculate_required_depth(
-                        order_size_quote=order_size,
-                        multiplier=min_depth_multiplier
-                    )
+                        # Check if depth is sufficient
+                        required_depth = calculate_required_depth(
+                            order_size_quote=order_size,
+                            multiplier=min_depth_multiplier
+                        )
 
-                    depth_sufficient = is_sufficient_depth(depth_metrics, required_depth, tolerance=0.1)
+                        depth_sufficient = is_sufficient_depth(depth_metrics, required_depth, tolerance=0.1)
 
                     if shadow_mode:
                         # Shadow mode: LOG but don't filter
@@ -1241,29 +1244,32 @@ class TrendCalculator:
                     # Get orderbook snapshot
                     orderbook = get_orderbook_snapshot(self.connector, symbol)
                     if not orderbook or not orderbook.snapshot_uid:
+                        # ✅ PRO RULE: Unknown data NEVER blocks, only confirmed illiquidity blocks
                         if shadow_mode:
                             logger.info(f"👻 Shadow: {symbol} - No orderbook data (would skip if filtering)")
                         elif depth_filtering_enabled:
-                            logger.debug(f"🚫 {symbol}: No orderbook data, skipping")
-                            depth_filtered_count += 1
-                            continue
+                            logger.debug(f"⚠️  {symbol}: No orderbook data (UNKNOWN ≠ ILLIQUID) - allowing entry")
+                            # Don't block - unknown is not the same as illiquid
+                        # Continue to normal evaluation (fall through)
 
-                    # Calculate depth metrics
-                    depth_metrics = calculate_orderbook_depth(
-                        bids=orderbook.bids,
-                        asks=orderbook.asks,
-                        mid_price=orderbook.bids[0].price if orderbook.bids else Decimal("0"),
-                        pct_range=depth_pct_range,
-                        max_levels=depth_levels
-                    )
+                    else:
+                        # We have orderbook data - check if depth is sufficient
+                        # Calculate depth metrics
+                        depth_metrics = calculate_orderbook_depth(
+                            bids=orderbook.bids,
+                            asks=orderbook.asks,
+                            mid_price=orderbook.bids[0].price if orderbook.bids else Decimal("0"),
+                            pct_range=depth_pct_range,
+                            max_levels=depth_levels
+                        )
 
-                    # Check if depth is sufficient
-                    required_depth = calculate_required_depth(
-                        order_size_quote=order_size,
-                        multiplier=min_depth_multiplier
-                    )
+                        # Check if depth is sufficient
+                        required_depth = calculate_required_depth(
+                            order_size_quote=order_size,
+                            multiplier=min_depth_multiplier
+                        )
 
-                    depth_sufficient = is_sufficient_depth(depth_metrics, required_depth, tolerance=0.1)
+                        depth_sufficient = is_sufficient_depth(depth_metrics, required_depth, tolerance=0.1)
 
                     if shadow_mode:
                         # Shadow mode: LOG but don't filter (only log first 3 for performance)
