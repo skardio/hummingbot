@@ -80,6 +80,10 @@ class MockExecutor:
         # Mock levels
         self.levels_by_state = {'OPEN_ORDER_PLACED': []}
 
+        # Mock trading rules for min_order_size check
+        self.trading_rules = MagicMock()
+        self.trading_rules.min_order_size = 0.001  # Default min size
+
     @property
     def current_timestamp(self):
         """Property to get/set current timestamp (for test compatibility)"""
@@ -99,6 +103,18 @@ class MockExecutor:
 
     def cancel_open_orders(self):
         pass
+
+    def update_position_metrics(self):
+        """Mock update_position_metrics for NO_FILL_TIMEOUT inventory check"""
+        # position_size_base is already set in __init__, just pass
+        pass
+
+    def start_forced_close(self, close_reason: CloseType):
+        """Mock start_forced_close for B1 two-phase unwind integration"""
+        self.close_type = close_reason
+        self._status = RunnableStatus.CLOSING
+        self._timeout_close_triggered = True
+        self._timeout_close_type = close_reason
 
     # Import actual timeout check methods from GridExecutor
     from hummingbot.strategy_v2.executors.grid_executor.grid_executor import GridExecutor
@@ -147,6 +163,27 @@ class TestStoryA1TimeoutLifecycle(unittest.TestCase):
         # Verify: No timeout
         self.assertFalse(result, "No-fill timeout should NOT trigger if fills received")
         self.assertFalse(self.executor._timeout_close_triggered)
+
+    def test_no_fill_timeout_with_inventory_triggers_forced_close(self):
+        """Test: No fills after 20 min BUT has inventory → start forced close (not shutdown)"""
+        # Setup: No last_fill_timestamp (e.g., from inflight orders) but has inventory
+        self.executor._last_fill_timestamp = None
+        self.executor._last_progress_timestamp = None
+        self.executor.position_size_base = 1.5  # Has inventory from partial fills
+
+        # Advance time past no_fill_timeout (20 min = 1200s)
+        self.executor.current_timestamp = 1000.0 + 1201
+
+        # Trigger timeout check
+        result = self.executor._check_timeout_triggers()
+
+        # Verify: Timeout triggered, but forced close (not shutdown) due to inventory
+        self.assertTrue(result, "No-fill timeout should trigger")
+        self.assertTrue(self.executor._timeout_close_triggered)
+        self.assertEqual(self.executor._timeout_close_type, CloseType.NO_FILL_TIMEOUT)
+        self.assertEqual(self.executor.close_type, CloseType.NO_FILL_TIMEOUT)
+        # Should call start_forced_close, which sets status to CLOSING (not SHUTTING_DOWN)
+        self.assertEqual(self.executor._status, RunnableStatus.CLOSING)
 
     def test_no_progress_timeout_triggers_graceful_close(self):
         """Test: No progress after 1 hour → start graceful unwind"""

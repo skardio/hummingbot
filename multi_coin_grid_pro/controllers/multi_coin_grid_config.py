@@ -157,6 +157,19 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={
             "is_updatable": True})
 
+    # Periodic Coin Discovery (auto-refresh pool during runtime)
+    coin_discovery_refresh_interval_seconds: int = Field(
+        default=3600,  # 1 hour
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Coin discovery refresh interval in seconds (3600 = 1 hour, 0 = disabled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={
+            "is_updatable": True,
+            "description": "How often to rescan ALL available pairs and refresh the coin pool (0 = only at startup)"
+        }
+    )
+
     # Trend Detection Parameters
     trend_lookback_minutes: int = Field(
         default=1440,  # Default to 24 hours (1440 minutes) for real trend detection
@@ -362,6 +375,50 @@ class MultiCoinGridConfig(ControllerConfigBase):
         default=120,  # 2 minutes for graceful close (maker) before aggressive (market)
         client_data=ClientFieldData(
             prompt=lambda mi: "Close grace period (seconds): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ==============================================================================
+    # STORY A2: SESSION BLACKLIST & ANTI-FLIPFLOP
+    # ==============================================================================
+
+    blacklist_after_timeout_sec: int = Field(
+        default=1800,  # 30 minutes - timeout closes trigger temporary blacklist
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Blacklist duration after timeout (seconds, 0=disabled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ==============================================================================
+    # STORY B1: TWO-PHASE UNWIND PROTOCOL (Graceful → Aggressive Fallback)
+    # ==============================================================================
+
+    aggressive_close_method: str = Field(
+        default="MARKET",  # MARKET | TAKER_LIMIT_IOC (exchange-dependent)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Aggressive close method (MARKET, TAKER_LIMIT_IOC): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    aggressive_close_slippage_guard_pct: Decimal = Field(
+        default=Decimal("0.30"),  # 0.3% max slippage for aggressive close
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Aggressive close slippage guard (%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    max_close_retries: int = Field(
+        default=2,  # Max retries for close orders (graceful + aggressive phases)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Max close order retries: ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
@@ -1128,7 +1185,19 @@ class MultiCoinGridConfig(ControllerConfigBase):
             # Phase 2: Slippage Protection
             'slippage_check_enabled', 'max_entry_spread_pct',
             # Phase 2: Order Book Depth
-            'depth_check_enabled', 'min_depth_multiplier'
+            'depth_check_enabled', 'min_depth_multiplier',
+            # EPIC v3.4: Momentum Health Guards (Stories 1-11)
+            'vwap_slope_guard_enabled', 'vwap_slope_guard_shadow_mode',
+            'vwap_slope_dual_confirmation',  # Story 9
+            'vwap_slope_deviation_high_pct', 'vwap_slope_min_pct_5m', 'vwap_slope_min_pct_15m', 'vwap_slope_log_details',
+            'parabolic_detector_enabled', 'parabolic_detector_shadow_mode',
+            'parabolic_cooldown_persist',  # Story 10
+            'parabolic_accel_5m_min_pct', 'parabolic_accel_15m_min_pct', 'parabolic_vwap_dev_min_pct',
+            'parabolic_cooldown_minutes', 'parabolic_blacklist_scope', 'parabolic_log_details',
+            'momentum_thresholds',
+            # Story 11: Market Exhaustion Warning
+            'market_exhaustion_enabled', 'market_exhaustion_threshold_pct',
+            'market_exhaustion_sample_size', 'market_exhaustion_cooldown_min', 'market_exhaustion_telegram'
         }
         invalid_keys = set(v.keys()) - valid_keys
         if invalid_keys:
@@ -1152,8 +1221,8 @@ class MultiCoinGridConfig(ControllerConfigBase):
         # Validate grid counts
         if 'min_grids' in v and v['min_grids'] < 2:
             raise ValueError("min_grids must be at least 2")
-        if 'max_grids' in v and v['max_grids'] > 10:
-            raise ValueError("max_grids should not exceed 10")
+        if 'max_grids' in v and v['max_grids'] > 20:
+            raise ValueError("max_grids should not exceed 20")
         if 'min_grids' in v and 'max_grids' in v and v['min_grids'] >= v['max_grids']:
             raise ValueError("min_grids must be less than max_grids")
 

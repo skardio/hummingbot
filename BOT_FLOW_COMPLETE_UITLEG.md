@@ -545,6 +545,59 @@ def _create_grid_action(self, symbol: str, total_amount_quote: Optional[Decimal]
     # === STAP 1: Get Configuration ===
     order_amount_eur = total_amount_quote or Decimal("60")  # €60 per grid
 
+    # === STAP 1B: Story D1 - Calculate Adaptive Timeout ===
+    # Bereken dynamische timeout gebaseerd op markt volatiliteit
+    adaptive_timeout_sec = self.config.no_fill_timeout_sec  # Default: 600s (10 min)
+
+    try:
+        # Haal recente candle data op voor volatiliteit berekening
+        candle_df = self.market_data_provider.get_candles_df(
+            connector_name="kraken",
+            trading_pair=symbol,
+            interval="1m",  # 1-min candles voor responsiveness
+            max_records=20  # 20 candles voor ATR-14 berekening
+        )
+
+        if candle_df is not None and len(candle_df) >= 14:
+            # Extract OHLC data
+            highs = [float(h) for h in candle_df['high'].tolist()]
+            lows = [float(l) for l in candle_df['low'].tolist()]
+            closes = [float(c) for c in candle_df['close'].tolist()]
+
+            # Bereken ATR-based adaptive timeout
+            from multi_coin_grid_pro.utils.adaptive_timeout import get_recommended_timeout
+
+            timeout_result = get_recommended_timeout(
+                symbol=symbol,
+                current_price=float(mid_price),
+                high_prices=highs,
+                low_prices=lows,
+                close_prices=closes,
+                base_timeout_sec=self.config.no_fill_timeout_sec
+            )
+
+            adaptive_timeout_sec = timeout_result.adjusted_timeout_sec
+
+            # Log aanpassing
+            if timeout_result.adjustment_factor != 1.0:
+                self.logger().info(
+                    f"⏱️  Adaptive timeout voor {symbol}: "
+                    f"{adaptive_timeout_sec}s (was {self.config.no_fill_timeout_sec}s, "
+                    f"factor: {timeout_result.adjustment_factor:.2f}x) - "
+                    f"{timeout_result.reasoning}"
+                )
+
+            # Voorbeelden:
+            # - LOW volatility (<1% ATR): timeout 420s (600s * 0.7x) ← sneller stall detectie
+            # - NORMAL volatility (1-3%): timeout 600s (ongewijzigd)
+            # - HIGH volatility (3-6%): timeout 900s (600s * 1.5x) ← minder false timeouts
+            # - EXTREME volatility (>6%): timeout 1200s (600s * 2.0x) ← maximale tolerantie
+
+    except Exception as e:
+        self.logger().warning(
+            f"⚠️  Failed to calculate adaptive timeout: {e} - using base {adaptive_timeout_sec}s"
+        )
+
     # Get coin-specific overrides
     overrides = self.config.get("coin_specific_overrides", {}).get(symbol, {})
 
@@ -618,7 +671,15 @@ def _create_grid_action(self, symbol: str, total_amount_quote: Optional[Decimal]
 
         # Other settings
         leverage=1,  # Spot trading, no leverage
-        activation_bounds=None  # Start immediately
+        activation_bounds=None,  # Start immediately
+
+        # Story D1: Adaptive timeout (passed via custom_info)
+        custom_info={
+            "no_fill_timeout_sec": adaptive_timeout_sec,  # Dynamic timeout!
+            "no_progress_timeout_sec": self.config.no_progress_timeout_sec,
+            "max_hold_time_sec": self.config.max_hold_time_seconds,
+            "close_grace_sec": self.config.close_grace_sec,
+        }
     )
 
     # === STAP 4: Create Action ===
@@ -1014,6 +1075,152 @@ def adjust_and_place_close_order(self, level: GridLevel):
 
 ## 8. GRID SLUITEN
 
+### Stap 8.0: Story B2 - Audit Record Creatie
+**File**: `multi_coin_grid_controller.py` → `_on_executor_terminated()`
+
+```python
+def _on_executor_terminated(self, executor):
+    """
+    Wanneer executor stopt, schrijf audit record voor analytics
+    """
+    # === Story B2: Write Execution Audit ===
+    from multi_coin_grid_pro.models.execution_audit import (
+        AuditWriter, create_audit_from_executor
+    )
+
+    try:
+        # Bepaal close reason
+        close_reason_map = {
+            CloseType.TAKE_PROFIT: "TAKE_PROFIT",
+            CloseType.STOP_LOSS: "STOP_LOSS",
+            CloseType.TIMEOUT: "TIMEOUT",
+            CloseType.USER_STOP: "USER_STOP",
+            CloseType.EARLY_STOP: "EARLY_STOP"
+        }
+        close_reason = close_reason_map.get(executor.close_type, "UNKNOWN")
+
+        # Maak audit record
+        audit = create_audit_from_executor(executor, close_reason)
+
+        # Audit bevat:
+        # - symbol: "DOT-EUR"
+        # - executor_id: "abc123..."
+        # - start_ts: 1735574400.0 (Unix timestamp)
+        # - end_ts: 1735578000.0
+        # - duration_sec: 3600.0 (1 uur)
+        # - close_reason: "TAKE_PROFIT"
+        # - realized_pnl_quote: "8.57" (bruto winst)
+        # - fees_quote: "0.04" (totale fees)
+        # - net_pnl_quote: "8.53" (netto winst)
+        # - num_fills: 14 (7 buys + 7 sells)
+        # - num_open_fills: 7
+        # - num_close_fills: 7
+        # - time_to_first_fill_sec: 78.5 (eerste fill na 78s)
+        # - timeout_triggered: False
+        # - timeout_type: None
+        # - unwind_phase_reached: None
+        # - graceful_close_success: True
+        # - config_snapshot: {grid config dict}
+        # - version: "1.0"
+        # - recorded_at: "2025-12-30T14:30:00.123456"
+
+        # Schrijf naar JSONL file (audits/2025-12-30.jsonl)
+        writer = AuditWriter(audit_dir="audits")
+        writer.write(audit)
+
+        self.logger().info(
+            f"📊 Audit written: {executor.config.trading_pair} - "
+            f"PNL: €{audit.net_pnl_quote} ({audit.close_reason})"
+        )
+
+    except Exception as e:
+        self.logger().error(f"Failed to write audit: {e}")
+```
+
+**Audit File Format (JSONL):**
+```json
+{"version":"1.0","symbol":"DOT-EUR","executor_id":"abc123","start_ts":1735574400.0,"end_ts":1735578000.0,"duration_sec":3600.0,"close_reason":"TAKE_PROFIT","close_type_priority":1,"realized_pnl_quote":"8.57","fees_quote":"0.04","net_pnl_quote":"8.53","num_fills":14,"num_open_fills":7,"num_close_fills":7,"num_closed_levels":7,"time_to_first_fill_sec":78.5,"time_to_last_fill_sec":3521.0,"time_in_graceful_unwind_sec":0.0,"time_in_aggressive_unwind_sec":0.0,"timeout_triggered":false,"timeout_type":null,"unwind_phase_reached":null,"graceful_close_success":true,"max_adverse_excursion":"0.0","max_favorable_excursion":"0.0","max_position_size_quote":"60.0","config_snapshot":{},"recorded_at":"2025-12-30T14:30:00.123456"}
+{"version":"1.0","symbol":"TAO-EUR","executor_id":"def456","start_ts":1735578000.0,...}
+```
+
+### Stap 8.0B: Story C2 - Metrics Analysis
+**File**: `multi_coin_grid_pro/utils/metrics_calculator.py`
+
+```python
+from multi_coin_grid_pro.utils.metrics_calculator import MetricsCalculator
+
+# Na een week trading, analyseer performance
+calculator = MetricsCalculator(audit_dir="audits")
+
+# Bereken metrics voor laatste 7 dagen
+metrics = calculator.calculate_period_metrics(
+    days=7,
+    end_date=datetime.strptime("2025-12-30", "%Y-%m-%d"),
+    by_symbol=True  # Breakdown per coin
+)
+
+# Metrics object bevat:
+print(f"Total Executions: {metrics.total_executions}")  # 143
+print(f"Total PNL: €{metrics.total_pnl_net}")  # €1247.35
+print(f"Win Rate: {metrics.win_rate:.1f}%")  # 87.4%
+print(f"Timeout Rate: {metrics.timeout_rate:.1f}%")  # 3.5%
+print(f"Avg Time to First Fill: {metrics.avg_time_to_first_fill_sec:.0f}s")  # 124s
+print(f"Median Time to First Fill: {metrics.median_time_to_first_fill_sec:.0f}s")  # 89s
+print(f"P95 Time to First Fill: {metrics.p95_time_to_first_fill_sec:.0f}s")  # 312s
+print(f"PNL per Hour: €{metrics.pnl_per_hour:.2f}")  # €8.72/hour
+print(f"Graceful Unwind Rate: {metrics.graceful_vs_aggressive_rate:.1f}%")  # 94.2%
+print(f"Avg Fills per Execution: {metrics.avg_fills_per_execution:.1f}")  # 13.8
+
+# Per-symbol breakdown
+for symbol, symbol_metrics in metrics.by_symbol_metrics.items():
+    print(f"\n{symbol}:")
+    print(f"  Executions: {symbol_metrics['total_executions']}")
+    print(f"  Net PNL: €{symbol_metrics['total_pnl_net']}")
+    print(f"  Win Rate: {symbol_metrics['win_rate']:.1f}%")
+    print(f"  Avg Duration: {symbol_metrics['avg_duration_sec']/60:.1f} min")
+
+# Export naar CSV voor analyse
+calculator.export_to_csv(metrics, "metrics_report_2025-12-30.csv")
+
+# Export naar JSON voor dashboards
+calculator.export_to_json(metrics, "metrics_report_2025-12-30.json")
+```
+
+**Output Voorbeeld:**
+```
+Total Executions: 143
+Total PNL: €1247.35
+Win Rate: 87.4%
+Timeout Rate: 3.5%
+Avg Time to First Fill: 124s
+Median Time to First Fill: 89s
+P95 Time to First Fill: 312s
+PNL per Hour: €8.72
+Graceful Unwind Rate: 94.2%
+Avg Fills per Execution: 13.8
+
+DOT-EUR:
+  Executions: 45
+  Net PNL: €387.52
+  Win Rate: 91.1%
+  Avg Duration: 58.3 min
+
+TAO-EUR:
+  Executions: 38
+  Net PNL: €324.18
+  Win Rate: 86.8%
+  Avg Duration: 52.1 min
+
+...
+```
+
+**Key Insights:**
+- **Time to First Fill** metrics help tune timeout settings
+- **Timeout Rate** shows if adaptive timeout is working (target: <5%)
+- **Win Rate** validates coin selection and SmartEntry filters
+- **PNL per Hour** measures efficiency
+- **Per-symbol breakdown** identifies best/worst performers
+
 ### Scenario 8.1: Take Profit Hit (HAPPY PATH)
 
 **Stap 1: Sell Order Fills**
@@ -1249,7 +1456,8 @@ Time      Action
 00:10     - First trend update (fetch 24h candles)
 00:10     - Rank coins → DOT-EUR best
 00:10     - SmartEntry check → PASSED
-00:10     - Create GridExecutor
+00:10     - Story D1: Calculate adaptive timeout (ATR 0.8% → NORMAL → 600s)
+00:10     - Create GridExecutor (with dynamic timeout)
 00:11     - Place 7 buy orders
 
 ...waiting for fills...
@@ -1268,6 +1476,8 @@ Time      Action
 04:30     - All 7 levels closed
 04:30     - Grid completed
 04:30     - Total P&L: +€0.13 (0.25% avg)
+04:30     - Story B2: Write audit record (audits/2025-12-30.jsonl)
+04:30     - Audit: symbol=DOT-EUR, pnl=€0.13, duration=14100s, fills=14
 
 04:40     - Next control loop
 04:40     - Check if DOT still best
@@ -1296,6 +1506,9 @@ Time      Action
 - ✅ Grid levels spread risk (€60 / 7 = €8.57 per level)
 - ✅ 0.25% take profit per level
 - ✅ 2% stop loss for risk management
+- ✅ **Story D1**: Adaptive timeout based on volatility (0.7x - 2.0x multiplier)
+- ✅ **Story B2**: Audit trail for every execution (JSONL format)
+- ✅ **Story C2**: KPI metrics and performance analysis
 
 **Files Involved:**
 - `scripts/multi_coin_grid_v2.py` - Main strategy
@@ -1304,5 +1517,8 @@ Time      Action
 - `trend_calculator.py` - Trend analysis
 - `smart_entry_filter.py` - Entry filters
 - `kraken_exchange.py` - Exchange integration
+- **Story D1**: `adaptive_timeout.py` - Dynamic timeout based on ATR volatility
+- **Story B2**: `execution_audit.py` - Audit record creation and JSONL writing
+- **Story C2**: `metrics_calculator.py` - KPI calculation and performance analysis
 
 Heb je specifieke vragen over een bepaald deel?

@@ -373,7 +373,7 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
                     lines.append(
                         f"║ ID: {executor.id[:8]}... | "
                         f"Status: {executor.status.name:10} | "
-                        f"P&L: {executor.net_pnl_pct * 100:+.2f}%   ║"
+                        f"P&L: {float(executor.net_pnl_pct) * 100:+.2f}%   ║"
                     )
 
                 lines.append("╚═══════════════════════════════════════════════════════════════╝\n")

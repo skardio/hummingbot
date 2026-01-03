@@ -55,6 +55,7 @@ blacklist:
   - SKY-EUR
   - M-EUR
   - Q-EUR          # Kraken blokkeert Q-EUR trading voor NL accounts
+  - STBL-EUR       # Kraken blokkeert STBL-EUR trading voor NL accounts
 
 
 # ==============================================================================
@@ -87,7 +88,7 @@ adaptive_filters:
     rsi_buy_min: 25.0
     rsi_buy_max: 80.0               # 🔧 FIX: 71→80 (allow trading in CHOP/BEAR when altcoins pumping)
     rsi_extreme_min: 20.0
-    vwap_max_deviation_pct: 5.0     # 🔧 FIX: 3.0→5.0 (allow stronger altcoin moves)
+    vwap_max_deviation_pct: 12.0    # 🔧 FIX: 5.0→12.0 (allow bull market entries far above VWAP)
     max_up_accel_pct: 2.0           # 🔧 FIX: 1.2→2.0 (allow momentum)
     max_down_accel_pct: -3.0        # 🔧 FIX: -2.0→-3.0 (allow deeper pullbacks)
     atr_min_pct: 0.10               # 🔧 FIX: 0.15→0.10 (Kraken EUR pairs less volatile than USDT)
@@ -101,7 +102,7 @@ adaptive_filters:
   # BULL regime: relaxed filters
   BULL:
     rsi_buy_max: 85.0
-    vwap_max_deviation_pct: 7.0
+    vwap_max_deviation_pct: 20.0    # 🔧 FIX: 7.0→20.0 (allow entries in strong uptrends)
     max_up_accel_pct: 3.0
     max_down_accel_pct: -4.0
     atr_min_pct: 0.08
@@ -113,7 +114,7 @@ adaptive_filters:
   # CHOP regime: strict filters
   CHOP:
     rsi_buy_max: 78.0               # 🔧 FIX: 71→78 (allow trading in choppy markets)
-    vwap_max_deviation_pct: 4.5     # 🔧 FIX: 3.0→4.5 (more room for altcoin moves)
+    vwap_max_deviation_pct: 10.0    # 🔧 FIX: 4.5→10.0 (allow altcoin pumps in chop)
     max_up_accel_pct: 1.8           # 🔧 FIX: 1.2→1.8 (allow some momentum)
     max_down_accel_pct: -2.5        # 🔧 FIX: -2.0→-2.5 (allow pullbacks)
     atr_min_pct: 0.10               # 🔧 FIX: 0.15→0.10 (Kraken EUR pairs)
@@ -125,7 +126,7 @@ adaptive_filters:
   # BEAR regime: ultra-strict or disabled
   BEAR:
     rsi_buy_max: 70.0               # 🔧 FIX: 50→70 (allow counter-trend altcoin pumps)
-    vwap_max_deviation_pct: 3.5     # 🔧 FIX: 1.5→3.5 (allow mean-reversion trades)
+    vwap_max_deviation_pct: 8.0     # 🔧 FIX: 3.5→8.0 (allow counter-trend pumps)
     max_up_accel_pct: 1.5           # 🔧 FIX: 0.5→1.5 (allow counter-trend momentum)
     max_down_accel_pct: -2.0        # 🔧 FIX: -1.0→-2.0 (allow pullbacks)
     atr_min_pct: 0.15
@@ -357,7 +358,7 @@ smart_entry_filter:
   rsi_block_min: 80.0              # 🔧 FIX: 75→80 (less blocking in bull runs)
 
   # VWAP / candles
-  vwap_max_deviation_pct: 5.0      # 🔧 FIX: 3.0→5.0 (allow stronger moves)
+  vwap_max_deviation_pct: 12.0     # 🔧 FIX: 5.0→12.0 (allow bull market entries)
   min_wick_ratio: 0.0              # 🔧 FIX: 0.03→0.0 (body-dominant OK!)
 
   # Volatiliteit / ATR – geschikt voor grids
@@ -381,6 +382,65 @@ smart_entry_filter:
   min_depth_multiplier: 3.0        # Require 3x order size on each side
   depth_check_enabled: true        # Enable depth validation
 
+  # ==============================================================================
+  # EPIC v3.4: MOMENTUM HEALTH GUARDS (Stories 1-11)
+  # ==============================================================================
+
+  # VWAP Slope Guard (Story 2 + Story 9: Dual-Window Confirmation)
+  vwap_slope_guard_enabled: true    # ✅ Enabled in LIVE mode
+  vwap_slope_guard_shadow_mode: false  # 🔴 LIVE: Block entries on detection
+  vwap_slope_dual_confirmation: true  # ✅ Story 9: Require both 5m AND 15m slopes flat
+
+  # Parabolic Detector + Cooldown (Story 3 + Story 10: Persistence)
+  parabolic_detector_enabled: true   # ✅ Enabled in LIVE mode
+  parabolic_detector_shadow_mode: false  # 🔴 LIVE: Block entries + 60min cooldown
+  parabolic_cooldown_minutes: 60     # 1 hour cooldown after parabolic detection
+  parabolic_cooldown_persist: true   # ✅ Story 10: Persist cooldowns to SQLite
+
+  # Market Exhaustion Warning (Story 11)
+  market_exhaustion_enabled: true   # ✅ Monitor market-wide parabolic conditions
+  market_exhaustion_threshold_pct: 0.70  # 70% of top coins must be parabolic
+  market_exhaustion_sample_size: 10      # Evaluate top 10 candidates
+  market_exhaustion_cooldown_min: 30     # Rate limit: 1 alert per 30 minutes
+  market_exhaustion_telegram: true       # Send Telegram alerts
+
+  # Baseline Thresholds (Story 5 + Story 9: Dual-Window)
+  momentum_thresholds:
+    baseline:
+      slope_min_pct_5m: 0.05         # ✅ Story 9: 0.05% minimum 5m VWAP slope
+      slope_min_pct_15m: 0.02        # 0.02% minimum 15m VWAP slope (safety floor)
+      slope_max_pct_15m: 0.30        # 0.30% maximum VWAP slope
+      dev_max_pct: 5.0               # 5% max deviation from VWAP
+      accel_5m_min_pct: 1.0          # 1% minimum 5m acceleration (safety floor)
+      accel_5m_max_pct: 5.0          # 5% maximum 5m acceleration
+      accel_15m_max_pct: 8.0         # 8% maximum 15m acceleration
+
+    # Regime-aware overrides (Story 5 + Story 9)
+    regimes:
+      BULL:
+        slope_min_pct_5m: 0.00       # Allow flat 5m in bull (lenient)
+        slope_min_pct_15m: 0.02      # Slightly higher 15m requirement
+        slope_max_pct_15m: 0.40      # Allow steeper slopes in bull
+        dev_max_pct: 8.0             # Allow more deviation in bull
+        accel_5m_max_pct: 7.0        # Allow faster acceleration
+        accel_15m_max_pct: 12.0
+
+      CHOP:
+        slope_min_pct_5m: 0.05       # Require some momentum in chop
+        slope_min_pct_15m: 0.03
+        slope_max_pct_15m: 0.25      # Conservative in chop
+        dev_max_pct: 4.0
+        accel_5m_max_pct: 4.0
+        accel_15m_max_pct: 6.0
+
+      BEAR:
+        slope_min_pct_5m: 0.10       # Require strong momentum in bear
+        slope_min_pct_15m: 0.05
+        slope_max_pct_15m: 0.20      # Very conservative in bear
+        dev_max_pct: 3.0
+        accel_5m_max_pct: 3.0
+        accel_15m_max_pct: 5.0
+
 # ==============================================================================
 # COIN PROFILES (per-coin overrides)
 # ==============================================================================
@@ -392,16 +452,16 @@ coin_profiles:
     rsi_block_min: 76.0
     min_wick_ratio: 0.00           # 🔧 FIX: 0.35→0.00 (accepteer consolidatie candles)
     max_atr_pct_for_grid: 8
-    vwap_max_deviation_pct: 4.5
-    max_trend_24h_pct: 20.0
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 4.5→12.0 (allow bull moves)
+    max_trend_24h_pct: 25.0        # 🔧 FIX: 20.0→25.0
 
   SUI-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.40→0.00
     max_atr_pct_for_grid: 7
-    vwap_max_deviation_pct: 3.0
+    vwap_max_deviation_pct: 15.0   # 🔧 FIX: 3.0→15.0 (L1 volatile moves)
     rsi_extreme_low: 18.0
     rsi_block_min: 75.0
-    max_trend_24h_pct: 18.0
+    max_trend_24h_pct: 25.0        # 🔧 FIX: 18.0→25.0
 
   TAO-EUR:
     rsi_extreme_low: 20.0
@@ -413,102 +473,102 @@ coin_profiles:
     rsi_block_min: 80.0
     min_wick_ratio: 0.00           # 🔧 FIX: 0.50→0.00
     max_atr_pct_for_grid: 9
-    vwap_max_deviation_pct: 4.0
-    max_trend_24h_pct: 25.0
+    vwap_max_deviation_pct: 20.0   # 🔧 FIX: 4.0→20.0 (meme coin extreme moves)
+    max_trend_24h_pct: 40.0        # 🔧 FIX: 25.0→40.0 (allow strong pumps)
 
   AVAX-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.35→0.00
     max_atr_pct_for_grid: 8
-    vwap_max_deviation_pct: 4.0
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 4.0→12.0 (allow bull moves)
     rsi_extreme_low: 22.0
     rsi_block_min: 74.0
 
   LINK-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.30→0.00
     max_atr_pct_for_grid: 6
-    vwap_max_deviation_pct: 2.5
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 2.5→12.0 (allow bull moves)
     rsi_extreme_low: 23.0
     rsi_block_min: 72.0
 
   DOT-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.25→0.00
     max_atr_pct_for_grid: 5
-    vwap_max_deviation_pct: 2.5
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 2.5→12.0 (allow bull moves)
     rsi_block_min: 72.0
 
   NEAR-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.35→0.00
     max_atr_pct_for_grid: 7
-    vwap_max_deviation_pct: 3.5
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 3.5→12.0 (allow bull moves)
     rsi_block_min: 74.0
 
   ATOM-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.20→0.00
     max_atr_pct_for_grid: 6
-    vwap_max_deviation_pct: 3.0
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 3.0→12.0 (allow bull moves)
     rsi_block_min: 71.0
 
   FTM-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.30→0.00
     max_atr_pct_for_grid: 8
-    vwap_max_deviation_pct: 4.0
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 4.0→12.0 (allow bull moves)
     rsi_block_min: 75.0
 
   SOL-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.45→0.00
     max_atr_pct_for_grid: 5
-    vwap_max_deviation_pct: 2.0
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 2.0→12.0 (allow bull moves)
     max_5m_spike_pct: 1.8
     rsi_block_min: 71.0
 
   ADA-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.20→0.00
     max_atr_pct_for_grid: 4
-    vwap_max_deviation_pct: 3.0
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 3.0→12.0 (allow bull moves)
     rsi_block_min: 72.0
 
   XRP-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.25→0.00
     max_atr_pct_for_grid: 6
-    vwap_max_deviation_pct: 2.5
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 2.5→12.0 (allow bull moves)
     rsi_block_min: 71.0
 
   POL-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.30→0.00
     max_atr_pct_for_grid: 5
-    vwap_max_deviation_pct: 2.5
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 2.5→12.0 (allow bull moves)
     rsi_block_min: 70.0
 
   LTC-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.25→0.00
     max_atr_pct_for_grid: 4
-    vwap_max_deviation_pct: 2.0
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 2.0→12.0 (allow bull moves)
     rsi_block_min: 70.0
 
   BCH-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.40→0.00
     max_atr_pct_for_grid: 5
-    vwap_max_deviation_pct: 2.0
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 2.0→12.0 (allow bull moves)
     rsi_block_min: 70.0
 
   PUMP-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.60→0.00
     max_atr_pct_for_grid: 10
-    vwap_max_deviation_pct: 5.0
+    vwap_max_deviation_pct: 20.0   # 🔧 FIX: 5.0→20.0 (meme coin extreme moves)
     rsi_extreme_low: 17.0
     rsi_block_min: 82.0
 
   DYDX-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.35→0.00
     max_atr_pct_for_grid: 9
-    vwap_max_deviation_pct: 3.5
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 3.5→12.0 (allow bull moves)
     rsi_extreme_low: 22.0
     rsi_block_min: 76.0
 
   XDC-EUR:
     min_wick_ratio: 0.00           # 🔧 FIX: 0.25→0.00
     max_atr_pct_for_grid: 6
-    vwap_max_deviation_pct: 3.0
+    vwap_max_deviation_pct: 12.0   # 🔧 FIX: 3.0→12.0 (allow bull moves)
     rsi_extreme_low: 24.0
     rsi_block_min: 70.0
 
@@ -516,23 +576,23 @@ coin_profiles:
 # GRID CONFIGURATION (Hybrid Grid Engine)
 # ==============================================================================
 
-grid_range_pct_down: 1.5
-grid_range_pct_up: 10.0           # 8 → 10: iets meer ruimte voor swings
+grid_range_pct_down: 0.8           # Fixed tight range for mean-reversion
+grid_range_pct_up: 1.2            # Fixed tight range for mean-reversion
 
-num_grids: 7                      # 5 → 7: smoother fills
+num_grids: 10                     # More grids for tighter spacing (~0.2%)
 
 use_dynamic_grid_sizer: true
 
 dynamic_grid_sizer:
-  min_grids: 4                    # 3 → 4
-  max_grids: 7                    # Keep at 7 for safety (€80/7 = €11.43/grid)
+  min_grids: 7                    # Higher minimum for tighter grids
+  max_grids: 15                   # Allow expansion in volatile conditions
   low_vol_atr_pct: 0.7
   mid_vol_atr_pct: 2.0
   high_vol_atr_pct: 4.0
 
-use_atr_grid_ranges: true
-atr_multiplier_down: 1.5
-atr_multiplier_up: 2.0
+use_atr_grid_ranges: false         # Disabled: ATR creates too-wide ranges for mean-reversion
+atr_multiplier_down: 1.5          # (unused when use_atr_grid_ranges=false)
+atr_multiplier_up: 2.0            # (unused when use_atr_grid_ranges=false)
 
 use_asymmetric_grids: true
 smart_refill_threshold_pct: 3.0
@@ -564,12 +624,17 @@ price_update_interval: 30
 max_coin_monitoring_seconds: 180   # 🚀 FIX: 300→120 (2 min - faster timeout)
 session_blacklist_duration_seconds: 7200  # 2 uur blacklist, dan weer proberen
 
+# PERIODIC COIN DISCOVERY: Auto-refresh coin pool during runtime
+coin_discovery_refresh_interval_seconds: 3600  # 1 hour (3600s), set to 0 to disable
+# 💡 Dit scant elk uur ALLE beschikbare pairs opnieuw en vernieuwd de pool
+# Zo kan de bot nieuwe trending coins automatisch ontdekken zonder herstart!
+
 # ==============================================================================
 # CAPITAL & RISK MANAGEMENT
 # ==============================================================================
 max_simultaneous_coins: 2          # ✅ INCREASED: Allow 2 coins for better diversification & opportunity cost tracking
 
-total_amount_quote: 60             # Per coin: €60 × 2 coins = €120 totaal (2 coins simultaan)
+total_amount_quote: 120            # €120 per coin (verdeeld over grid levels) → target €60 actual per coin
 min_order_amount_quote: 10
 
 risk_reference_balance_quote: 150  # €150 reference (buffer voor veiligheid)
@@ -608,7 +673,7 @@ telegram:
 # ORDER MANAGEMENT
 # ==============================================================================
 
-max_open_orders: 5
+max_open_orders: 30               # Increased for 10 grids × 2 coins
 order_frequency: 3
 
 min_switch_interval_seconds: 600    # 🚀 FIX: 1800→600 (10 min - faster switching)

@@ -48,6 +48,31 @@ class SmartEntryBaseConfig:
     # Phase 2: Order Book Depth
     depth_check_enabled: bool = True
     min_depth_multiplier: float = 3.0
+    # EPIC v3.4: Momentum Guards (optional fields with defaults)
+    vwap_slope_guard_enabled: bool = False
+    vwap_slope_guard_shadow_mode: bool = True
+    vwap_slope_dual_confirmation: bool = True  # Story 9: Require both 5m AND 15m slopes flat
+    vwap_slope_deviation_high_pct: float = 15.0
+    vwap_slope_min_pct_5m: float = 0.05  # Story 9: 5m slope threshold
+    vwap_slope_min_pct_15m: float = 0.10
+    vwap_slope_log_details: bool = True
+    parabolic_detector_enabled: bool = False
+    parabolic_detector_shadow_mode: bool = True
+    parabolic_cooldown_persist: bool = True  # Story 10: Persist cooldowns to SQLite
+    parabolic_accel_5m_min_pct: float = 2.5
+    parabolic_accel_15m_min_pct: float = 6.0
+    parabolic_vwap_dev_min_pct: float = 18.0
+    parabolic_cooldown_minutes: int = 30
+    parabolic_blacklist_scope: str = "session"
+    parabolic_log_details: bool = True
+    momentum_thresholds: dict = None
+    # Story 11: Market Exhaustion Warning
+    market_exhaustion_enabled: bool = False
+    market_exhaustion_threshold_pct: float = 0.70
+    market_exhaustion_sample_size: int = 10
+    market_exhaustion_cooldown_min: int = 30
+    market_exhaustion_telegram: bool = False
+    market_exhaustion_actions: list = None
 
 
 class SmartEntryFilter:
@@ -73,6 +98,7 @@ class SmartEntryFilter:
         logger: Optional[logging.Logger] = None,
         exchange_connector=None,
         connector_name: Optional[str] = None,
+        event_logger=None,  # EPIC v3.4 Story 6: Event logging support
     ):
         """
         Initialize SmartEntry filter
@@ -83,12 +109,14 @@ class SmartEntryFilter:
             logger: Optional logger instance
             exchange_connector: MarketDataProvider instance for order book access
             connector_name: Name of the connector to query (e.g., 'kraken')
+            event_logger: Optional EventLogger for structured event tracking (EPIC v3.4)
         """
         self.base_cfg = base_cfg
         self.coin_profiles = coin_profiles
         self.logger = logger or logging.getLogger(__name__)
         self.exchange_connector = exchange_connector
         self.connector_name = connector_name
+        self.event_logger = event_logger  # EPIC v3.4: Store event logger
 
         self.logger.info("=" * 80)
         self.logger.info("🧠 SmartEntryFilter v2.0 initialized")
@@ -292,6 +320,10 @@ class SmartEntryFilter:
         order_size_eur: Optional[float] = None,
         bid_price: Optional[float] = None,
         ask_price: Optional[float] = None,
+        vwap_slope_15m_pct: Optional[float] = None,  # EPIC v3.4 Story 6
+        accel_5m_pct: Optional[float] = None,  # EPIC v3.4 Story 6
+        accel_15m_pct: Optional[float] = None,  # EPIC v3.4 Story 6
+        regime: str = "CHOP",  # EPIC v3.4 Story 6
     ) -> Tuple[bool, str, Optional[PairDecisionTrace]]:
         """
         Check if entry is allowed for this symbol based on indicators
@@ -301,6 +333,13 @@ class SmartEntryFilter:
             ind: CandleIndicators with all technical data
             exchange: Exchange name (for trace)
             trace_enabled: Enable decision tracing
+            order_size_eur: Order size for depth checks
+            bid_price: Optional bid price override
+            ask_price: Optional ask price override
+            vwap_slope_15m_pct: VWAP momentum slope (EPIC v3.4)
+            accel_5m_pct: 5-minute price acceleration (EPIC v3.4)
+            accel_15m_pct: 15-minute price acceleration (EPIC v3.4)
+            regime: Market regime (BULL/CHOP/BEAR) (EPIC v3.4)
 
         Returns:
             Tuple of (allowed: bool, reason: str, trace: Optional[PairDecisionTrace])

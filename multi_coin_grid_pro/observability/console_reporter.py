@@ -6,6 +6,7 @@ Phase 4.1: US-E3.x "Why No Trade?" v2 - Operator Grade
 """
 
 import logging
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -139,6 +140,9 @@ class ConsoleReporter:
                     f"   {idx}. {opp['symbol']:15s} {opp['count']:4d} times"
                 )
 
+        # Show momentum guard evaluation statistics
+        self._report_momentum_guards(hours=hours)
+
         self._log("=" * 70 + "\n")
 
     def report_by_stage(self, hours: int = 24):
@@ -243,6 +247,61 @@ class ConsoleReporter:
         except Exception as e:
             self.logger.error(f"Error generating Why-No-Trade v2 report: {e}")
             self._log(f"[ERROR] Failed to generate v2 report: {e}")
+
+    def _report_momentum_guards(self, hours: int = 24):
+        """
+        Report momentum guard evaluation statistics.
+
+        Args:
+            hours: Number of hours to analyze
+        """
+        summaries = self.aggregator.aggregate_hourly(hours=hours)
+
+        # Aggregate momentum stats across all periods
+        total_evaluations = 0
+        total_passed = 0
+        total_failed = 0
+        guard_aggregates = defaultdict(lambda: {'total': 0, 'passed': 0, 'failed': 0})
+
+        for summary in summaries:
+            if not summary.momentum_guard_stats:
+                continue
+
+            stats = summary.momentum_guard_stats
+            total_evaluations += stats['total_evaluations']
+            total_passed += stats['passed']
+            total_failed += stats['failed']
+
+            for guard_name, guard_stats in stats['by_guard'].items():
+                guard_aggregates[guard_name]['total'] += guard_stats['total']
+                guard_aggregates[guard_name]['passed'] += guard_stats['passed']
+                guard_aggregates[guard_name]['failed'] += guard_stats['failed']
+
+        if total_evaluations == 0:
+            return  # No momentum guard evaluations to report
+
+        self._log("\n📊 Momentum Guard Evaluations:")
+        self._log(f"   Total: {total_evaluations} evaluations")
+        pass_rate = (total_passed / total_evaluations * 100) if total_evaluations > 0 else 0
+        self._log(f"   Passed: {total_passed} ({pass_rate:.1f}%)")
+        self._log(f"   Failed: {total_failed} ({100 - pass_rate:.1f}%)")
+
+        if guard_aggregates:
+            self._log("\n   By Guard Type:")
+            # Sort by total evaluations descending
+            sorted_guards = sorted(
+                guard_aggregates.items(),
+                key=lambda x: x[1]['total'],
+                reverse=True
+            )
+            for guard_name, stats in sorted_guards:
+                guard_pass_rate = (stats['passed'] / stats['total'] * 100) if stats['total'] > 0 else 0
+                self._log(
+                    f"     • {guard_name:30s} "
+                    f"{stats['total']:5d} evals, "
+                    f"{stats['passed']:5d} passed ({guard_pass_rate:5.1f}%), "
+                    f"{stats['failed']:5d} failed"
+                )
 
     def _print_summary(self, summary: PeriodSummary):
         """

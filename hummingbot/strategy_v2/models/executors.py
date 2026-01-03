@@ -21,6 +21,37 @@ class CloseType(Enum):
     NO_PROGRESS_TIMEOUT = 12       # No progress after no_progress_timeout_sec → unwind
     HARD_CAP_TIME_LIMIT = 13       # Hit max_hold_time_seconds → forced unwind
     RISK_KILL_SWITCH = 14          # Global risk manager triggered → emergency unwind
+    # Story B1: Manual close
+    MANUAL = 15                    # Manual forced close by operator
+    # Story B2: Switch close (coin swap)
+    SWITCH = 16                    # Position closed to switch to different coin
+
+
+# Story B1: Close reason priority for idempotent forced exits
+# Higher priority = keeps reason if multiple forced closes triggered
+# (e.g., RISK_KILL_SWITCH overrides TIME_LIMIT)
+CLOSE_TYPE_PRIORITY = {
+    CloseType.RISK_KILL_SWITCH: 100,      # Highest priority - risk override
+    CloseType.STOP_LOSS: 90,              # High priority - hard loss limit
+    CloseType.HARD_CAP_TIME_LIMIT: 80,    # High priority - absolute time limit
+    CloseType.TIME_LIMIT: 70,             # Medium-high priority - triple barrier time
+    CloseType.NO_PROGRESS_TIMEOUT: 60,    # Medium priority - stagnation
+    CloseType.NO_FILL_TIMEOUT: 50,        # Lower priority - never got filled
+    CloseType.MANUAL: 40,                 # Lower priority - operator requested
+    CloseType.TRAILING_STOP: 30,          # Low priority - profit protection
+    CloseType.INSUFFICIENT_BALANCE: 20,   # Very low priority - balance issue
+    CloseType.TAKE_PROFIT: 10,            # Lowest priority - normal completion
+    CloseType.COMPLETED: 10,
+    CloseType.EARLY_STOP: 10,
+    CloseType.EXPIRED: 10,
+    CloseType.FAILED: 10,
+    CloseType.POSITION_HOLD: 10,
+}
+
+
+def get_close_type_priority(close_type: CloseType) -> int:
+    """Get priority for a close type (higher = more important)"""
+    return CLOSE_TYPE_PRIORITY.get(close_type, 0)
 
 
 class TrackedOrder:

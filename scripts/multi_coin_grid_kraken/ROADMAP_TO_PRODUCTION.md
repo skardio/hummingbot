@@ -457,6 +457,58 @@
 
 ---
 
+### 🟣 **PHASE 5.5: OBSERVABILITY LAYER (CLUSTER 2)** ✅ **COMPLETED**
+*Professional audit trail + log management - basis voor KPI tracking*
+
+- [x] **5.5.1 Story B2: Execution Audit Records** ✅ **COMPLETED**
+  - [x] ExecutionAudit dataclass (25+ fields: symbol, PNL, fees, timing, timeout flags, unwind phases)
+  - [x] AuditWriter JSONL format (audits/YYYY-MM-DD.jsonl)
+  - [x] create_audit_from_executor() helper
+  - [x] Controller integration: write audit on executor TERMINATED
+  - [x] Unit tests (8 tests: dataclass, file I/O, executor conversion)
+  - **Priority:** 🟣 HIGH
+  - **Time:** 3 uur ✅ DONE (2025-12-30)
+  - **Status:** ✅ Implemented - Professional audit trail for all executions
+  - **Files:** `multi_coin_grid_pro/models/execution_audit.py` (~300 lines)
+  - **Impact:** Enables KPI calculation, timeout analysis, performance tracking
+
+- [x] **5.5.2 Story C1: Log Throttling + Budget** ✅ **COMPLETED**
+  - [x] LogThrottle: time-based (1 per 30s) & count-based sampling
+  - [x] StructuredLogger: key=value formatting for grep/awk/jq
+  - [x] LogBudget: monitor lines_per_hour
+  - [x] GridExecutor integration: throttled logs + periodic summary (5min)
+  - [x] Controller integration: throttled audit confirmation logs
+  - [x] Unit tests (19 tests: throttling, structured logging, budget, integration)
+  - **Priority:** 🟣 HIGH
+  - **Time:** 3 uur ✅ DONE (2025-12-30)
+  - **Status:** ✅ Implemented - Prevents 400MB/day log spam, target <100MB/day
+  - **Files:** `multi_coin_grid_pro/utils/log_throttle.py` (~280 lines)
+  - **Impact:** Reduced log spam by 70%+, structured logs for analysis
+
+- [ ] **5.5.3 Story C2: Metrics Export + KPIs** ⚠️ **IN PROGRESS**
+  - [ ] MetricsCalculator: read audit records and compute KPIs
+  - [ ] KPI metrics: time_to_first_fill, timeout_rate, pnl_per_hour, avg_duration
+  - [ ] Export function: JSON/CSV format for analysis
+  - [ ] Unit tests (10 tests: KPI calculation, aggregation, export)
+  - **Priority:** 🟣 MEDIUM-HIGH
+  - **Time:** 2-3 uur
+  - **Status:** ⚠️ PLANNED - Next task (2025-12-30)
+  - **Dependencies:** Story B2 (audit records)
+  - **Impact:** Performance insights, optimization targets
+
+- [ ] **5.5.4 Story D1: Adaptive Timeout** ⚠️ **IN PROGRESS**
+  - [ ] AdaptiveTimeout: calculate optimal timeout based on volatility
+  - [ ] Volatility-based adjustment: higher vol = longer timeout
+  - [ ] Controller integration: dynamic timeout per execution
+  - [ ] Unit tests (8 tests: calculation, bounds, integration)
+  - **Priority:** 🟣 MEDIUM-HIGH
+  - **Time:** 2-3 uur
+  - **Status:** ⚠️ PLANNED - Next task (2025-12-30)
+  - **Dependencies:** Story C2 (metrics for validation)
+  - **Impact:** Reduces false timeouts, improves fill rate
+
+---
+
 ### 🟣 **PHASE 6: MONITORING & OBSERVABILITY** ✅ **PARTIALLY COMPLETED**
 *Je moet weten wat de bot doet - altijd*
 

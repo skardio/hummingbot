@@ -45,6 +45,7 @@ class PeriodSummary:
     top_rejections: List[RejectionStats]
     rejections_by_stage: Dict[str, int]
     rejections_by_symbol: Dict[str, int]
+    momentum_guard_stats: Optional[Dict[str, any]] = None
 
     def __str__(self):
         lines = [
@@ -238,6 +239,9 @@ class EventAggregator:
 
         denial_rate = (denied / total_intents * 100) if total_intents > 0 else 0
 
+        # Aggregate momentum guard evaluation statistics
+        momentum_stats = self._aggregate_momentum_guards(events)
+
         return PeriodSummary(
             period=period,
             total_intents=total_intents,
@@ -246,7 +250,8 @@ class EventAggregator:
             denial_rate=denial_rate,
             top_rejections=top_rejections,
             rejections_by_stage=dict(rejections_by_stage),
-            rejections_by_symbol=dict(rejections_by_symbol)
+            rejections_by_symbol=dict(rejections_by_symbol),
+            momentum_guard_stats=momentum_stats
         )
 
     def get_summary_stats(
@@ -296,6 +301,55 @@ class EventAggregator:
             'total_approved': total_approved,
             'denial_rate': (total_denied / total_intents * 100) if total_intents > 0 else 0,
             'top_rejection_reasons': top_reasons
+        }
+
+    def _aggregate_momentum_guards(self, events: List[dict]) -> Dict[str, any]:
+        """
+        Aggregate momentum guard evaluation statistics.
+
+        Args:
+            events: List of event dictionaries
+
+        Returns:
+            Dictionary with momentum guard statistics
+        """
+        guard_events = [e for e in events if e.get('event_type') == 'entry_guard_evaluation']
+
+        if not guard_events:
+            return None
+
+        total_evaluations = len(guard_events)
+        passed = sum(1 for e in guard_events if e.get('passed', False))
+        failed = total_evaluations - passed
+
+        # Count by guard name
+        guard_counts = Counter()
+        guard_pass_rates = defaultdict(lambda: {'passed': 0, 'total': 0})
+
+        for event in guard_events:
+            guard_name = event.get('guard_name', 'UNKNOWN')
+            guard_counts[guard_name] += 1
+            guard_pass_rates[guard_name]['total'] += 1
+            if event.get('passed', False):
+                guard_pass_rates[guard_name]['passed'] += 1
+
+        # Calculate pass rates
+        guard_stats = {}
+        for guard_name, counts in guard_pass_rates.items():
+            pass_rate = (counts['passed'] / counts['total'] * 100) if counts['total'] > 0 else 0
+            guard_stats[guard_name] = {
+                'total': counts['total'],
+                'passed': counts['passed'],
+                'failed': counts['total'] - counts['passed'],
+                'pass_rate': pass_rate
+            }
+
+        return {
+            'total_evaluations': total_evaluations,
+            'passed': passed,
+            'failed': failed,
+            'pass_rate': (passed / total_evaluations * 100) if total_evaluations > 0 else 0,
+            'by_guard': guard_stats
         }
 
     def get_missed_opportunities(

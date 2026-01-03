@@ -24,6 +24,13 @@ from hummingbot.strategy_v2.models.base import RunnableStatus
 from hummingbot.strategy_v2.models.executors import CloseType, TrackedOrder
 from hummingbot.strategy_v2.utils.distributions import Distributions
 
+# Story C1: Log Throttling - prevent executor spam
+try:
+    from multi_coin_grid_pro.utils.log_throttle import StructuredLogger, should_log
+    HAS_LOG_THROTTLE = True
+except ImportError:
+    HAS_LOG_THROTTLE = False
+
 
 class GridExecutor(ExecutorBase):
     _logger = None
@@ -89,6 +96,10 @@ class GridExecutor(ExecutorBase):
         self._close_balance_retry_interval = 1.0  # seconds between balance refresh attempts
         self._close_balance_max_retries = 5  # how many times we wait for locked balances
 
+        # Insufficient funds retry tracking (prevents infinite loops)
+        self._insufficient_funds_retries = 0
+        self._max_insufficient_funds_retries = 3  # After 3 attempts, mark executor as failed
+
         # Cancel retry backoff tracking (BITGET FIX)
         # Prevents excessive cancel retries when exchange is slow to confirm
         self._cancel_request_times = {}  # order_id -> last cancel request timestamp
@@ -114,6 +125,17 @@ class GridExecutor(ExecutorBase):
         self._timeout_close_triggered = False  # Guard: prevent double close from timeouts
         self._timeout_close_type = None  # Which timeout triggered: NO_FILL / NO_PROGRESS / HARD_CAP
         self._force_aggressive_close = False  # Bounded close: escalate to market order after grace period
+        # ==============================================================================
+
+        # ==============================================================================
+        # STORY B1: Two-Phase Unwind Protocol (Graceful → Aggressive Fallback)
+        # ==============================================================================
+        self._unwind_phase = "NONE"  # "NONE" | "GRACEFUL" | "AGGRESSIVE"
+        self._unwind_close_reason = None  # CloseType for forced exit
+        self._unwind_started_ts = None  # Timestamp when unwind started
+        self._unwind_attempts = 0  # Number of unwind attempts
+        self._graceful_close_orders = set()  # Track graceful close order IDs
+        self._aggressive_close_orders = set()  # Track aggressive close order IDs
         # ==============================================================================
 
     @property
@@ -457,15 +479,30 @@ class GridExecutor(ExecutorBase):
         if no_fill_timeout > 0 and self._last_fill_timestamp is None and age_sec >= no_fill_timeout:
             self.logger().warning(
                 f"⏰ NO_FILL_TIMEOUT triggered: {self.config.trading_pair} | "
-                f"age={age_sec / 60:.1f}m >= {no_fill_timeout / 60:.1f}m | No fills received | "
-                f"Cancelling orders + closing executor"
+                f"age={age_sec / 60:.1f}m >= {no_fill_timeout / 60:.1f}m | No fills received"
             )
             self._timeout_close_triggered = True
             self._timeout_close_type = CloseType.NO_FILL_TIMEOUT
             self.close_type = CloseType.NO_FILL_TIMEOUT
-            # Cancel all open orders and mark for shutdown (no inventory to unwind)
-            self.cancel_open_orders()
-            self._status = RunnableStatus.SHUTTING_DOWN
+
+            # 🔧 CRITICAL FIX: Check if there's inventory before skipping unwind
+            # Even with no last_fill_timestamp, partial fills might exist (e.g., from inflight orders)
+            self.update_position_metrics()
+
+            if self.position_size_base >= self.trading_rules.min_order_size:
+                # Have inventory - must close position with two-phase unwind
+                self.logger().warning(
+                    f"⚠️  NO_FILL_TIMEOUT but have inventory: {float(self.position_size_base):.6f} "
+                    f"{self.config.trading_pair.split('-')[0]} - starting forced close to prevent stuck position"
+                )
+                self.start_forced_close(CloseType.NO_FILL_TIMEOUT)
+            else:
+                # No inventory - safe to shutdown directly
+                self.logger().info(
+                    "✅ NO_FILL_TIMEOUT with no inventory - safe shutdown"
+                )
+                self.cancel_open_orders()
+                self._status = RunnableStatus.SHUTTING_DOWN
             return True
 
         # Check 2: No-progress timeout (stalled - have fills but no completed levels)
@@ -477,10 +514,8 @@ class GridExecutor(ExecutorBase):
             )
             self._timeout_close_triggered = True
             self._timeout_close_type = CloseType.NO_PROGRESS_TIMEOUT
-            self.close_type = CloseType.NO_PROGRESS_TIMEOUT
-            # Start graceful close (cancel orders + unwind inventory)
-            self.cancel_open_orders()
-            self._status = RunnableStatus.CLOSING
+            # Story B1: Start two-phase unwind protocol (graceful → aggressive)
+            self.start_forced_close(CloseType.NO_PROGRESS_TIMEOUT)
             return True
 
         # Check 3: Hard cap (max hold time)
@@ -492,10 +527,8 @@ class GridExecutor(ExecutorBase):
             )
             self._timeout_close_triggered = True
             self._timeout_close_type = CloseType.HARD_CAP_TIME_LIMIT
-            self.close_type = CloseType.HARD_CAP_TIME_LIMIT
-            # Start graceful close (cancel orders + unwind inventory)
-            self.cancel_open_orders()
-            self._status = RunnableStatus.CLOSING
+            # Story B1: Start two-phase unwind protocol (graceful → aggressive)
+            self.start_forced_close(CloseType.HARD_CAP_TIME_LIMIT)
             return True
 
         return False
@@ -546,6 +579,327 @@ class GridExecutor(ExecutorBase):
         return False
 
     # ==============================================================================
+    # STORY B1: Two-Phase Unwind Protocol (Graceful → Aggressive Fallback)
+    # ==============================================================================
+
+    def start_forced_close(self, close_reason: CloseType) -> None:
+        """
+        Story B1: Start forced close with two-phase protocol (graceful → aggressive).
+
+        This method is idempotent - can be called multiple times with different reasons.
+        Higher priority reason wins (e.g., RISK_KILL_SWITCH > STOP_LOSS > TIME_LIMIT).
+
+        Args:
+            close_reason: CloseType indicating why we're forcing close
+
+        Flow:
+            1. Check idempotency (already closing with higher priority reason?)
+            2. Cancel non-essential open orders
+            3. Start graceful phase (maker/limit close orders)
+            4. Transition to CLOSING status
+        """
+        from hummingbot.strategy_v2.models.executors import get_close_type_priority
+
+        # Skip if already fully closed
+        if self._status == RunnableStatus.TERMINATED:
+            self.logger().debug(
+                f"Story B1: Ignoring start_forced_close({close_reason}) - executor already terminated"
+            )
+            return
+
+        # Idempotency: Check if already unwinding with higher priority reason
+        if self._unwind_phase != "NONE" and self._unwind_close_reason is not None:
+            current_priority = get_close_type_priority(self._unwind_close_reason)
+            new_priority = get_close_type_priority(close_reason)
+
+            if new_priority <= current_priority:
+                self.logger().debug(
+                    f"Story B1: Ignoring start_forced_close({close_reason}, priority={new_priority}) - "
+                    f"already unwinding with {self._unwind_close_reason} (priority={current_priority})"
+                )
+                return
+            else:
+                self.logger().warning(
+                    f"🔄 Story B1: Upgrading unwind reason from {self._unwind_close_reason} "
+                    f"(priority={current_priority}) to {close_reason} (priority={new_priority})"
+                )
+
+        # Initialize unwind state
+        if self._unwind_phase == "NONE":
+            self._unwind_started_ts = self._strategy.current_timestamp
+            self._unwind_attempts = 0
+
+        self._unwind_close_reason = close_reason
+        self.close_type = close_reason
+
+        # Get current inventory
+        self.update_position_metrics()
+        remaining_inventory = self.position_size_base
+
+        # Log unwind start
+        self.logger().info(
+            f"🚨 UNWIND_PHASE_START phase=GRACEFUL reason={close_reason.name} "
+            f"pair={self.config.trading_pair} inv={float(remaining_inventory):.6f}"
+        )
+
+        # Step 1: Cancel all non-essential open orders (buy orders for LONG grid)
+        self._cancel_non_essential_orders()
+
+        # Step 2: Start graceful phase
+        self._unwind_phase = "GRACEFUL"
+
+        # If no inventory, skip directly to shutdown
+        if remaining_inventory < self.trading_rules.min_order_size:
+            self.logger().info(
+                f"✅ UNWIND_DONE reason={close_reason.name} inv=0 (no position to close)"
+            )
+            self._status = RunnableStatus.SHUTTING_DOWN
+            self._unwind_phase = "DONE"
+            return
+
+        # Step 3: Place graceful close orders (maker/limit)
+        self._place_graceful_close_orders(remaining_inventory)
+
+        # Step 4: Transition to CLOSING status
+        if self._status != RunnableStatus.CLOSING:
+            self._status = RunnableStatus.CLOSING
+
+        self._unwind_attempts += 1
+
+    def _cancel_non_essential_orders(self) -> None:
+        """Cancel all open buy orders (for LONG grid) that aren't close orders."""
+        # Cancel all open orders in the grid (these are entry orders)
+        open_order_levels = self.levels_by_state.get(GridLevelStates.OPEN_ORDER_PLACED, [])
+
+        for level in open_order_levels:
+            # 🔧 FIX: Use correct attribute name 'active_open_order' not 'open_order'
+            if level.active_open_order and level.active_open_order.order_id:
+                self.logger().debug(
+                    f"Story B1: Cancelling non-essential order {level.active_open_order.order_id} "
+                    f"at price {level.price}"  # 🔧 FIX: Use 'level.price' not 'level.start_price'
+                )
+                self._strategy.cancel(
+                    connector_name=self.config.connector_name,
+                    trading_pair=self.config.trading_pair,
+                    order_id=level.active_open_order.order_id
+                )
+
+    def _place_graceful_close_orders(self, inventory: Decimal) -> None:
+        """
+        Place maker/limit close orders for remaining inventory.
+
+        Uses best bid/ask with slight offset to avoid being maker but still competitive.
+        """
+        if inventory < self.trading_rules.min_order_size:
+            return
+
+        try:
+            # Get current price for close order
+            close_price = self.get_price(
+                self.config.connector_name,
+                self.config.trading_pair,
+                self.close_order_price_type  # Best ask for SELL (long close)
+            )
+
+            # Add small offset to improve fill probability while staying maker
+            # For SELL: use ask + 0.05% (slightly above best ask)
+            price_offset = Decimal("1.0005") if self.close_order_side == TradeType.SELL else Decimal("0.9995")
+            adjusted_price = close_price * price_offset
+
+            # Quantize price to trading rules
+            adjusted_price = self.connectors[self.config.connector_name].quantize_order_price(
+                self.config.trading_pair, adjusted_price
+            )
+
+            # Quantize amount to trading rules
+            quantized_amount = self.connectors[self.config.connector_name].quantize_order_amount(
+                self.config.trading_pair, inventory
+            )
+
+            # Ensure amount meets minimum order size
+            if quantized_amount < self.trading_rules.min_order_size:
+                self.logger().warning(
+                    f"Story B1: Graceful close amount {quantized_amount} < min {self.trading_rules.min_order_size}"
+                )
+                return
+
+            self.logger().info(
+                f"📤 Story B1: Placing graceful close order | "
+                f"side={self.close_order_side.name} amount={float(quantized_amount):.6f} "
+                f"price={float(adjusted_price):.6f}"
+            )
+
+            # Place limit maker order
+            order_id = self.place_order(
+                connector_name=self.config.connector_name,
+                trading_pair=self.config.trading_pair,
+                order_type=OrderType.LIMIT,  # Maker order for graceful close
+                side=self.close_order_side,
+                amount=quantized_amount,
+                price=adjusted_price
+            )
+
+            if order_id:
+                self._graceful_close_orders.add(order_id)
+                self._close_order_id = order_id  # Track for existing logic compatibility
+                self._closing_in_progress = True
+
+        except Exception as e:
+            self.logger().error(f"❌ Story B1: Failed to place graceful close order: {e}")
+
+    def _check_unwind_phase_transition(self) -> None:
+        """
+        Check if we should transition from GRACEFUL to AGGRESSIVE phase.
+        Called from control_task when in CLOSING status.
+        """
+        if self._unwind_phase != "GRACEFUL":
+            return
+
+        # Get close_grace_sec from config
+        custom_info = self.config.custom_info or {}
+        close_grace_sec = custom_info.get('close_grace_sec', 120)  # Default 2 min
+
+        # Check if grace period expired
+        now = self._strategy.current_timestamp
+        time_in_graceful = now - self._unwind_started_ts
+
+        if time_in_graceful >= close_grace_sec:
+            # Check if we still have inventory
+            self.update_position_metrics()
+            remaining_inventory = self.position_size_base
+
+            if remaining_inventory >= self.trading_rules.min_order_size:
+                self.logger().warning(
+                    f"⚠️  UNWIND_PHASE_START phase=AGGRESSIVE reason={self._unwind_close_reason.name} | "
+                    f"Graceful phase failed after {time_in_graceful:.0f}s | "
+                    f"Remaining inv={float(remaining_inventory):.6f} | "
+                    f"Escalating to aggressive close"
+                )
+
+                # Cancel all graceful close orders
+                self._cancel_graceful_close_orders()
+
+                # Transition to aggressive phase
+                self._unwind_phase = "AGGRESSIVE"
+
+                # Place aggressive close order (market or IOC)
+                self._place_aggressive_close_orders(remaining_inventory)
+
+    def _cancel_graceful_close_orders(self) -> None:
+        """Cancel all graceful close orders."""
+        for order_id in list(self._graceful_close_orders):
+            try:
+                self._strategy.cancel(
+                    connector_name=self.config.connector_name,
+                    trading_pair=self.config.trading_pair,
+                    order_id=order_id
+                )
+                self.logger().debug(f"Story B1: Cancelled graceful close order {order_id}")
+            except Exception as e:
+                self.logger().warning(f"Could not cancel graceful order {order_id}: {e}")
+
+        self._graceful_close_orders.clear()
+        self._closing_in_progress = False
+        self._close_order_id = None
+
+    def _place_aggressive_close_orders(self, inventory: Decimal) -> None:
+        """
+        Place aggressive close orders (market or taker IOC) for remaining inventory.
+
+        Uses config aggressive_close_method to determine order type.
+        """
+        if inventory < self.trading_rules.min_order_size:
+            return
+
+        try:
+            # Get config for aggressive close
+            custom_info = self.config.custom_info or {}
+            close_method = custom_info.get('aggressive_close_method', 'MARKET')
+            slippage_guard_pct = custom_info.get('aggressive_close_slippage_guard_pct', Decimal("0.30"))
+
+            # Quantize amount
+            quantized_amount = self.connectors[self.config.connector_name].quantize_order_amount(
+                self.config.trading_pair, inventory
+            )
+
+            if quantized_amount < self.trading_rules.min_order_size:
+                self.logger().warning(
+                    f"Story B1: Aggressive close amount {quantized_amount} < min {self.trading_rules.min_order_size}"
+                )
+                return
+
+            if close_method == "MARKET":
+                # Place market order (no price needed for market orders, but some exchanges require it)
+                self.logger().warning(
+                    f"🚨 Story B1: Placing MARKET close order | "
+                    f"side={self.close_order_side.name} amount={float(quantized_amount):.6f}"
+                )
+
+                # Get current price for market order (some exchanges need it even for market orders)
+                try:
+                    current_price = self.get_price(
+                        self.config.connector_name,
+                        self.config.trading_pair,
+                        self.close_order_price_type
+                    )
+                except Exception:
+                    current_price = self.mid_price if self.mid_price else Decimal("0")
+
+                order_id = self._strategy.place_order(
+                    connector_name=self.config.connector_name,
+                    trading_pair=self.config.trading_pair,
+                    order_type=OrderType.MARKET,
+                    side=self.close_order_side,
+                    amount=quantized_amount,
+                    price=current_price  # Ignored by market orders but required by some connectors
+                )
+
+            else:  # TAKER_LIMIT_IOC
+                # Place IOC limit order with slippage guard
+                current_price = self.get_price(
+                    self.config.connector_name,
+                    self.config.trading_pair,
+                    self.close_order_price_type
+                )
+
+                # Apply slippage: For SELL, go below best bid. For BUY, go above best ask.
+                slippage_mult = (Decimal("1") - slippage_guard_pct / Decimal("100")) \
+                    if self.close_order_side == TradeType.SELL \
+                    else (Decimal("1") + slippage_guard_pct / Decimal("100"))
+
+                aggressive_price = current_price * slippage_mult
+
+                # Quantize price
+                aggressive_price = self.connectors[self.config.connector_name].quantize_order_price(
+                    self.config.trading_pair, aggressive_price
+                )
+
+                self.logger().warning(
+                    f"🚨 Story B1: Placing IOC close order | "
+                    f"side={self.close_order_side.name} amount={float(quantized_amount):.6f} "
+                    f"price={float(aggressive_price):.6f} (slippage={float(slippage_guard_pct):.2f}%)"
+                )
+
+                order_id = self.place_order(
+                    connector_name=self.config.connector_name,
+                    trading_pair=self.config.trading_pair,
+                    order_type=OrderType.LIMIT,  # IOC is usually a limit order flag
+                    side=self.close_order_side,
+                    amount=quantized_amount,
+                    price=aggressive_price,
+                    # Note: IOC flag depends on connector - some use position_action=CLOSE
+                )
+
+            if order_id:
+                self._aggressive_close_orders.add(order_id)
+                self._close_order_id = order_id
+                self._closing_in_progress = True
+                self._force_aggressive_close = True  # Set flag for existing logic compatibility
+
+        except Exception as e:
+            self.logger().error(f"❌ Story B1: Failed to place aggressive close order: {e}")
+
+    # ==============================================================================
 
     async def control_task(self):
         """
@@ -580,6 +934,9 @@ class GridExecutor(ExecutorBase):
                     order_id=orders_id_to_cancel
                 )
         elif self.status == RunnableStatus.CLOSING:
+            # Story B1: Check if we should transition from graceful to aggressive phase
+            self._check_unwind_phase_transition()
+
             # Story A1: Check if we should escalate to aggressive close
             if self._check_bounded_close_escalation():
                 # Escalation triggered - bounded close will force market order on next iteration
@@ -636,10 +993,12 @@ class GridExecutor(ExecutorBase):
                             self._status = RunnableStatus.SHUTTING_DOWN
                             self._closing_in_progress = False
                         else:
-                            self.logger().debug(
-                                f"⏳ PHASE 3.5: Close order pending - order_id: {self._close_order_id}, "
-                                f"balance: {available_balance} {base_asset}, min_order: {min_order_size} {base_asset}"
-                            )
+                            # Story C1: Throttle position check log to max 1 per 120s per executor
+                            if HAS_LOG_THROTTLE and should_log(f"close_pending_{self.config.id}", interval_sec=120):
+                                self.logger().debug(
+                                    f"⏳ PHASE 3.5: Close order pending - order_id: {self._close_order_id}, "
+                                    f"balance: {available_balance} {base_asset}, min_order: {min_order_size} {base_asset}"
+                                )
                 except Exception as e:
                     self.logger().warning(f"⚠️  Could not check close progress: {e}")
             else:
@@ -649,6 +1008,23 @@ class GridExecutor(ExecutorBase):
                 self._closing_in_progress = False
         elif self.status == RunnableStatus.SHUTTING_DOWN:
             await self.control_shutdown_process()
+
+        # Story C1: Periodic throttled summary log (max 1 per 300s = 5min per executor)
+        if HAS_LOG_THROTTLE and should_log(f"executor_summary_{self.config.id}", interval_sec=300):
+            try:
+                slog = StructuredLogger(self.logger())
+                slog.info(
+                    "EXECUTOR_SUMMARY",
+                    symbol=self.config.trading_pair,
+                    status=self.status.name,
+                    pnl_net=float(self.net_pnl_quote) if hasattr(self, 'net_pnl_quote') else 0.0,
+                    open_fills=len(self.open_fills),
+                    close_fills=len(self.close_fills) if hasattr(self, 'close_fills') else 0,
+                    phase=getattr(self, '_unwind_phase', 'N/A')
+                )
+            except Exception:
+                pass  # Silently skip if summary fails
+
         self.evaluate_max_retries()
 
     def early_stop(self, keep_position: bool = False):
@@ -787,6 +1163,16 @@ class GridExecutor(ExecutorBase):
                 # Regular shutdown process for non-held positions
                 order_execution_completed = self.position_size_base == Decimal("0")
                 if order_execution_completed:
+                    # Story B1: Log unwind completion if we were in unwind mode
+                    if self._unwind_phase in ["GRACEFUL", "AGGRESSIVE"]:
+                        self.logger().info(
+                            f"✅ UNWIND_DONE reason={self._unwind_close_reason.name if self._unwind_close_reason else 'UNKNOWN'} "
+                            f"phase={self._unwind_phase} inv=0 "
+                            f"realized_pnl={float(self.realized_pnl_quote):.4f} "
+                            f"fees={float(self.realized_fees_quote):.4f}"
+                        )
+                        self._unwind_phase = "DONE"
+
                     for level in self.levels_by_state[GridLevelStates.OPEN_ORDER_FILLED]:
                         if level.active_open_order and level.active_open_order.order:
                             self._filled_orders.append(level.active_open_order.order.to_json())
@@ -819,7 +1205,11 @@ class GridExecutor(ExecutorBase):
                                                        self._close_order.order_id) if not self._close_order.order else self._close_order.order
             if in_flight_order:
                 self._close_order.order = in_flight_order
-                self.logger().info("Waiting for close order to be filled")
+                # Story C1: Throttle this log to max 1 per 60s per executor
+                if HAS_LOG_THROTTLE and should_log(f"close_wait_{self.config.id}", interval_sec=60):
+                    self.logger().info("Waiting for close order to be filled")
+                elif not HAS_LOG_THROTTLE:
+                    self.logger().debug("Waiting for close order to be filled")  # Downgrade to debug if no throttle
             else:
                 self._failed_orders.append(self._close_order.order_id)
                 self._close_order = None
@@ -906,8 +1296,10 @@ class GridExecutor(ExecutorBase):
 
                 # If available balance is less than order amount, adjust to available balance
                 if available_balance < order_candidate.amount:
-                    min_order_size = self._strategy.market_data_provider.get_order_size_quantum(
-                        self.config.connector_name, self.config.trading_pair, order_candidate.amount
+                    # Get connector instance to call get_order_size_quantum (needs connector interface, not MDP)
+                    connector = self._strategy.connectors[self.config.connector_name]
+                    min_order_size = connector.get_order_size_quantum(
+                        self.config.trading_pair, order_candidate.amount
                     )
 
                     if available_balance >= min_order_size:
@@ -945,6 +1337,14 @@ class GridExecutor(ExecutorBase):
             )
             level.active_close_order = TrackedOrder(order_id=order_id)
             self.logger().debug(f"Executor ID: {self.config.id} - Placing close order {order_id}")
+
+            # Reset insufficient funds counter on successful order placement
+            if self._insufficient_funds_retries > 0:
+                self.logger().debug(
+                    f"✅ Close order placed successfully, resetting insufficient funds counter "
+                    f"(was: {self._insufficient_funds_retries})"
+                )
+                self._insufficient_funds_retries = 0
 
     def get_take_profit_price(self, level: GridLevel):
         return level.price * (1 + level.take_profit) if self.config.side == TradeType.BUY else level.price * (1 - level.take_profit)
@@ -1241,10 +1641,24 @@ class GridExecutor(ExecutorBase):
         This method is responsible for controlling the take profit. It will check if the net pnl percentage is greater
         than the take profit percentage and place the close order.
 
-        :return: None
+        CRITICAL FIX: Limits close orders to 1 per batch to prevent "Insufficient funds" race conditions
+        when multiple levels try to sell the same inventory simultaneously.
+
+        :return: List of levels that need close orders
         """
         close_orders_proposal = []
         open_orders_filled = self.levels_by_state[GridLevelStates.OPEN_ORDER_FILLED]
+
+        # Count existing close orders being processed
+        n_close_orders_pending = len(
+            [level.active_close_order for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
+        )
+
+        # CRITICAL: Only allow 1 close order at a time to prevent balance race conditions
+        # If we already have a close order pending, don't create more
+        if n_close_orders_pending >= 1:
+            return []
+
         for level in open_orders_filled:
             if self.config.activation_bounds:
                 tp_to_mid = abs(self.get_take_profit_price(level) - self.mid_price) / self.mid_price
@@ -1252,7 +1666,10 @@ class GridExecutor(ExecutorBase):
                     close_orders_proposal.append(level)
             else:
                 close_orders_proposal.append(level)
-        return close_orders_proposal
+
+        # CRITICAL: Return max 1 close order at a time (serialize close orders)
+        # This prevents race conditions where multiple levels try to sell same inventory
+        return close_orders_proposal[:1] if close_orders_proposal else []
 
     def get_open_order_ids_to_cancel(self):
         if self.config.activation_bounds:
@@ -2185,10 +2602,23 @@ class GridExecutor(ExecutorBase):
                 # BUG FIX: If this is an insufficient funds error, log warning and mark executor for shutdown
                 # This prevents infinite retry loops with wrong amounts
                 if is_insufficient_funds:
+                    self._insufficient_funds_retries += 1
                     self.logger().warning(
-                        f"⚠️ Executor {self.config.id[:8]}... Close order failed with 'Insufficient funds'. "
+                        f"⚠️ Executor {self.config.id[:8]}... Close order failed with 'Insufficient funds' "
+                        f"(retry {self._insufficient_funds_retries}/{self._max_insufficient_funds_retries}). "
                         f"This likely means position was already sold. Resetting close state."
                     )
+
+                    # If we hit max retries, terminate to prevent infinite loop
+                    if self._insufficient_funds_retries >= self._max_insufficient_funds_retries:
+                        self.logger().error(
+                            f"❌ Executor {self.config.id[:8]}... Insufficient funds errors exceeded max retries "
+                            f"({self._max_insufficient_funds_retries}). Terminating executor."
+                        )
+                        self._status = RunnableStatus.TERMINATED
+                        self.close_type = CloseType.FAILED
+                        return
+
                     # Phase 3+: Reset guard to allow retry with fresh balance check
                     self._closing_in_progress = False
                     self._close_order_id = None
@@ -2199,11 +2629,21 @@ class GridExecutor(ExecutorBase):
 
             # BUG FIX: Same insufficient funds handling for main close order
             if is_insufficient_funds:
+                self._insufficient_funds_retries += 1
                 self.logger().warning(
-                    f"⚠️ Executor {self.config.id[:8]}... Main close order failed with 'Insufficient funds'. "
+                    f"⚠️ Executor {self.config.id[:8]}... Main close order failed with 'Insufficient funds' "
+                    f"(retry {self._insufficient_funds_retries}/{self._max_insufficient_funds_retries}). "
                     f"Marking executor as complete to prevent retries."
                 )
-                self._status = RunnableStatus.TERMINATED
+
+                # After max retries, terminate
+                if self._insufficient_funds_retries >= self._max_insufficient_funds_retries:
+                    self.logger().error(
+                        f"❌ Executor {self.config.id[:8]}... Insufficient funds errors exceeded max retries "
+                        f"({self._max_insufficient_funds_retries}). Terminating executor."
+                    )
+                    self._status = RunnableStatus.TERMINATED
+                    self.close_type = CloseType.FAILED
 
     def update_position_metrics(self):
         """
@@ -2323,9 +2763,17 @@ class GridExecutor(ExecutorBase):
         """
         Calculate the net pnl percentage
 
+        DEFENSIVE: Prevents absurd values when filled_amount is tiny (precision bug)
+        Returns 0 if filled_amount < $0.01 (sub-penny position = meaningless %)
+
         :return: The net pnl percentage.
         """
-        return self.get_net_pnl_quote() / self.filled_amount_quote if self.filled_amount_quote > 0 else Decimal("0")
+        if self.filled_amount_quote <= Decimal("0.01"):
+            # Position too small to calculate meaningful percentage
+            # (prevents -2162.46% display bugs from micro-fills)
+            return Decimal("0")
+
+        return self.get_net_pnl_quote() / self.filled_amount_quote
 
     async def _sleep(self, delay: float):
         """

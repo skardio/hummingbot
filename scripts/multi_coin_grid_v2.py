@@ -136,7 +136,7 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
                                 return {connector: discovered}
                         except Exception as discover_error:
                             print(f"⚠️  Dynamic discovery failed: {discover_error}")
-                            print(f"⚠️  Falling back to whitelist...")
+                            print("⚠️  Falling back to whitelist...")
 
                     # Fallback to whitelist if dynamic fails
                     if pairs:
@@ -169,7 +169,7 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
                 max_spread = config.get("max_entry_spread_pct", 0.5)
                 blacklist = set(config.get("blacklist", []))
 
-                print(f"   Fetching all tickers from Kraken...")
+                print("   Fetching all tickers from Kraken...")
 
                 async with aiohttp.ClientSession() as session:
                     url = "https://api.kraken.com/0/public/Ticker"
@@ -265,12 +265,12 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
             else:
                 # Event loop exists but not running
                 return loop.run_until_complete(fetch_and_rank())
-        except RuntimeError as e:
+        except RuntimeError:
             # No event loop at all, create one
-            print(f"   Creating new event loop for discovery...")
+            print("   Creating new event loop for discovery...")
             return asyncio.run(fetch_and_rank())
-        except Exception as e:
-            print(f"   Discovery error: {type(e).__name__}: {e}")
+        except Exception:
+            print("   Discovery error occurred")
             return None
 
     @staticmethod
@@ -634,10 +634,18 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
                     lines.append("╠═══════════════════════════════════════════════════════════════╣")
 
                     for executor in active_executors:
+                        # Sanity check for P&L percentage (prevent -2162.46% display bug)
+                        pnl_pct = float(executor.net_pnl_pct) * 100
+                        if abs(pnl_pct) > 500:  # Cap at ±500% (anything higher is likely a precision bug)
+                            pnl_pct = 0.0
+                            pnl_display = "N/A (bug)"
+                        else:
+                            pnl_display = f"{pnl_pct:+.2f}%"
+
                         lines.append(
                             f"║ ID: {executor.id[:8]}... | "
                             f"Status: {executor.status.name:10} | "
-                            f"P&L: {float(executor.net_pnl_pct) * 100:+.2f}%   ║"
+                            f"P&L: {pnl_display:>12}   ║"
                         )
 
                     lines.append("╚═══════════════════════════════════════════════════════════════╝\n")

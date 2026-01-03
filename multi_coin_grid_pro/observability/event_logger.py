@@ -145,6 +145,12 @@ class EventLogger:
         if not self.enabled or not self.buffer:
             return
 
+        # Check if file_handle is valid before writing
+        if not self.file_handle:
+            self.logger.debug("EventLogger file handle not available, clearing buffer")
+            self.buffer.clear()
+            return
+
         try:
             for event in self.buffer:
                 json_line = json.dumps(event)
@@ -288,6 +294,59 @@ class EventLogger:
             "side": side,
             "price": price,
             "amount": amount
+        })
+
+    def emit_entry_guard_evaluation(
+        self,
+        connector: str,
+        symbol: str,
+        decision: str,
+        regime: str = "NEUTRAL",
+        reject_reason: Optional[str] = None,
+        metrics: Optional[Dict[str, Optional[float]]] = None,
+        thresholds: Optional[Dict[str, float]] = None,
+        cooldown_remaining_sec: Optional[int] = None,
+        mode: str = "live",
+        correlation_id: Optional[str] = None
+    ) -> None:
+        """
+        Emit entry_guard_evaluation event (EPIC v3.4 Story 6).
+
+        Logs momentum health guard decisions for analysis and tuning.
+
+        Args:
+            connector: Exchange connector name ("kraken", "bitget")
+            symbol: Trading pair (e.g., "PEPE-EUR", "BTC-USDT")
+            decision: "ACCEPTED" or "REJECTED"
+            regime: Market regime ("BULL", "CHOP", "BEAR", "NEUTRAL")
+            reject_reason: Rejection reason code (e.g., "VWAP_SLOPE_FLAT_WHILE_DEVIATION_HIGH")
+            metrics: Momentum metrics dict with keys:
+                - vwap_deviation_pct
+                - vwap_slope_5m_pct (optional, for Story 9)
+                - vwap_slope_15m_pct
+                - accel_5m_pct
+                - accel_15m_pct
+            thresholds: Thresholds used for evaluation:
+                - deviation_high_pct
+                - slope_min_pct_5m (optional, for Story 9)
+                - slope_min_pct_15m
+                - accel_5m_min_pct
+                - accel_15m_min_pct
+            cooldown_remaining_sec: Remaining cooldown time (if applicable)
+            mode: "shadow" or "live"
+            correlation_id: Optional correlation ID for intent tracking
+        """
+        self._emit("entry_guard_evaluation", {
+            "connector": connector,
+            "symbol": symbol,
+            "regime": regime,
+            "decision": decision,
+            "reject_reason": reject_reason,
+            "metrics": metrics or {},
+            "thresholds": thresholds or {},
+            "cooldown_remaining_sec": cooldown_remaining_sec,
+            "mode": mode,
+            "correlation_id": correlation_id
         })
 
 

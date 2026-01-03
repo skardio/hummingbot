@@ -415,7 +415,22 @@ class ExecutorOrchestrator:
         if not executor:
             self.logger().error(f"Executor ID {executor_id} not found for controller {controller_id}.")
             return
-        executor.early_stop(action.keep_position)
+
+        # 🔧 CRITICAL FIX: Wrap early_stop in try-except to ensure it completes
+        # If early_stop fails, position may be left hanging without close orders
+        try:
+            executor.early_stop(action.keep_position)
+        except Exception as e:
+            self.logger().error(
+                f"❌ CRITICAL: early_stop failed for {executor_id[:8]}... with error: {e}. "
+                f"Position may need manual closure! keep_position={action.keep_position}"
+            )
+            # Even if early_stop failed, try to force status to TERMINATED to prevent stuck executor
+            try:
+                executor._status = executor.RunnableStatus.TERMINATED if hasattr(executor, 'RunnableStatus') else 3
+                self.logger().warning(f"⚠️  Forced executor {executor_id[:8]}... status to TERMINATED after early_stop failure")
+            except Exception as status_error:
+                self.logger().error(f"❌ Could not force status update: {status_error}")
 
     def _update_positions_from_done_executors(self):
         """

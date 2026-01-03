@@ -1,6 +1,6 @@
 from decimal import Decimal
 from enum import Enum
-from typing import Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -36,6 +36,8 @@ class GridExecutorConfig(ExecutorConfigBase):
     deduct_base_fees: bool = False
     keep_position: bool = False
     coerce_tp_to_step: bool = False
+    # Custom info dict for passing additional data (e.g., adaptive timeouts, audit info)
+    custom_info: Optional[Dict[str, Any]] = None
 
 
 class GridLevelStates(Enum):

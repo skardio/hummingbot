@@ -47,19 +47,34 @@ from multi_coin_grid_pro.core.reason_codes import ReasonCode, Stage
 # Feature 1.2: Time-Based Trading Rules
 from multi_coin_grid_pro.core.time_based_integration import TimeBasedIntegration
 from multi_coin_grid_pro.filters import CandleIndicators, SmartEntryConfig, SmartEntryFilter
+
+# Story 6 Part 2: Momentum Indicators
+from multi_coin_grid_pro.indicators.momentum_indicators import MomentumIndicatorService
 from multi_coin_grid_pro.logic.coin_selector import CoinSelector
 from multi_coin_grid_pro.logic.grid_sizer import DynamicGridSizer as DynamicGridSizerV2
 
 # Hybrid Grid Bot v2.0 - New modular components
 from multi_coin_grid_pro.logic.liquidity_aware_sizer import LiquidityAwareSizing
 from multi_coin_grid_pro.logic.smart_entry import SmartEntryBaseConfig, SmartEntryFilter as SmartEntryFilterV2
+
+# Story B2: Execution Audit Records
+from multi_coin_grid_pro.models.execution_audit import AuditWriter, create_audit_from_executor
 from multi_coin_grid_pro.observability.event_logger import EventLogger
+
+# Story 10: Cooldown Persistence
+from multi_coin_grid_pro.persistence.cooldown_store import CooldownStore
 from multi_coin_grid_pro.risk.pnl_tracker import RealtimePnLTracker
 from multi_coin_grid_pro.risk.risk_guard import RiskGuardV2
+
+# Story D1: Adaptive Timeout based on volatility
+from multi_coin_grid_pro.utils.adaptive_timeout import AdaptiveTimeout, get_recommended_timeout
 from multi_coin_grid_pro.utils.candle_indicators import CandleIndicatorsCalculator
 from multi_coin_grid_pro.utils.coin_discovery import CoinDiscovery
 from multi_coin_grid_pro.utils.decision_trace import PairDecisionTrace
 from multi_coin_grid_pro.utils.dynamic_grid_sizer import DynamicGridSizer
+
+# Story C1: Log Throttling + Structured Logging
+from multi_coin_grid_pro.utils.log_throttle import StructuredLogger, should_log
 from multi_coin_grid_pro.utils.trend_calculator import TrendCalculator, TrendStatus
 
 from .multi_coin_grid_config import MultiCoinGridConfig
@@ -140,6 +155,10 @@ class MultiCoinGridController(ControllerBase):
         # Replace coin after X updates without trades
         self.rotation_threshold: int = getattr(config, 'coin_rotation_threshold', 90)
 
+        # Periodic coin discovery (auto-refresh pool)
+        self.coin_discovery_refresh_interval: int = getattr(config, 'coin_discovery_refresh_interval_seconds', 3600)
+        self._last_coin_discovery: float = 0.0  # Timestamp of last discovery scan
+
         # State tracking - MULTI-COIN SUPPORT
         # Legacy single-coin (for backwards compatibility when max_simultaneous_coins=1)
         self.active_coin: Optional[str] = None
@@ -155,6 +174,12 @@ class MultiCoinGridController(ControllerBase):
         self.monitoring_coin: Optional[str] = None  # Coin being monitored (maar niet geëxecuteerd)
         self.monitoring_start_time: float = 0  # When monitoring of this coin started
         self.session_blacklist: Dict[str, float] = {}  # {coin: timestamp_when_blacklisted}
+
+        # ==============================================================================
+        # STORY A2: SESSION BLACKLIST & ANTI-FLIPFLOP
+        # ==============================================================================
+        # Track which executors we've already processed for blacklisting (idempotency)
+        self._processed_timeout_executors: set = set()  # Set of executor IDs we've already blacklisted
 
         # Phase 1.1: Stop-Loss tracking
         self.entry_prices: Dict[str, Decimal] = {}  # Track entry price per coin: {coin: entry_price}
@@ -184,6 +209,7 @@ class MultiCoinGridController(ControllerBase):
         self._last_pnl_reset_month = None
 
         self._last_logged_regime = None
+        self._last_detected_regime = None  # Story 6 Part 2: Cache detected regime for momentum guards
 
         # Phase 1.4: Position Size Limits state
         self.current_exposure_per_coin: Dict[str, Decimal] = {}  # {coin: exposure_amount}
@@ -332,6 +358,31 @@ class MultiCoinGridController(ControllerBase):
         # Candle Indicators Calculator (for SmartEntry)
         self.candle_calc = CandleIndicatorsCalculator()
 
+        # Story D1: Adaptive Timeout Calculator
+        self.adaptive_timeout = AdaptiveTimeout(
+            base_timeout_sec=self.config.no_fill_timeout_sec,
+            atr_period=14
+        )
+
+        # Story 6 Part 2: Momentum Indicator Service
+        self.momentum_service = MomentumIndicatorService(connector_name=config.connector_name)
+
+        # Story 10: Cooldown Persistence (restart-safe parabolic cooldowns)
+        self.cooldown_store: Optional[CooldownStore] = None
+        self.parabolic_blacklist: Dict[str, float] = {}  # In-memory cache: {symbol: expiry_timestamp}
+        self._last_cooldown_cleanup: float = time.time()
+        self._cooldown_cleanup_interval: int = 300  # Cleanup expired cooldowns every 5 minutes
+
+        # Initialize CooldownStore if parabolic persistence enabled
+        smart_cfg = getattr(config, 'smart_entry_filter', {})
+        if smart_cfg.get('parabolic_cooldown_persist', False):
+            try:
+                self.cooldown_store = CooldownStore("data/cooldowns.db")
+                self.logger().info("✅ Story 10: CooldownStore initialized (data/cooldowns.db)")
+            except Exception as e:
+                self.logger().error(f"❌ Story 10: CooldownStore init failed: {e}")
+                self.cooldown_store = None
+
         # ===== HYBRID GRID BOT V2.0 - New Modular Components =====
         # Telegram Alerter
         telegram_cfg = getattr(config, 'telegram', {})
@@ -376,7 +427,8 @@ class MultiCoinGridController(ControllerBase):
                     base_cfg,
                     coin_profiles,
                     self.logger(),
-                    exchange_connector=self.market_data_provider
+                    exchange_connector=self.market_data_provider,
+                    event_logger=self.event_logger
                 )
                 self.logger().info("🧠 SmartEntry v2.0: ENABLED (with coin profiles)")
 
@@ -619,6 +671,44 @@ class MultiCoinGridController(ControllerBase):
         except Exception as e:
             # Trace errors should never break trading
             self.logger().error(f"Error logging decision trace: {e}")
+
+    def _handle_parabolic_cooldown(self, symbol: str, reason: str):
+        """
+        Story 10: Handle parabolic detection cooldown persistence
+
+        Args:
+            symbol: Trading pair symbol
+            reason: Rejection reason containing parabolic trigger info
+        """
+        try:
+            # Get cooldown duration from config
+            smart_cfg = getattr(self.config, 'smart_entry_filter', {})
+            cooldown_minutes = smart_cfg.get('parabolic_cooldown_minutes', 30)
+            cooldown_sec = cooldown_minutes * 60
+            shadow_mode = smart_cfg.get('parabolic_detector_shadow_mode', True)
+
+            # Update in-memory cache
+            expiry_ts = time.time() + cooldown_sec
+            self.parabolic_blacklist[symbol] = expiry_ts
+
+            # Persist to database if enabled (and NOT in shadow mode)
+            if self.cooldown_store and not shadow_mode:
+                self.cooldown_store.set_cooldown(
+                    connector=self.config.connector_name,
+                    symbol=symbol,
+                    reason="PARABOLIC",
+                    cooldown_sec=cooldown_sec
+                )
+                self.logger().info(
+                    f"✅ Story 10: Parabolic cooldown persisted for {symbol} ({cooldown_minutes}min)"
+                )
+            elif shadow_mode:
+                self.logger().info(
+                    f"[SHADOW] Story 10: Would persist cooldown for {symbol} ({cooldown_minutes}min)"
+                )
+
+        except Exception as e:
+            self.logger().error(f"❌ Story 10: Failed to handle cooldown for {symbol}: {e}")
 
     def _calculate_portfolio_value(self) -> Decimal:
         """
@@ -1125,6 +1215,22 @@ class MultiCoinGridController(ControllerBase):
     async def on_start(self):
         """Override to log when control_loop starts"""
         self.logger().info("🚀 Controller.on_start() called - control_loop is starting!")
+
+        # Story 10: Load active cooldowns from database on startup
+        if self.cooldown_store:
+            try:
+                active_cooldowns = self.cooldown_store.load_active()
+                self.parabolic_blacklist.update(active_cooldowns)
+                if active_cooldowns:
+                    self.logger().info(f"✅ Story 10: Loaded {len(active_cooldowns)} active cooldowns from database")
+                    for symbol, expiry_ts in active_cooldowns.items():
+                        remaining = int(expiry_ts - time.time())
+                        self.logger().info(f"   - {symbol}: {remaining}s remaining")
+                else:
+                    self.logger().info("ℹ️  Story 10: No active cooldowns to restore")
+            except Exception as e:
+                self.logger().error(f"❌ Story 10: Failed to load cooldowns: {e}")
+
         await super().on_start()
 
     async def control_task(self):
@@ -1154,12 +1260,30 @@ class MultiCoinGridController(ControllerBase):
             self.pnl_tracker_v2.on_new_month()
             self._last_pnl_reset_month = current_month
 
+        # Story 10: Periodic cooldown cleanup (every 5 minutes)
+        current_time = time.time()
+        if self.cooldown_store and (current_time - self._last_cooldown_cleanup) >= self._cooldown_cleanup_interval:
+            try:
+                deleted = self.cooldown_store.cleanup_expired()
+                if deleted > 0:
+                    self.logger().debug(f"🧹 Story 10: Cleaned up {deleted} expired cooldowns")
+                # Also cleanup in-memory cache
+                expired_symbols = [sym for sym, expiry in self.parabolic_blacklist.items() if expiry <= current_time]
+                for sym in expired_symbols:
+                    del self.parabolic_blacklist[sym]
+                self._last_cooldown_cleanup = current_time
+            except Exception as e:
+                self.logger().error(f"❌ Story 10: Cooldown cleanup failed: {e}")
+
         # ===== ADAPTIVE REGIME DETECTION (Phase 1: Logging Only) =====
         if hasattr(self, 'regime_detector') and self.regime_detector:
             try:
                 # Detect regime periodically (once per control cycle)
                 regime_state = await self._detect_current_regime()
                 if regime_state:
+                    # Story 6 Part 2: Cache regime for momentum guards
+                    self._last_detected_regime = regime_state.regime
+
                     regime_changed = regime_state.regime != self._last_logged_regime
                     if regime_changed:
                         self.logger().info(
@@ -1596,6 +1720,9 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().info(f"✅ Top 20: {', '.join(self.monitored_coins[:20])}")
                     self.logger().info("=" * 80)
 
+                    # Mark initial discovery timestamp for periodic refresh
+                    self._last_coin_discovery = time.time()
+
                 except Exception as e:
                     self.logger().error(f"❌ EXCEPTION during DIRECT discovery: {e}")
                     import traceback
@@ -1737,6 +1864,22 @@ class MultiCoinGridController(ControllerBase):
         else:
             self.logger().debug("⏭️  Skipping coin rotation (manual trading pairs mode)")
 
+        # PERIODIC COIN DISCOVERY: Refresh the coin pool if interval has passed
+        if self.coin_discovery_refresh_interval > 0:  # 0 = disabled
+            time_since_last_discovery = time.time() - self._last_coin_discovery
+            if time_since_last_discovery >= self.coin_discovery_refresh_interval:
+                self.logger().info("=" * 80)
+                self.logger().info(f"🔄 PERIODIC COIN DISCOVERY: Refreshing pool after {time_since_last_discovery / 60:.0f} min")
+                self.logger().info("=" * 80)
+                try:
+                    await self._refresh_coin_pool()
+                    self._last_coin_discovery = time.time()
+                    self.logger().info("✅ Coin pool refreshed successfully")
+                except Exception as e:
+                    self.logger().error(f"❌ Error refreshing coin pool: {e}")
+                    import traceback
+                    self.logger().error(traceback.format_exc())
+
         # Update trends for all monitored coins (respect configured refresh interval)
         min_update_interval = max(1.0, float(getattr(self.config, "price_update_interval", 30)))
         time_since_last_update = time.time() - getattr(self, "_last_trend_update", 0.0)
@@ -1765,6 +1908,73 @@ class MultiCoinGridController(ControllerBase):
                 self.logger().error(traceback.format_exc())
                 # Don't update _last_trend_update on error, so we retry sooner
                 # This ensures we don't skip updates when API is having issues
+
+    async def _refresh_coin_pool(self):
+        """
+        Refresh the coin pool by rescanning ALL available pairs from the exchange.
+        This updates self.all_available_pairs, self.pair_volumes, and self.pair_spreads.
+        Called periodically based on coin_discovery_refresh_interval_seconds.
+        """
+        try:
+            # Phase 1.3: Use error handling wrapper
+            trading_pair_map = await self._api_call_with_error_handling(
+                self.connector.trading_pair_symbol_map
+            )
+            if trading_pair_map is None:
+                self.logger().error("❌ Failed to get trading pair map during refresh")
+                return
+
+            # Filter for quote pairs
+            quote = self.config.quote_asset
+            quote_pairs = [hb_pair for kraken_pair, hb_pair in trading_pair_map.items()
+                           if hb_pair.endswith(f"-{quote}")]
+
+            old_pool_size = len(self.all_available_pairs)
+            self.all_available_pairs = quote_pairs
+
+            # Fetch fresh ticker data
+            ticker_data = await self._get_ticker_data_safe()
+
+            # Build volume and spread maps
+            pair_volumes = {}
+            pair_spreads = {}
+            for exchange_symbol, hb_symbol in trading_pair_map.items():
+                if hb_symbol in quote_pairs and exchange_symbol in ticker_data:
+                    ticker = ticker_data[exchange_symbol]
+                    # Volume data
+                    volume_24h = float(ticker["v"][1]) if "v" in ticker else 0
+                    last_price = float(ticker["c"][0]) if "c" in ticker else 0
+                    volume_quote = volume_24h * last_price
+                    pair_volumes[hb_symbol] = volume_quote
+
+                    # Spread data
+                    try:
+                        best_ask = float(ticker["a"][0]) if "a" in ticker and ticker["a"] else None
+                        best_bid = float(ticker["b"][0]) if "b" in ticker and ticker["b"] else None
+                        if best_bid and best_ask and best_ask > 0:
+                            spread = (best_ask - best_bid) / best_ask
+                            pair_spreads[hb_symbol] = spread
+                    except Exception:
+                        pass
+
+            # Update stored data
+            self.pair_volumes = pair_volumes
+            self.pair_spreads = pair_spreads
+
+            # Log changes
+            new_pairs = set(quote_pairs) - set([p for p in self.all_available_pairs if p in quote_pairs[:old_pool_size]])
+            if new_pairs:
+                self.logger().info(f"🆕 Found {len(new_pairs)} NEW pairs since last scan: {sorted(new_pairs)[:10]}...")
+
+            self.logger().info(
+                f"✅ Pool refreshed: {len(self.all_available_pairs)} total pairs, "
+                f"{len(pair_volumes)} with volume data"
+            )
+
+        except Exception as e:
+            self.logger().error(f"❌ Error refreshing coin pool: {e}")
+            import traceback
+            self.logger().error(traceback.format_exc())
 
     def _rotate_underperforming_coins(self):
         """
@@ -1985,6 +2195,22 @@ class MultiCoinGridController(ControllerBase):
             # Get config blacklist
             config_blacklist = set(getattr(self.config, 'blacklist', []) or [])
 
+            # ==============================================================================
+            # STORY A2: PURGE EXPIRED BLACKLIST & ADD TO EXCLUSIONS
+            # ==============================================================================
+            # First, purge any expired blacklist entries
+            self._purge_expired_blacklist(current_time)
+
+            # Add currently blacklisted coins to exclusions
+            blacklisted_coins = set(self.session_blacklist.keys())
+
+            # Log blacklisted coins if any (max once per coin per cycle)
+            if blacklisted_coins:
+                for coin in blacklisted_coins:
+                    blacklist_info = self._get_blacklist_info(coin, current_time)
+                    if blacklist_info:
+                        self.logger().debug(f"🚫 BLACKLIST_SKIP | Story A2: {coin} ({blacklist_info})")
+
             # Exit cooldown enforced by risk manager
             exit_cooldown_map = self.risk_manager.coins_in_exit_cooldown(current_time)
             if exit_cooldown_map:
@@ -1993,12 +2219,13 @@ class MultiCoinGridController(ControllerBase):
                         f"⏳ {coin} exit cooldown: {remaining_seconds / 60:.1f} min remaining"
                     )
 
-            # Combine cooldown coins, auto-blacklisted coins, and config blacklist
+            # Combine cooldown coins, auto-blacklisted coins, config blacklist, and Story A2 blacklist
             excluded_coins = (
                 set(coins_in_cooldown)
                 | self.auto_blacklisted_coins
                 | config_blacklist
                 | set(exit_cooldown_map.keys())
+                | blacklisted_coins  # Story A2: Add session blacklist
             )
             if excluded_coins:
                 self.logger().debug(f"🚫 Excluding coins: {excluded_coins}")
@@ -2008,6 +2235,8 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().debug(f"   Auto-blacklisted: {self.auto_blacklisted_coins}")
                 if coins_in_cooldown:
                     self.logger().debug(f"   In cooldown: {coins_in_cooldown}")
+                if blacklisted_coins:
+                    self.logger().debug(f"   Story A2 session blacklist: {blacklisted_coins}")
 
             # MULTI-COIN: Get top N coins (where N = available slots)
             # Calculate how many slots are available
@@ -3023,6 +3252,22 @@ class MultiCoinGridController(ControllerBase):
         )
 
         if not active_executor:
+            # BUG FIX: Add grace period - newly created executors need time to appear in executors_info
+            # Check if this executor was just created (within last 30 seconds)
+            if not hasattr(self, '_executor_creation_times'):
+                self._executor_creation_times = {}
+
+            current_time = self.market_data_provider.time()
+            creation_time = self._executor_creation_times.get(self.active_executor_id)
+
+            if creation_time:
+                time_since_creation = current_time - creation_time
+                if time_since_creation < 30:  # 30 second grace period
+                    self.logger().debug(
+                        f"⏳ Executor {self.active_executor_id[:8]}... created {time_since_creation:.1f}s ago - "
+                        f"waiting for orchestrator sync (grace period: 30s)"
+                    )
+                    return True  # Assume it's still active during grace period
             # Executor doesn't exist or is not active - check why it failed
             failed_executor = self._get_executor_info(self.active_executor_id)
 
@@ -3122,6 +3367,11 @@ class MultiCoinGridController(ControllerBase):
             if self.active_coin and self.active_coin in self.active_coins:
                 del self.active_coins[self.active_coin]
                 self.logger().info(f"📊 Removed {self.active_coin} from active_coins: {list(self.active_coins.keys())}")
+
+            # BUG FIX: Clean up executor creation time tracking
+            if hasattr(self, '_executor_creation_times') and self.active_executor_id in self._executor_creation_times:
+                del self._executor_creation_times[self.active_executor_id]
+
             self.active_executor_id = None
             self.active_coin = None
             return False
@@ -3267,6 +3517,88 @@ class MultiCoinGridController(ControllerBase):
         else:
             self.logger().info("ℹ️  API errors not paused - no reset needed")
 
+    # ==============================================================================
+    # STORY A2: SESSION BLACKLIST & ANTI-FLIPFLOP
+    # ==============================================================================
+
+    def _is_blacklisted(self, symbol: str, now: float) -> bool:
+        """
+        Check if symbol is currently blacklisted (Story A2)
+
+        Args:
+            symbol: Trading pair (e.g., 'BTC-EUR')
+            now: Current timestamp
+
+        Returns:
+            True if blacklisted and not expired, False otherwise
+        """
+        if symbol not in self.session_blacklist:
+            return False
+
+        expiry_time = self.session_blacklist[symbol]
+        return now < expiry_time
+
+    def _add_to_blacklist(self, symbol: str, reason: str, now: float) -> None:
+        """
+        Add symbol to session blacklist (Story A2)
+
+        Args:
+            symbol: Trading pair to blacklist
+            reason: Reason for blacklisting (e.g., 'NO_FILL_TIMEOUT')
+            now: Current timestamp
+        """
+        # Get blacklist duration from config (default 30 min = 1800 sec)
+        blacklist_duration = getattr(self.config, 'blacklist_after_timeout_sec', 1800)
+
+        # If duration is 0, blacklisting is disabled
+        if blacklist_duration <= 0:
+            self.logger().debug(f"Story A2: Blacklisting disabled (duration=0), skipping {symbol}")
+            return
+
+        expiry_time = now + blacklist_duration
+        self.session_blacklist[symbol] = expiry_time
+
+        expiry_datetime = datetime.fromtimestamp(expiry_time).strftime('%H:%M:%S')
+        self.logger().info(
+            f"🚫 BLACKLIST_ADD | Story A2: {symbol} blacklisted until {expiry_datetime} "
+            f"({blacklist_duration / 60:.0f}m) | Reason: {reason}"
+        )
+
+    def _purge_expired_blacklist(self, now: float) -> None:
+        """
+        Remove expired entries from session blacklist (Story A2)
+
+        Args:
+            now: Current timestamp
+        """
+        expired = [sym for sym, expiry in self.session_blacklist.items() if now >= expiry]
+
+        for symbol in expired:
+            del self.session_blacklist[symbol]
+            self.logger().info(f"✅ BLACKLIST_EXPIRE | Story A2: {symbol} blacklist expired - now selectable")
+
+    def _get_blacklist_info(self, symbol: str, now: float) -> Optional[str]:
+        """
+        Get blacklist expiry info for a symbol (for logging)
+
+        Args:
+            symbol: Trading pair
+            now: Current timestamp
+
+        Returns:
+            Formatted string with expiry info, or None if not blacklisted
+        """
+        if symbol not in self.session_blacklist:
+            return None
+
+        expiry_time = self.session_blacklist[symbol]
+        if now >= expiry_time:
+            return None
+
+        remaining_sec = int(expiry_time - now)
+        expiry_datetime = datetime.fromtimestamp(expiry_time).strftime('%H:%M:%S')
+        return f"expires in {remaining_sec // 60}m at {expiry_datetime}"
+
     def _sync_risk_state(self) -> None:
         """
         Synchronize realised PnL and cooldown information with the global risk manager.
@@ -3292,6 +3624,53 @@ class MultiCoinGridController(ControllerBase):
                     realised_pnl = Decimal(str(executor.net_pnl_quote))
                     trading_pair = getattr(getattr(executor, "config", None), "trading_pair", self.active_coin)
                     if trading_pair:
+                        # ==============================================================================
+                        # STORY B2: WRITE EXECUTION AUDIT RECORD
+                        # ==============================================================================
+                        # Write audit trail for this completed execution
+                        try:
+                            # Determine close reason from close_type
+                            from hummingbot.strategy_v2.models.executors import CloseType
+                            close_type = executor.close_type
+
+                            if close_type == CloseType.STOP_LOSS:
+                                close_reason = "stop_loss"
+                            elif close_type == CloseType.TAKE_PROFIT:
+                                close_reason = "take_profit"
+                            elif close_type == CloseType.NO_FILL_TIMEOUT:
+                                close_reason = "no_fill_timeout"
+                            elif close_type == CloseType.NO_PROGRESS_TIMEOUT:
+                                close_reason = "no_progress_timeout"
+                            elif close_type == CloseType.TIME_LIMIT:
+                                close_reason = "time_limit"
+                            elif hasattr(CloseType, 'HARD_CAP_TIME_LIMIT') and close_type == CloseType.HARD_CAP_TIME_LIMIT:
+                                close_reason = "hard_cap_time_limit"
+                            elif hasattr(CloseType, 'SWITCH') and close_type == CloseType.SWITCH:
+                                close_reason = "switch"
+                            else:
+                                close_reason = str(close_type) if close_type else "manual"
+
+                            # Create audit record from executor
+                            audit = create_audit_from_executor(executor, close_reason)
+
+                            # Write to JSONL file (audits/YYYY-MM-DD.jsonl)
+                            writer = AuditWriter()
+                            writer.write(audit)
+
+                            # Throttled log to avoid spam (max 1 per 30s for "audit_written")
+                            if should_log("audit_written", interval_sec=30):
+                                slog = StructuredLogger(self.logger())
+                                slog.info(
+                                    "AUDIT_WRITTEN",
+                                    symbol=audit.symbol,
+                                    close_reason=close_reason,
+                                    pnl_net=float(audit.pnl_net_quote),
+                                    duration_sec=audit.total_duration_sec
+                                )
+                        except Exception as e:
+                            self.logger().error(f"Story B2: Failed to write audit record for {trading_pair}: {e}")
+                        # ==============================================================================
+
                         self.risk_manager.register_close_trade(
                             symbol=trading_pair,
                             realised_pnl_quote=realised_pnl,
@@ -3354,6 +3733,36 @@ class MultiCoinGridController(ControllerBase):
                                 )
                             except Exception as e:
                                 self.logger().error(f"❌ Feature 1.3: Failed to record trade: {e}")
+
+                        # ==============================================================================
+                        # STORY A2: SESSION BLACKLIST ON TIMEOUT (Anti-Flipflop)
+                        # ==============================================================================
+                        # Check if this executor closed due to timeout - if so, blacklist the symbol
+                        # Only process each executor once (idempotency)
+                        if executor.id not in self._processed_timeout_executors:
+                            self._processed_timeout_executors.add(executor.id)
+
+                            # Import CloseType enum
+                            from hummingbot.strategy_v2.models.executors import CloseType
+
+                            # Check if close_type is a timeout-related reason
+                            timeout_close_types = {
+                                CloseType.NO_FILL_TIMEOUT,
+                                CloseType.NO_PROGRESS_TIMEOUT,
+                                CloseType.TIME_LIMIT,
+                                CloseType.HARD_CAP_TIME_LIMIT,
+                            }
+
+                            if executor.close_type in timeout_close_types:
+                                # Timeout close - add to blacklist
+                                reason = executor.close_type.name if executor.close_type else "TIMEOUT"
+                                self._add_to_blacklist(trading_pair, reason, now)
+                            else:
+                                # Non-timeout close (e.g., TAKE_PROFIT, normal completion) - no blacklist
+                                close_type_name = executor.close_type.name if executor.close_type else "UNKNOWN"
+                                self.logger().debug(
+                                    f"Story A2: {trading_pair} closed with {close_type_name} - no blacklist (normal exit)"
+                                )
 
                     self._realised_executors_tracked[executor.id] = realised_pnl
 
@@ -4422,6 +4831,22 @@ class MultiCoinGridController(ControllerBase):
                 change_5m_pct=indicators_legacy.change_5m_pct,
             )
 
+            # Story 6 Part 2: Calculate momentum metrics
+            momentum_metrics = self.momentum_service.calculate_metrics(
+                symbol=symbol,
+                current_price=float(indicators_v2.price),
+                current_vwap=float(indicators_v2.vwap) if indicators_v2.vwap else None,
+                candles=trend.candles
+            )
+
+            # Extract momentum parameters
+            vwap_slope_15m_pct = momentum_metrics.vwap_slope_15m_pct if momentum_metrics.vwap_slope_15m_pct is not None else 0.0
+            accel_5m_pct = momentum_metrics.accel_5m_pct if momentum_metrics.accel_5m_pct is not None else 0.0
+            accel_15m_pct = momentum_metrics.accel_15m_pct if momentum_metrics.accel_15m_pct is not None else 0.0
+
+            # Determine regime from cached value or default to CHOP
+            regime = self._last_detected_regime if self._last_detected_regime else 'CHOP'
+
             # Check with v2.0 filter (with trace)
             order_size_eur = None
             total_amount_quote = getattr(self.config, 'total_amount_quote', None)
@@ -4436,12 +4861,23 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().debug(f"Failed to calculate order_size_eur for {symbol}: {e}")
                     order_size_eur = None
 
+            # Story 6 Part 2: Pass momentum parameters to allows_entry
             allowed, reason, trace = self.smart_entry_v2.allows_entry(
                 symbol, indicators_v2,
                 exchange=self.config.connector_name,
                 trace_enabled=self.debug_trace_enabled,
                 order_size_eur=order_size_eur,
+                vwap_slope_15m_pct=vwap_slope_15m_pct,
+                accel_5m_pct=accel_5m_pct,
+                accel_15m_pct=accel_15m_pct,
+                regime=regime,
             )
+
+            # Story 10: Check parabolic cooldown AFTER smart_entry (parabolic check happens inside)
+            # If parabolic was detected, smart_entry will have added to session blacklist
+            # We need to persist it if cooldown_persist is enabled
+            if not allowed and "PARABOLIC" in reason and self.cooldown_store:
+                self._handle_parabolic_cooldown(symbol, reason)
 
             # Fix #1: Store trace for correlation_id propagation to MTF
             self._last_smart_entry_trace = trace
@@ -5588,6 +6024,54 @@ class MultiCoinGridController(ControllerBase):
         trade_amount_quote = total_amount_quote if total_amount_quote is not None else Decimal(
             str(self.config.total_amount_quote))
 
+        # Story D1: Calculate adaptive timeout based on market volatility
+        adaptive_timeout_sec = self.config.no_fill_timeout_sec  # Default fallback
+        try:
+            # Fetch recent candle data for volatility calculation
+            candle_df = self.market_data_provider.get_candles_df(
+                connector_name=self.config.connector_name,
+                trading_pair=symbol,
+                interval="1m",  # 1-minute candles for responsiveness
+                max_records=20  # 20 candles for ATR calculation (need 14+ for ATR-14)
+            )
+
+            if candle_df is not None and not candle_df.empty and len(candle_df) >= 14:
+                # Extract OHLC data
+                highs = [float(h) for h in candle_df['high'].tolist()]
+                lows = [float(low) for low in candle_df['low'].tolist()]
+                closes = [float(c) for c in candle_df['close'].tolist()]
+
+                # Calculate adaptive timeout
+                timeout_result = get_recommended_timeout(
+                    symbol=symbol,
+                    current_price=float(current_price),
+                    high_prices=highs,
+                    low_prices=lows,
+                    close_prices=closes,
+                    base_timeout_sec=self.config.no_fill_timeout_sec
+                )
+
+                adaptive_timeout_sec = timeout_result.adjusted_timeout_sec
+
+                # Log timeout adjustment with reasoning
+                if timeout_result.adjustment_factor != 1.0:
+                    self.logger().info(
+                        f"⏱️  Adaptive timeout for {symbol}: "
+                        f"{adaptive_timeout_sec}s (was {self.config.no_fill_timeout_sec}s, "
+                        f"factor: {timeout_result.adjustment_factor:.2f}x) - "
+                        f"{timeout_result.reasoning}"
+                    )
+            else:
+                self.logger().debug(
+                    f"⚠️  Insufficient candle data for adaptive timeout ({len(candle_df) if candle_df is not None else 0} candles) - "
+                    f"using base timeout {adaptive_timeout_sec}s"
+                )
+        except Exception as e:
+            self.logger().warning(
+                f"⚠️  Failed to calculate adaptive timeout for {symbol}: {e} - "
+                f"using base timeout {adaptive_timeout_sec}s"
+            )
+
         grid_config = GridExecutorConfig(
             timestamp=self.market_data_provider.time(),
             connector_name=self.config.connector_name,
@@ -5602,15 +6086,16 @@ class MultiCoinGridController(ControllerBase):
             triple_barrier_config=self.config.triple_barrier_config,
             # Adjust max orders to grid count, ensure >= 1
             max_open_orders=max(1, min(self.config.max_open_orders, num_grids)),
-            max_orders_per_batch=2,
+            max_orders_per_batch=2,  # Can place 2 OPEN orders per batch
             order_frequency=self.config.order_frequency,
             activation_bounds=Decimal("0.05"),  # 5% activation bounds
             keep_position=False,  # Don't keep position on stop
             leverage=leverage,  # Use derivative_leverage from config (for futures) or 1 (for spot)
-            deduct_base_fees=True,  # Deduct fees paid in base asset from sell amount (e.g., PEAQ fees for PEAQ-USDT)
+            deduct_base_fees=False,  # FALSE for Kraken EUR pairs (fees paid in quote, not base)
             # Story A1: Pass timeout config to executor via custom_info
+            # Story D1: Use adaptive timeout (volatility-adjusted)
             custom_info={
-                "no_fill_timeout_sec": self.config.no_fill_timeout_sec,
+                "no_fill_timeout_sec": adaptive_timeout_sec,  # D1: Dynamic timeout
                 "no_progress_timeout_sec": self.config.no_progress_timeout_sec,
                 "max_hold_time_sec": self.config.max_hold_time_seconds,  # Reuse existing config
                 "close_grace_sec": self.config.close_grace_sec,
@@ -5634,6 +6119,11 @@ class MultiCoinGridController(ControllerBase):
 
             # Store executor ID
             self.active_executor_id = grid_config.id
+
+            # BUG FIX: Track executor creation time for grace period check
+            if not hasattr(self, '_executor_creation_times'):
+                self._executor_creation_times = {}
+            self._executor_creation_times[grid_config.id] = self.market_data_provider.time()
 
             # Phase 1.1: Track entry price for stop-loss monitoring
             self.entry_prices[symbol] = current_price
@@ -5838,9 +6328,12 @@ class MultiCoinGridController(ControllerBase):
                 entry_price = self.entry_prices.get(self.active_coin)
                 if entry_price:
                     loss_pct = float((Decimal(str(trend.current_price)) - entry_price) / entry_price * 100)
+                    stop_loss_pct = float(self.config.stop_loss_pct * 100)
                     stop_loss_price = entry_price * (Decimal('1') - self.config.stop_loss_pct)
                     status.append(
-                        f"║ Entry: €{entry_price:.4f} | Stop-Loss: €{stop_loss_price:.4f} ({loss_pct:+.2f}%) ║")
+                        f"║ Entry: €{entry_price:.4f} | Stop-Loss: €{stop_loss_price:.4f} (-{stop_loss_pct:.2f}%) ║")
+                    status.append(
+                        f"║ Current P&L: {loss_pct:+.2f}% from entry                              ║")
 
                 # Show executor P&L if available
                 if self.active_executor_id:
@@ -5850,7 +6343,7 @@ class MultiCoinGridController(ControllerBase):
                     )
                     if executor_info:
                         pnl_quote = executor_info.net_pnl_quote
-                        pnl_pct = executor_info.net_pnl_pct
+                        pnl_pct = float(executor_info.net_pnl_pct) * 100  # Convert fraction to percentage
                         fees = executor_info.cum_fees_quote
                         filled = executor_info.filled_amount_quote
 
@@ -5875,10 +6368,10 @@ class MultiCoinGridController(ControllerBase):
         # Show total P&L from all executors
         if self.executors_info:
             total_pnl_quote = sum(Decimal(str(e.net_pnl_quote)) for e in self.executors_info)
-            total_pnl_pct = sum(Decimal(str(e.net_pnl_pct)) for e in self.executors_info) / \
-                len(self.executors_info) if self.executors_info else Decimal("0")
             total_fees = sum(Decimal(str(e.cum_fees_quote)) for e in self.executors_info)
             total_volume = sum(Decimal(str(e.filled_amount_quote)) for e in self.executors_info)
+            # Calculate correct P&L percentage: (total_pnl / total_volume) * 100
+            total_pnl_pct = (total_pnl_quote / total_volume * Decimal("100")) if total_volume > 0 else Decimal("0")
 
             if total_volume > 0:
                 if total_pnl_quote > 0:

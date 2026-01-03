@@ -111,6 +111,7 @@ class CandleData:
     low: Decimal          # Low price
     close: Decimal        # Close price
     volume: Decimal       # Volume
+    vwap: Optional[Decimal] = None  # VWAP (optional, added for EPIC v3.4 momentum indicators)
 
 
 @dataclass
