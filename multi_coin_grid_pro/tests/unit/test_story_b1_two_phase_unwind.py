@@ -241,9 +241,9 @@ class MockExecutor:
             self.update_position_metrics()
             remaining_inventory = self.position_size_base
 
+            # If no inventory left during grace period, stay in GRACEFUL
+            # (will transition to DONE via other logic when appropriate)
             if remaining_inventory < self.trading_rules.min_order_size:
-                self._unwind_phase = "DONE"
-                self._status = RunnableStatus.SHUTTING_DOWN
                 return
 
             # Transition to aggressive

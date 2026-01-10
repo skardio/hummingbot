@@ -648,8 +648,9 @@ class GridExecutor(ExecutorBase):
         # Step 2: Start graceful phase
         self._unwind_phase = "GRACEFUL"
 
-        # If no inventory, skip directly to shutdown
-        if remaining_inventory < self.trading_rules.min_order_size:
+        # 🔧 FIX: Always try to close inventory if any exists
+        # Let the exchange reject if it's too small - don't skip preemptively
+        if remaining_inventory <= Decimal("0"):
             self.logger().info(
                 f"✅ UNWIND_DONE reason={close_reason.name} inv=0 (no position to close)"
             )
@@ -657,7 +658,7 @@ class GridExecutor(ExecutorBase):
             self._unwind_phase = "DONE"
             return
 
-        # Step 3: Place graceful close orders (maker/limit)
+        # Step 3: Place graceful close orders (maker/limit) - try regardless of size
         self._place_graceful_close_orders(remaining_inventory)
 
         # Step 4: Transition to CLOSING status
@@ -690,7 +691,8 @@ class GridExecutor(ExecutorBase):
 
         Uses best bid/ask with slight offset to avoid being maker but still competitive.
         """
-        if inventory < self.trading_rules.min_order_size:
+        # 🔧 FIX: Try to close ANY inventory - let exchange reject if too small
+        if inventory <= Decimal("0"):
             return
 
         try:
@@ -716,17 +718,18 @@ class GridExecutor(ExecutorBase):
                 self.config.trading_pair, inventory
             )
 
-            # Ensure amount meets minimum order size
-            if quantized_amount < self.trading_rules.min_order_size:
+            # 🔧 FIX: Try to place order regardless of size - let exchange reject if needed
+            if quantized_amount <= Decimal("0"):
                 self.logger().warning(
-                    f"Story B1: Graceful close amount {quantized_amount} < min {self.trading_rules.min_order_size}"
+                    f"Story B1: Quantized amount is zero for inventory {inventory} - cannot place order"
                 )
                 return
 
+            order_value = quantized_amount * adjusted_price
             self.logger().info(
                 f"📤 Story B1: Placing graceful close order | "
                 f"side={self.close_order_side.name} amount={float(quantized_amount):.6f} "
-                f"price={float(adjusted_price):.6f}"
+                f"price={float(adjusted_price):.6f} value=€{float(order_value):.2f}"
             )
 
             # Place limit maker order
@@ -743,9 +746,19 @@ class GridExecutor(ExecutorBase):
                 self._graceful_close_orders.add(order_id)
                 self._close_order_id = order_id  # Track for existing logic compatibility
                 self._closing_in_progress = True
+            else:
+                # Order was rejected but no exception - likely too small
+                self.logger().warning(
+                    "⚠️  Story B1: Graceful close order rejected (likely too small) - "
+                    "will try aggressive close after grace period"
+                )
 
         except Exception as e:
-            self.logger().error(f"❌ Story B1: Failed to place graceful close order: {e}")
+            # 🔧 FIX: Log rejection and continue - don't crash, let aggressive phase handle it
+            self.logger().warning(
+                f"⚠️  Story B1: Failed to place graceful close order: {e} - "
+                f"will try aggressive close after grace period"
+            )
 
     def _check_unwind_phase_transition(self) -> None:
         """
@@ -768,7 +781,8 @@ class GridExecutor(ExecutorBase):
             self.update_position_metrics()
             remaining_inventory = self.position_size_base
 
-            if remaining_inventory >= self.trading_rules.min_order_size:
+            # 🔧 FIX: Try aggressive close for ANY remaining inventory, not just > min_order_size
+            if remaining_inventory > Decimal("0"):
                 self.logger().warning(
                     f"⚠️  UNWIND_PHASE_START phase=AGGRESSIVE reason={self._unwind_close_reason.name} | "
                     f"Graceful phase failed after {time_in_graceful:.0f}s | "
@@ -808,7 +822,8 @@ class GridExecutor(ExecutorBase):
 
         Uses config aggressive_close_method to determine order type.
         """
-        if inventory < self.trading_rules.min_order_size:
+        # 🔧 FIX: Try to close ANY inventory - let exchange reject if too small
+        if inventory <= Decimal("0"):
             return
 
         try:
@@ -822,17 +837,22 @@ class GridExecutor(ExecutorBase):
                 self.config.trading_pair, inventory
             )
 
-            if quantized_amount < self.trading_rules.min_order_size:
+            # 🔧 FIX: Try to place order regardless of size - let exchange reject if needed
+            if quantized_amount <= Decimal("0"):
                 self.logger().warning(
-                    f"Story B1: Aggressive close amount {quantized_amount} < min {self.trading_rules.min_order_size}"
+                    f"Story B1: Quantized amount is zero for inventory {inventory} - cannot place order"
                 )
                 return
+
+            current_price = self.mid_price if self.mid_price else Decimal("1")
+            order_value = quantized_amount * current_price
 
             if close_method == "MARKET":
                 # Place market order (no price needed for market orders, but some exchanges require it)
                 self.logger().warning(
                     f"🚨 Story B1: Placing MARKET close order | "
-                    f"side={self.close_order_side.name} amount={float(quantized_amount):.6f}"
+                    f"side={self.close_order_side.name} amount={float(quantized_amount):.6f} "
+                    f"value=€{float(order_value):.2f}"
                 )
 
                 # Get current price for market order (some exchanges need it even for market orders)
@@ -845,7 +865,7 @@ class GridExecutor(ExecutorBase):
                 except Exception:
                     current_price = self.mid_price if self.mid_price else Decimal("0")
 
-                order_id = self._strategy.place_order(
+                order_id = self.place_order(
                     connector_name=self.config.connector_name,
                     trading_pair=self.config.trading_pair,
                     order_type=OrderType.MARKET,
@@ -895,9 +915,25 @@ class GridExecutor(ExecutorBase):
                 self._close_order_id = order_id
                 self._closing_in_progress = True
                 self._force_aggressive_close = True  # Set flag for existing logic compatibility
+            else:
+                # Order was rejected but no exception - likely too small
+                self.logger().warning(
+                    f"⚠️  Story B1: Aggressive close order rejected (likely too small) - "
+                    f"inventory will remain: {float(quantized_amount):.6f} (€{float(order_value):.2f})"
+                )
+                # Accept the loss and continue - don't keep retrying
+                self._status = RunnableStatus.SHUTTING_DOWN
+                self._unwind_phase = "DONE"
 
         except Exception as e:
-            self.logger().error(f"❌ Story B1: Failed to place aggressive close order: {e}")
+            # 🔧 FIX: Log rejection and continue - don't crash or retry endlessly
+            self.logger().warning(
+                f"⚠️  Story B1: Failed to place aggressive close order: {e} - "
+                f"inventory will remain: {float(quantized_amount):.6f} (€{float(order_value):.2f})"
+            )
+            # Accept the loss and move on - don't block the bot
+            self._status = RunnableStatus.SHUTTING_DOWN
+            self._unwind_phase = "DONE"
 
     # ==============================================================================
 
@@ -1315,10 +1351,20 @@ class GridExecutor(ExecutorBase):
                             f"❌ Executor {self.config.id[:8]}... Cannot place close order: "
                             f"available balance ({available_balance} {base_asset}) "
                             f"< minimum order size ({min_order_size} {base_asset}). "
-                            f"Resetting level to prevent infinite retries."
+                            f"Terminating executor to prevent infinite retries."
                         )
                         # Reset the level to prevent infinite retry loop
                         level.reset_close_order()
+
+                        # CRITICAL: Terminate executor if we have 0 inventory
+                        # This prevents infinite retry loops for executors with dust/zero balance
+                        self.update_position_metrics()
+                        if self.position_size_base < min_order_size:
+                            self.logger().warning(
+                                f"⚠️ Executor {self.config.id[:8]} has no tradeable inventory "
+                                f"({self.position_size_base} < {min_order_size}), forcing shutdown"
+                            )
+                            self._status = RunnableStatus.SHUTTING_DOWN
                         return
             except Exception as e:
                 self.logger().warning(

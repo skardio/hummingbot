@@ -191,6 +191,8 @@ class TradeFeeBase(ABC):
             local_rate_source: Optional[RateOracle] = rate_source or RateOracle.get_instance()
             rate: Decimal = local_rate_source.get_pair_rate(trading_pair)
             if rate is None:
+                # Rate oracle failed - this is common for non-USD quote currencies like EUR
+                # The fee will be tracked in its original currency instead
                 raise ValueError(f"Could not find the exchange rate for {trading_pair} using the rate source "
                                  f"{local_rate_source} (please verify it has been correctly configured)")
         return rate
@@ -211,8 +213,17 @@ class TradeFeeBase(ABC):
             if self._are_tokens_interchangeable(quote, token):
                 fee_amount += amount_from_percentage
             else:
-                conversion_rate: Decimal = self._get_exchange_rate(trading_pair, exchange, rate_source)
-                fee_amount += amount_from_percentage / conversion_rate
+                try:
+                    conversion_rate: Decimal = self._get_exchange_rate(trading_pair, exchange, rate_source)
+                    fee_amount += amount_from_percentage / conversion_rate
+                except ValueError:
+                    # For EUR pairs: if we can't get rate oracle conversion, use trade price as approximation
+                    # This assumes the caller wants fee in base token and we have quote->base from the trade
+                    if self._are_tokens_interchangeable(token, base):
+                        fee_amount += amount_from_percentage / price
+                    # Otherwise, we can't convert - raise the error
+                    else:
+                        raise
         for flat_fee in self.flat_fees:
             if self._are_tokens_interchangeable(flat_fee.token, token):
                 # No need to convert the value
@@ -222,9 +233,18 @@ class TradeFeeBase(ABC):
                 # In this case instead of looking for the rate we use directly the price in the parameters
                 fee_amount += flat_fee.amount * price
             else:
-                conversion_pair: str = combine_to_hb_trading_pair(base=flat_fee.token, quote=token)
-                conversion_rate: Decimal = self._get_exchange_rate(conversion_pair, exchange, rate_source)
-                fee_amount += flat_fee.amount * conversion_rate
+                try:
+                    conversion_pair: str = combine_to_hb_trading_pair(base=flat_fee.token, quote=token)
+                    conversion_rate: Decimal = self._get_exchange_rate(conversion_pair, exchange, rate_source)
+                    fee_amount += flat_fee.amount * conversion_rate
+                except ValueError:
+                    # For flat fees in quote currency converting to base, use trade price
+                    if (self._are_tokens_interchangeable(flat_fee.token, quote) and
+                            self._are_tokens_interchangeable(token, base)):
+                        fee_amount += flat_fee.amount / price
+                    # Otherwise, we can't convert - raise the error
+                    else:
+                        raise
         return fee_amount
 
     def _are_tokens_interchangeable(self, first_token: str, second_token: str):

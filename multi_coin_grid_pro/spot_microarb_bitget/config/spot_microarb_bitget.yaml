@@ -1,64 +1,131 @@
-# ==============================================================================
-# BITGET SPOT MICRO-ARBITRAGE PRESET
-# ==============================================================================
-
 micro_arb:
-  micro_arb:
-    enabled: true
-
-    # Universe (keep small & liquid)
-    symbols:
-      - BTC-USDT
-      - ETH-USDT
-      - SOL-USDT
-
-    # --- Edge (all in percent units) ---
-    # Effective threshold = 2*maker_fee_pct + min_spread_pct + buffer_pct
-    min_spread_pct: 0.35
-    maker_fee_pct: 0.10
-    buffer_pct: 0.05
-
-    # --- Orders ---
-    order_size_usdt: 10
-    price_offset_ticks: 1
-    maker_only: true
-
-    # --- Lifecycle (seconds) ---
-    buy_timeout_sec: 3
-    max_hold_sec: 6
-
-    # Cooldowns (separate causes)
-    cooldown_after_trade_sec: 5          # normal round-trip completed
-    cooldown_after_cancel_sec: 2         # buy timed out / cancelled (no fill)
-    cooldown_after_force_exit_sec: 10    # forced exit path (stress scenario)
-
-    # --- Guards ---
-    min_depth_usdt: 50000
-    volatility_block_pct_30s: 0.30
-    max_inventory_usdt: 15
-
-    # Dust threshold (for partial fills / rounding)
-    # If remaining base position <= dust_threshold_base, treat as flat
-    dust_threshold_base: 0.00000001
-
-    # Inventory breach behavior
-    # When inventory cap is exceeded: cancel open orders, market-exit remaining,
-    # then pause trading for a bit.
-    inventory_breach_cooldown_sec: 30
-
-    # --- Rate limits / cancel storm protection ---
-    # This throttles cancels so you don't spam the API during choppy moments.
-    min_cancel_interval_sec: 1
-
-    # If your code uses a refresh loop for orders, keep it modest.
-    order_refresh_time: 2
-    rate_limit_buffer: 0.8
-
-    # --- Logging ---
-    log_level: INFO
-    log_decisions: true
-
-    # Optional richer logging toggles (safe if your code checks for them)
-    log_block_reasons: true              # logs why trade was blocked (spread/depth/vol/inventory)
-    log_trade_summary: true              # logs entry/exit, elapsed sec, estimated pnl
-    log_metrics_interval_sec: 30         # periodic health line: cancels, fills, latency, etc.
+  enabled: true
+  symbols:
+  - BTC-USDT
+  - ETH-USDT
+  - SOL-USDT
+  - XRP-USDT
+  - DOGE-USDT
+  - ADA-USDT
+  - AVAX-USDT
+  - DOT-USDT
+  - LINK-USDT
+  - UNI-USDT
+  - ATOM-USDT
+  - LTC-USDT
+  - FIL-USDT
+  - NEAR-USDT
+  - APT-USDT
+  - ARB-USDT
+  - OP-USDT
+  - SUI-USDT
+  - PEPE-USDT
+  - SHIB-USDT
+  - WIF-USDT
+  - BONK-USDT
+  - FLOKI-USDT
+  - TRX-USDT
+  - BCH-USDT
+  - ETC-USDT
+  - ICP-USDT
+  - INJ-USDT
+  - STX-USDT
+  - TIA-USDT
+  - SEI-USDT
+  - HBAR-USDT
+  - VET-USDT
+  - ALGO-USDT
+  - AAVE-USDT
+  - GRT-USDT
+  - RENDER-USDT
+  - IMX-USDT
+  - LDO-USDT
+  - MANA-USDT
+  - SAND-USDT
+  - AXS-USDT
+  - GALA-USDT
+  - ENJ-USDT
+  - CHZ-USDT
+  - MEME-USDT
+  - BOME-USDT
+  - WLD-USDT
+  - JTO-USDT
+  - JUP-USDT
+  - PYTH-USDT
+  - STRK-USDT
+  - ONDO-USDT
+  - DYM-USDT
+  - PENDLE-USDT
+  - ENA-USDT
+  - W-USDT
+  - ETHFI-USDT
+  - MERL-USDT
+  - TNSR-USDT
+  - SAGA-USDT
+  - TAO-USDT
+  - NOT-USDT
+  - IO-USDT
+  - ZK-USDT
+  - ZRO-USDT
+  - LISTA-USDT
+  - FET-USDT
+  - ROSE-USDT
+  - MASK-USDT
+  - LRC-USDT
+  - 1INCH-USDT
+  - CRV-USDT
+  - SNX-USDT
+  - COMP-USDT
+  - YFI-USDT
+  - SUSHI-USDT
+  - BAL-USDT
+  - BAND-USDT
+  - KNC-USDT
+  - ZRX-USDT
+  - BNT-USDT
+  - RLC-USDT
+  - CELO-USDT
+  - SKL-USDT
+  - ANKR-USDT
+  # - NKN-USDT
+  - BLUR-USDT
+  - MAGIC-USDT
+  - GMT-USDT
+  - APE-USDT
+  - GMX-USDT
+  - DYDX-USDT
+  - OSMO-USDT
+  - RUNE-USDT
+  - KAVA-USDT
+  - IOTX-USDT
+  - ONT-USDT
+  - ZIL-USDT
+  - WAVES-USDT
+  auto_discover_symbols: false
+  max_symbols: 100
+  min_volume_24h_usdt: 5000000
+  symbol_refresh_interval_sec: 300
+  min_spread_pct: 1.0
+  maker_fee_pct: 0.1
+  buffer_pct: 0.02
+  order_size_usdt: 15
+  price_offset_ticks: 1
+  maker_only: true
+  buy_timeout_sec: 3
+  max_hold_sec: 6
+  cooldown_after_trade_sec: 5
+  cooldown_after_cancel_sec: 2
+  cooldown_after_force_exit_sec: 10
+  min_depth_usdt: 10000
+  volatility_block_pct_30s: 0.3
+  max_inventory_usdt: 200
+  dust_threshold_base: 1.0e-08
+  inventory_breach_cooldown_sec: 30
+  min_cancel_interval_sec: 1
+  order_refresh_time: 2
+  rate_limit_buffer: 0.8
+  log_level: INFO
+  log_decisions: true
+  log_block_reasons: true
+  log_trade_summary: true
+  log_metrics_interval_sec: 30

@@ -7,7 +7,11 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, NamedTuple, Optional, Tuple
 
-from async_timeout import timeout
+try:
+    from async_timeout import timeout
+except ImportError:
+    # Python 3.11+ has timeout built into asyncio
+    from asyncio import timeout
 
 from hummingbot.core.data_type.common import OrderType, PositionAction, TradeType
 from hummingbot.core.data_type.limit_order import LimitOrder
@@ -360,7 +364,8 @@ class InFlightOrder:
                     exchange=exchange
                 )
         except Exception as e:
-            self.logger().error(f"Error calculating fee paid in {token}: {e}")
+            # Downgraded to debug level - fee conversion is non-critical for EUR/non-USD pairs
+            self.logger().debug(f"Could not calculate fee in {token}, fee tracking will use original currency: {e}")
         return total_fee_in_token
 
     def update_with_order_update(self, order_update: OrderUpdate) -> bool:

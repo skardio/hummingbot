@@ -52,45 +52,45 @@ adaptive_regime_detection:
   log_filter_updates: true
 
 adaptive_filters:
-  # Baseline filters (conservative, used as fallback)
+  # Baseline filters (RELAXED for bull market - versoepl voor meer trades)
   baseline:
     rsi_buy_min: 25.0
-    rsi_buy_max: 80.0               # 🔧 FIX: 70→80 (allow trading in CHOP/BEAR when altcoins pumping)
-    rsi_extreme_min: 20.0
-    vwap_max_deviation_pct: 12.0    # 🔧 FIX: 5.0→12.0 (allow bull market entries far above VWAP)
-    max_up_accel_pct: 2.0           # 🔧 FIX: 1.2→2.0 (allow momentum)
-    max_down_accel_pct: -3.0        # 🔧 FIX: -2.0→-3.0 (allow deeper pullbacks)
-    atr_min_pct: 0.12               # 🔧 FIX: 0.15→0.12 (accepteer iets minder volatiele coins)
-    atr_max_pct: 6.0
-    spike_5m_max_pct: 2.5           # 🔧 FIX: 2.0→2.5 (allow bigger moves)
+    rsi_buy_max: 85.0               # 🚀 80→85 (allow more entries in uptrends)
+    rsi_extreme_min: 15.0           # 🚀 20→15 (catch oversold bounces)
+    vwap_max_deviation_pct: 35.0    # 🚀 25→35 (allow extreme bull moves)
+    max_up_accel_pct: 5.0           # 🚀 3.5→5 (strong momentum)
+    max_down_accel_pct: -12.0       # 🚀 -5.5→-12 (SWCH -17%, FARTCOIN -9% geblockt!)
+    atr_min_pct: 0.10               # 🚀 0.12→0.10 (allow lower vol coins)
+    atr_max_pct: 8.0                # 🚀 6→8 (allow volatile memecoins)
+    spike_5m_max_pct: 3.5           # 🚀 2.5→3.5 (allow bigger spikes)
     wick_ratio_min: 0.0
     grid_spacing_mult: 1.0
-    max_active_grids: 1
-    entry_confidence_min: 0.70
+    max_active_grids: 2             # 🚀 1→2 (allow 2 concurrent grids)
+    entry_confidence_min: 0.65      # 🚀 0.70→0.65 (lower bar for entry)
 
-  # BULL regime: relaxed filters (NOT ACTIVE YET - logging_only mode)
+  # BULL regime: very relaxed filters for bull market
   BULL:
-    rsi_buy_max: 85.0
-    vwap_max_deviation_pct: 20.0    # 🔧 FIX: 7.0→20.0 (allow entries in strong uptrends)
-    max_up_accel_pct: 3.0
-    max_down_accel_pct: -4.0
-    atr_min_pct: 0.10
-    spike_5m_max_pct: 3.5
+    rsi_buy_max: 90.0               # 🚀 85→90 (extreme bull trading)
+    vwap_max_deviation_pct: 40.0    # 🚀 30→40 (extreme memecoin pumps)
+    max_up_accel_pct: 7.0           # 🚀 5→7 (very strong momentum)
+    max_down_accel_pct: -15.0       # 🚀 -6→-15 (deep dips OK in bull)
+    atr_min_pct: 0.08               # 🚀 0.10→0.08 (more coins)
+    spike_5m_max_pct: 5.0           # 🚀 3.5→5 (big moves OK)
     grid_spacing_mult: 1.2
     max_active_grids: 3
-    entry_confidence_min: 0.60
+    entry_confidence_min: 0.55      # 🚀 0.60→0.55 (lower bar)
 
-  # CHOP regime: strict filters
+  # CHOP regime: moderate filters (not too strict)
   CHOP:
-    rsi_buy_max: 78.0               # 🔧 FIX: 70→78 (allow trading in choppy markets)
-    vwap_max_deviation_pct: 10.0    # 🔧 FIX: 4.5→10.0 (allow altcoin pumps in chop)
-    max_up_accel_pct: 1.8           # 🔧 FIX: 1.2→1.8 (allow some momentum)
-    max_down_accel_pct: -2.5        # 🔧 FIX: -2.0→-2.5 (allow pullbacks)
-    atr_min_pct: 0.12               # 🔧 FIX: 0.15→0.12
-    spike_5m_max_pct: 2.5           # 🔧 FIX: 2.0→2.5
+    rsi_buy_max: 82.0               # 🚀 78→82 (more trading in chop)
+    vwap_max_deviation_pct: 18.0    # 🚀 10→18 (allow altcoin rotations)
+    max_up_accel_pct: 2.5           # 🚀 1.8→2.5 (momentum OK)
+    max_down_accel_pct: -4.0        # 🚀 -2.5→-4 (deeper dips OK)
+    atr_min_pct: 0.10               # 🚀 0.12→0.10
+    spike_5m_max_pct: 3.0           # 🚀 2.5→3 (bigger moves)
     grid_spacing_mult: 0.8
-    max_active_grids: 1
-    entry_confidence_min: 0.75
+    max_active_grids: 2             # 🚀 1→2 (more grids in chop)
+    entry_confidence_min: 0.70      # 🚀 0.75→0.70
 
   # BEAR regime: relaxed to allow counter-trend altcoin pumps
   BEAR:
@@ -185,8 +185,8 @@ mtf_declining_4h_max: -2.0         # (prevents trading during severe crashes)
 # ==============================================================================
 
 warmup_override_enabled: true
-warmup_4h_strong_min: -0.5        # 🔧 FIX: 0.5→-0.5 (allow 4h pullback if 24h strong)
-warmup_1h_min_if_4h_strong: -2.0  # 🔧 FIX: -1.5→-2.0 (allow 1h dips in bullish coins)
+warmup_4h_strong_min: -2.5        # 🔧 FIX: -0.5→-2.5 (match mtf_4h_min_pct for multi-coin trading)
+warmup_1h_min_if_4h_strong: -3.0  # 🔧 FIX: -2.0→-3.0 (match mtf_1h_min_pct for pullback entries)
 
 # ==============================================================================
 # FEATURE 1.1: MARKET REGIME FILTER - BTC Trend Following
@@ -344,25 +344,25 @@ use_smart_entry_filter: true
 smart_entry_filter:
   # RSI - Use adaptive regime filters instead of static values
   # These are fallback values when adaptive regime detection is disabled
-  rsi_buy_max: 80.0                # Match adaptive baseline (use regime-aware filters when enabled)
-  rsi_extreme_low: 25.0
-  rsi_block_min: 80.0
+  rsi_buy_max: 85.0                # 🚀 80→85 (match relaxed baseline)
+  rsi_extreme_low: 15.0            # 🚀 25→15 (catch oversold)
+  rsi_block_min: 85.0              # 🚀 80→85 (higher ceiling)
 
   # VWAP / candles
-  vwap_max_deviation_pct: 12.0     # 🔧 FIX: 5.0→12.0 (allow bull market entries)
-  min_wick_ratio: 0.0              # 🔧 FIX: 0.05→0.0 (body-dominant OK!)
+  vwap_max_deviation_pct: 35.0     # 🚀 25→35 (extreme bull moves)
+  min_wick_ratio: 0.0              # Keep 0 (body-dominant OK)
 
   # Volatiliteit / ATR
-  max_atr_pct_for_grid: 6.0
-  min_atr_pct_for_grid: 0.10       # 🔧 FIX: 0.2→0.15 (allow lower vol coins like CHESS)
+  max_atr_pct_for_grid: 8.0        # 🚀 6→8 (allow memecoins)
+  min_atr_pct_for_grid: 0.08       # 🚀 0.10→0.08 (more coins qualify)
 
   # Short-term spikes
-  max_5m_spike_pct: 2.5
-  max_down_accel_pct: -4.0          # 🔧 FIX: -1.2→-4.0 (allow healthy pullbacks in bull markets)
-  max_up_accel_pct: 1.8
+  max_5m_spike_pct: 5.0            # 🚀 3.5→5.0 (bigger spikes)
+  max_down_accel_pct: -12.0        # 🚀 -5.5→-12 (SWCH -17%, FARTCOIN -9%!)
+  max_up_accel_pct: 5.0            # 🚀 3.5→5 (strong momentum)
 
   # 24h trend bounds
-  max_trend_24h_pct: 15.0          # 🔧 FIX: 10.0→15.0 (allow stronger bull runs like CHZ +14%)
+  max_trend_24h_pct: 40.0          # 🚀 15.0→40.0 (allow FARTCOIN +32%, WIF +16% bull runs)
   min_trend_24h_pct: -10.0
 
   # Slippage Protection (single source of truth)
@@ -465,17 +465,17 @@ coin_profiles:
     vwap_max_deviation_pct: 15.0   # 🔧 FIX: 3.0→15.0 (L1 volatile moves)
     rsi_extreme_low: 18.0
     rsi_block_min: 75.0
-    max_trend_24h_pct: 25.0        # 🔧 FIX: 18.0→25.0
+    max_trend_24h_pct: 50.0        # 🚀 25.0→50.0 (allow extreme bull moves)
 
 # ==============================================================================
 # GRID CONFIGURATION (Hybrid Grid Engine)
 # ==============================================================================
 
-# 🎯 TIGHTER GRID for faster cycling (was 1.5/10.0)
-grid_range_pct_down: 0.8          # -0.8% below entry (was 1.5%)
-grid_range_pct_up: 1.2            # +1.2% above entry (was 10.0%)
+# 🎯 WIDER GRID for trending markets (aangepast voor bull)
+grid_range_pct_down: 2.0          # 🚀 0.8→2.0% (wider for pullbacks)
+grid_range_pct_up: 5.0            # 🚀 1.2→5.0% (wider for uptrends)
 
-num_grids: 10                     # More grids = tighter spacing (was 7)
+num_grids: 8                      # 🚀 10→8 (fewer but wider grids for trending)
 
 use_dynamic_grid_sizer: true
 
@@ -529,10 +529,10 @@ coin_discovery_refresh_interval_seconds: 3600  # 1 hour (3600s), set to 0 to dis
 # CAPITAL & RISK MANAGEMENT
 # ==============================================================================
 
-max_simultaneous_coins: 2         # ✅ INCREASED: Allow 2 coins for better diversification & opportunity cost tracking
+max_simultaneous_coins: 3         # 🚀 2→3 (more diversification in bull market)
 
-total_amount_quote: 140           # 🎯 Total budget: $140 USDT (wordt gedeeld door 2 coins = $70 per coin)
-risk_reference_balance_quote: 140  # Total budget: $140 USDT (2 coins × $70 each)
+total_amount_quote: 300           # 🚀 140→300 (increase capital for better returns)
+risk_reference_balance_quote: 300  # Total budget: $300 USDT (3 coins × $100 each)
 min_order_amount_quote: 10        # $10 per order
 
 risk_max_balance_per_trade_pct: 100.0  # 100% per coin (2 coins = $140 total)
@@ -541,21 +541,22 @@ risk_max_total_open_risk_pct: 100.0    # 100% total exposure (2 × $70)
 max_exposure_per_coin_pct: 50.0   # Each coin: 50% van $140 = $70
 max_total_exposure_pct: 100.0      # Totaal: 100% van $140 = $140 (2 coins × $70)
 
-stop_loss_pct: 0.05               # 5% SL
-take_profit_pct: 0.02             # 2% TP
+stop_loss_pct: 0.05               # 5% SL per coin
+take_profit_pct: 0.035            # 3.5% TP (let winners run in bull)
 
 min_grid_profit_pct: 0.6          # 0.6% min profit (0.2% fees + 0.2% spread + 0.2% buffer)
 
-emergency_exit_pct: -3.0          # 🔧 FIX: 0.03→-3.0 (3% emergency - NEGATIVE percentage format!)
-hard_stop_pct: -5.0               # 🔧 FIX: 0.05→-5.0 (5% hard stop - NEGATIVE percentage format!)
+# 🛡️ CRASH PROTECTION (Tightened for safety)
+emergency_exit_pct: -2.5         # 🛡️ 2.5% emergency (faster reaction than -3%)
+hard_stop_pct: -4.0               # 🛡️ 4% hard stop (tighter than -5%)
 
 # ==============================================================================
-# DRAWDOWN / KILL SWITCH
+# DRAWDOWN / KILL SWITCH - CRASH PROTECTION
 # ==============================================================================
 
-max_daily_loss_pct: 5.0      # 🔧 FIX: 0.03→5.0 (was absurd - stopped at €0.05 loss!)
-max_weekly_loss_pct: 10.0    # 🔧 FIX: 0.08→10.0 (realistic for grid trading)
-max_monthly_loss_pct: 15.0   # 🔧 FIX: 0.12→15.0 (allows proper risk management)
+max_daily_loss_pct: 3.0      # 🛡️ 3% daily limit = max -$9 per dag (tighter than 5%)
+max_weekly_loss_pct: 8.0     # 🛡️ 8% weekly (tighter than 10%)
+max_monthly_loss_pct: 12.0   # 🛡️ 12% monthly (tighter than 15%)
 
 # =============================================================================
 # TELEGRAM ALERTS (v2.0)

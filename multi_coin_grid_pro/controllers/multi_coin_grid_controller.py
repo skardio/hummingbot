@@ -3664,7 +3664,7 @@ class MultiCoinGridController(ControllerBase):
                                     "AUDIT_WRITTEN",
                                     symbol=audit.symbol,
                                     close_reason=close_reason,
-                                    pnl_net=float(audit.pnl_net_quote),
+                                    pnl_net=float(audit.net_pnl_quote),
                                     duration_sec=audit.total_duration_sec
                                 )
                         except Exception as e:
@@ -4060,15 +4060,36 @@ class MultiCoinGridController(ControllerBase):
                     f"📊 Multi-coin mode: {current_count}/{self.max_simultaneous_coins} slots used - "
                     f"adding {best_coin}"
                 )
-                # Continue to check startup delay and other conditions below
-            else:
-                # All slots full - need to decide if we should replace worst performer
-                # For now, just log and don't switch (keep stable)
-                self.logger().info(
-                    f"📊 Multi-coin mode: All {self.max_simultaneous_coins} slots filled "
-                    f"({list(self.active_coins.keys())}) - keeping current positions"
+                # 🔧 FIX: In multi-coin ADD mode, skip hold time check (only applies to SWITCHING)
+                # Check risk manager and return True immediately to add the coin
+                # Calculate per-coin capital allocation
+                per_coin_capital = Decimal(str(self.config.total_amount_quote)) / \
+                    Decimal(str(max(1, self.max_simultaneous_coins)))
+                requested_notional = per_coin_capital
+                allowed = self.risk_manager.can_open_trade(
+                    symbol=best_coin,
+                    requested_notional=requested_notional,
+                    now=now_val,
+                    logger=self.logger()
                 )
-                return False
+                if allowed is None:
+                    self.logger().warning(
+                        f"🛑 Risk manager blocked adding {best_coin} (see details above)"
+                    )
+                    return False
+                self._next_allocation_quote = allowed
+                return True  # ✅ ADD new coin - no hold time required
+            else:
+                # All slots full - but don't block here!
+                # The multi-coin loop in determine_executor_actions() will handle this
+                # by NOT creating an action for this coin (first coin in top_coins is handled separately)
+                # Just log that we're at capacity
+                self.logger().debug(
+                    f"📊 Multi-coin mode: All {self.max_simultaneous_coins} slots filled "
+                    f"({list(self.active_coins.keys())})"
+                )
+                # 🔧 FIX: Don't return False - let startup delay check below proceed
+                # This allows the multi-coin loop to evaluate other coins properly
 
         # No active coin - check startup delay first
         if not self.active_coin and len(self.active_coins) == 0:
@@ -4110,7 +4131,10 @@ class MultiCoinGridController(ControllerBase):
             if not self._check_smart_entry_filter(best_coin):
                 return False
 
-            requested_notional = Decimal(str(self.config.total_amount_quote))
+            # Calculate per-coin capital for multi-coin mode
+            per_coin_capital = Decimal(str(self.config.total_amount_quote)) / \
+                Decimal(str(max(1, self.max_simultaneous_coins)))
+            requested_notional = per_coin_capital
             allowed = self.risk_manager.can_open_trade(
                 symbol=best_coin,
                 requested_notional=requested_notional,
@@ -4138,7 +4162,10 @@ class MultiCoinGridController(ControllerBase):
             if not self._check_multi_timeframe_buy(best_coin):
                 return False
 
-            requested_notional = Decimal(str(self.config.total_amount_quote))
+            # Calculate per-coin capital for multi-coin mode
+            per_coin_capital = Decimal(str(self.config.total_amount_quote)) / \
+                Decimal(str(max(1, self.max_simultaneous_coins)))
+            requested_notional = per_coin_capital
             allowed = self.risk_manager.can_open_trade(
                 symbol=best_coin,
                 requested_notional=requested_notional,
@@ -4244,17 +4271,21 @@ class MultiCoinGridController(ControllerBase):
         # Phase 3.1: Smart Switch Threshold - volatility-based threshold
         # IMPORTANT: For coins with strong long-term trends (>2%), be less sensitive to short-term volatility
         # This prevents switching away from coins with good 24h trends due to small temporary dips
-        active_has_strong_trend = active_trend_value > 2.0  # Active coin has >2% trend (good long-term trend)
-        best_has_strong_trend = best_trend_value > 2.0  # Best coin has >2% trend
+        # 🔧 FIX: Use config threshold instead of hardcoded 2.0%
+        strong_trend_threshold = float(getattr(self.config, 'switch_threshold_percent', 3.0))  # Default 3%
+        active_has_strong_trend = active_trend_value > strong_trend_threshold
+        best_has_strong_trend = best_trend_value > strong_trend_threshold
 
         # If active coin has strong trend, require larger difference to switch (prevent premature exits)
         if active_has_strong_trend and not best_has_strong_trend:
             # Active coin has strong trend, best coin doesn't - require even larger difference
             trend_difference = best_trend_value - active_trend_value
-            if trend_difference < 1.5:  # Require at least 1.5% better to switch away from strong trend
+            # 🔧 FIX: Make hysteresis configurable instead of hardcoded 1.5%
+            switch_hysteresis = float(getattr(self.config, 'switch_hysteresis_pct', 1.5))  # Default 1.5%
+            if trend_difference < switch_hysteresis:
                 self.logger().info(
                     f"📊 Active coin {self.active_coin} has strong trend ({active_trend_value:+.2f}%) - "
-                    f"requiring larger difference ({trend_difference:+.2f}% < 1.5%) to switch"
+                    f"requiring larger difference ({trend_difference:+.2f}% < {switch_hysteresis}%) to switch"
                 )
                 return False
 
@@ -4303,7 +4334,10 @@ class MultiCoinGridController(ControllerBase):
                     return False
 
         # All checks passed - obtain risk allocation approval
-        requested_notional = Decimal(str(self.config.total_amount_quote))
+        # Calculate per-coin capital for multi-coin mode
+        per_coin_capital = Decimal(str(self.config.total_amount_quote)) / \
+            Decimal(str(max(1, self.max_simultaneous_coins)))
+        requested_notional = per_coin_capital
         allowed_notional = self.risk_manager.can_open_trade(
             symbol=best_coin,
             requested_notional=requested_notional,
@@ -6547,17 +6581,24 @@ class MultiCoinGridController(ControllerBase):
                 # 2. 60m trend must be neutral or positive (>= 0.0%)
                 # 3. Both must be positive (reject if either is negative)
 
-                warmup_240m_ok = trend.trend_240m > self.config.warmup_4h_strong_min  # Use config threshold
-                warmup_60m_ok = trend.trend_60m >= 0.0  # Neutral/positive 1h trend OK
-                both_positive = trend.trend_240m > 0.0 and trend.trend_60m > 0.0  # Both must be positive
+                # 🔧 FIX: Use same logic as normal MTF checks - warmup_4h_strong_min is the THRESHOLD
+                # If warmup_4h_strong_min = -0.5, then -2.08% should be REJECTED (< -0.5)
+                # If warmup_4h_strong_min = -2.5, then -2.08% should be ACCEPTED (> -2.5)
+                warmup_4h_threshold = getattr(self.config, 'warmup_4h_strong_min', -0.5)
+                warmup_1h_threshold = getattr(self.config, 'warmup_1h_min_if_4h_strong', -2.0)
+
+                warmup_240m_ok = trend.trend_240m > warmup_4h_threshold
+                warmup_60m_ok = trend.trend_60m >= warmup_1h_threshold  # 🔧 FIX: Use config, not hardcoded 0.0
+                both_positive = trend.trend_240m > warmup_4h_threshold and trend.trend_60m > warmup_1h_threshold
 
                 # NEW: Warmup Override - Allow 1H negative if 4H is VERY strong (pullback buying)
                 override_active = False
                 if self.config.warmup_override_enabled:
-                    if trend.trend_240m >= self.config.warmup_4h_strong_min:
-                        if trend.trend_60m >= self.config.warmup_1h_min_if_4h_strong:
-                            warmup_60m_ok = True  # Override: accept negative 1h within limit
-                            both_positive = True  # Override: ignore both_positive check
+                    # Override already works correctly - warmup_240m_ok checks if 4h > threshold
+                    if warmup_240m_ok:  # 4H is acceptable
+                        if trend.trend_60m >= warmup_1h_threshold:  # 1H is acceptable (uses config threshold now)
+                            warmup_60m_ok = True  # Override: accept 1h within configured limit
+                            both_positive = True  # Override: ignore strict positive check
                             override_active = True
 
                 if warmup_240m_ok and warmup_60m_ok and both_positive:
@@ -6576,12 +6617,13 @@ class MultiCoinGridController(ControllerBase):
                     reasons = []
                     if not warmup_240m_ok:
                         reasons.append(
-                            f"4h trend ({trend.trend_240m:+.2f}%) <= +{self.config.warmup_4h_strong_min:.2f}% (warm-up requires > +{self.config.warmup_4h_strong_min:.2f}%)")  # noqa: E501
+                            f"4h trend ({trend.trend_240m:+.2f}%) <= {warmup_4h_threshold:+.2f}% (warm-up requires > {warmup_4h_threshold:+.2f}%)")  # noqa: E501
                     if not warmup_60m_ok:
-                        override_status = f" (override needs 4H ≥ {
-                            self.config.warmup_4h_strong_min:+.1f}%, 1H ≥ {
-                            self.config.warmup_1h_min_if_4h_strong:+.1f}%)" if self.config.warmup_override_enabled else ""  # noqa: E501
-                        reasons.append(f"1h trend ({trend.trend_60m:+.2f}%) < 0.0%{override_status}")
+                        override_status = f" (override needs 4H ≥ {warmup_4h_threshold:+.1f}%, 1H ≥ {warmup_1h_threshold:+.1f}%)" if self.config.warmup_override_enabled else ""  # noqa: E501
+                        reasons.append(f"1h trend ({trend.trend_60m:+.2f}%) < {warmup_1h_threshold:+.2f}%{override_status}")
+                    if not both_positive:
+                        reasons.append(
+                            f"One or both trends negative (4h: {trend.trend_240m:+.2f}%, 1h: {trend.trend_60m:+.2f}%)")
                     if not both_positive:
                         reasons.append(
                             f"One or both trends negative (4h: {trend.trend_240m:+.2f}%, 1h: {trend.trend_60m:+.2f}%)")
@@ -6595,39 +6637,48 @@ class MultiCoinGridController(ControllerBase):
                     return False
 
             # Buy conditions (exit thresholds are only used in exit conditions, not here)
-            # Updated: allow slightly softer entries while still requiring upward momentum
-            trend_1440m_ok = trend.trend_1440m > 0.5  # 24h trend > +0.5%
-            trend_240m_ok = trend.trend_240m > 0.3  # 4h trend > +0.3%
-            trend_60m_ok = trend.trend_60m >= -0.1  # 1h trend >= -0.1% (mild pullback allowed)
+            # 🔧 FIX: Use config values instead of hardcoded thresholds!
+            # This allows multi-coin trading in choppy/pullback conditions
+            trend_1440m_threshold = getattr(self.config, 'mtf_24h_min_pct', -2.5)  # Default: -2.5% (allow pullbacks)
+            trend_240m_threshold = getattr(self.config, 'mtf_4h_min_pct', -2.5)    # Default: -2.5% (allow pullbacks)
+            trend_60m_threshold = getattr(self.config, 'mtf_1h_min_pct', -3.0)     # Default: -3.0% (allow pullbacks)
+
+            trend_1440m_ok = trend.trend_1440m > trend_1440m_threshold
+            trend_240m_ok = trend.trend_240m > trend_240m_threshold
+            trend_60m_ok = trend.trend_60m >= trend_60m_threshold
 
             # CRITICAL: Additional check - reject if both short-term trends are negative
             # This prevents trading during declining trends even if 24h trend is positive
-            declining_trend = trend.trend_60m < -0.5 and trend.trend_240m < 0.0
+            # 🔧 FIX: Use mtf_declining thresholds from config (less conservative)
+            declining_1h_threshold = getattr(self.config, 'mtf_declining_1h_max', -4.0)  # Default: -4%
+            declining_4h_threshold = getattr(self.config, 'mtf_declining_4h_max', -2.0)  # Default: -2%
+
+            declining_trend = trend.trend_60m < declining_1h_threshold and trend.trend_240m < declining_4h_threshold
 
             if declining_trend:
                 self.logger().warning(
-                    f"[DECISION] ❌ {coin} BUY REJECTED: Declining trend detected!\n"
+                    f"[DECISION] ❌ {coin} BUY REJECTED: Severe declining trend detected!\n"
                     f"   [TREND] 24h: {trend.trend_1440m:+.2f}% | 4h: {trend.trend_240m:+.2f}% | 1h: {trend.trend_60m:+.2f}%\n"  # noqa: E501
-                    f"   [REASON] 1h trend ({trend.trend_60m:+.2f}%) < -0.5% AND 4h trend ({trend.trend_240m:+.2f}%) < 0%\n"  # noqa: E501
-                    f"   [NOTE] Avoiding trade during declining trends to prevent losses"
+                    f"   [REASON] 1h trend ({trend.trend_60m:+.2f}%) < {declining_1h_threshold}% AND 4h trend ({trend.trend_240m:+.2f}%) < {declining_4h_threshold}%\n"  # noqa: E501
+                    f"   [NOTE] Avoiding trade during severe crashes (uses mtf_declining thresholds)"
                 )
                 return False
 
             if not trend_1440m_ok:
                 self.logger().info(
-                    f"[DECISION] ❌ {coin} BUY REJECTED: 24h trend ({trend.trend_1440m:+.2f}%) <= +0.5%"
+                    f"[DECISION] ❌ {coin} BUY REJECTED: 24h trend ({trend.trend_1440m:+.2f}%) <= {trend_1440m_threshold:+.2f}%"
                 )
                 return False
 
             if not trend_240m_ok:
                 self.logger().info(
-                    f"[DECISION] ❌ {coin} BUY REJECTED: 4h trend ({trend.trend_240m:+.2f}%) <= +0.3%"
+                    f"[DECISION] ❌ {coin} BUY REJECTED: 4h trend ({trend.trend_240m:+.2f}%) <= {trend_240m_threshold:+.2f}%"
                 )
                 return False
 
             if not trend_60m_ok:
                 self.logger().info(
-                    f"[DECISION] ❌ {coin} BUY REJECTED: 1h trend ({trend.trend_60m:+.2f}%) < -0.1%"
+                    f"[DECISION] ❌ {coin} BUY REJECTED: 1h trend ({trend.trend_60m:+.2f}%) < {trend_60m_threshold:+.2f}%"
                 )
                 return False
 
