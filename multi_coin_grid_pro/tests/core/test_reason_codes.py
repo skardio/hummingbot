@@ -18,9 +18,9 @@ class TestReasonCodes(unittest.TestCase):
     """Test suite for ReasonCode enum and utilities"""
 
     def test_reason_code_count(self):
-        """Verify we have exactly 30 rejection codes (no APPROVED)"""
+        """Verify we have exactly 32 rejection codes (added NO_PRICE_DATA, NO_ORDERBOOK_DATA)"""
         codes = list(ReasonCode)
-        self.assertEqual(len(codes), 30, f"Expected 30 codes, got {len(codes)}")
+        self.assertEqual(len(codes), 32, f"Expected 32 codes, got {len(codes)}")
 
         # Verify no APPROVED code exists
         code_values = [code.value for code in codes]

@@ -615,8 +615,23 @@ def _create_grid_action(self, symbol: str, total_amount_quote: Optional[Decimal]
     # Take profit per level (0.25% default)
     take_profit = Decimal(str(overrides.get("take_profit", 0.0025)))
 
-    # Stop loss (2.0% default)
-    stop_loss = Decimal(str(overrides.get("stop_loss", 0.02)))
+    # Stop loss (ATR-based v2 CLAMPED)
+    # ⚠️ NIET meer fixed 2%! Nu dynamic per coin:
+    # - Berekent 2×ATR (volatiliteits-aware)
+    # - Clamped tussen min_stop (2%) en max_stop (8%)
+    # - BTC 1.2% ATR → -2.4% stop
+    # - RENDER 3.5% ATR → -7.0% stop
+    # - Ultra volatiel 10% ATR → capped op -8%
+    if self.config.use_professional_risk_mgmt:
+        atr_pct = self._calculate_atr(symbol)  # ATR from recent price data
+        atr_stop = atr_pct * self.config.atr_stop_multiplier  # 2×ATR
+        stop_loss = Decimal(str(max(
+            self.config.min_stop_pct,  # Min -2%
+            min(atr_stop, self.config.max_stop_pct)  # Max -8%
+        )))
+        logger.info(f"📊 {symbol} - ATR: {atr_pct:.2%}, Stop: {stop_loss:.2%} (clamped)")
+    else:
+        stop_loss = Decimal(str(overrides.get("stop_loss", 0.02)))  # Legacy fixed 2%
 
     # === STAP 2: Calculate Grid Levels ===
     # Start price = current mid price
@@ -704,7 +719,9 @@ Level 5: Buy @ €7.4063 (-1.25%) = €8.57
 Level 6: Buy @ €7.3875 (-1.50%) = €8.57
 
 Take Profit per level: +0.25%
-Stop Loss: -2.0% from entry
+Stop Loss (v2): Clamped 2×ATR
+  - DOT ATR 2.5% → -5.0% stop (2×2.5%)
+  - Clamped tussen -2% en -8%
 ```
 
 ### Stap 5.2: Execute Action
@@ -1266,9 +1283,9 @@ def process_order_filled_event(self, _, market, event: OrderFilledEvent):
                 self.logger().info("🎉 Grid completed - all levels profitable!")
 ```
 
-### Scenario 8.2: Stop Loss Hit (LOSS PATH)
+### Scenario 8.2: Stop Loss Hit (LOSS PATH - v2 ATR-Based)
 
-**Stap 1: Price Drops Below Stop Loss**
+**Stap 1: Price Drops Below ATR-Based Stop**
 ```python
 async def control_task(self):
     """
@@ -1379,7 +1396,259 @@ async def stop(self, controller_id: str):
 
 ---
 
-## 9. CONTROL LOOP
+## 9. PROFESSIONAL RISK MANAGEMENT (v2 GRID-AWARE)
+
+> ⚠️ **v2 UPDATE**: Bot heeft sinds januari 2026 professionele grid-aware risk management.
+> Dit is NIET momentum/trend risk (trailing stops, fixed %), maar grid-specific logic.
+
+### 9.1: ATR-Based Stops (Clamped)
+
+**Probleem met oude fixed 2% stop**:
+- RENDER (volatiel, ATR 3.5%) raakte vaak -2% stop door normale oscillatie
+- BTC (stabiel, ATR 1.2%) had te wide stop → verloor meer dan nodig
+
+**v2 Oplossing: Clamped ATR stops**
+```python
+# Bereken ATR (14-period)
+atr_pct = calculate_atr(symbol, period=14)
+
+# 2× ATR als basis
+atr_stop = atr_pct * 2.0
+
+# Clamp tussen min (2%) en max (8%)
+effective_stop = max(0.02, min(atr_stop, 0.08))
+
+# Voorbeelden:
+# BTC ATR 1.2% → 2×1.2% = 2.4% → clamped to 2.4% ✅
+# RENDER ATR 3.5% → 2×3.5% = 7.0% → clamped to 7.0% ✅
+# Ultra volatiel ATR 10% → 2×10% = 20% → capped op 8% ✅
+```
+
+**Impact**: Volatiele coins krijgen wijdere stops, stabiele coins tighter stops.
+
+---
+
+### 9.2: High Watermark Drawdown (Profit Tiers)
+
+**Probleem met trailing stops**:
+- Grid gaat van +2.5% → +2.0% → trailing stop triggert
+- Normale grid oscillatie → te vroeg verkocht
+- Grid structuur verliest function
+
+**v2 Oplossing: Drawdown-based profit tiers**
+```python
+# Track hoogste PnL sinds entry (high watermark)
+if current_pnl > peak_pnl:
+    peak_pnl = current_pnl  # Update high water mark
+
+# Bereken drawdown vanaf peak
+drawdown = peak_pnl - current_pnl
+
+# Profit tiers (peak, required_drawdown, lock_level):
+if peak_pnl >= 0.02 and drawdown >= 0.013:
+    # Peak was +2%, drawdown 1.3% → lock +0.7%
+    close_position(lock_profit=0.007)
+elif peak_pnl >= 0.01 and drawdown >= 0.005:
+    # Peak was +1%, drawdown 0.5% → lock breakeven
+    close_position(lock_profit=0.0)
+
+# Voorbeeld flow:
+# Entry €100 → Peak €102.50 (+2.5%) → geen actie (nog geen drawdown)
+# Dalend naar €101.00 (+1.0%) → drawdown 1.5%
+# Drawdown 1.5% >= 1.3% required → LOCK +0.7% profit ✅
+```
+
+**Waarom beter**:
+- Normale oscillatie (€102.50 → €102.00) triggert NIET
+- Structurele reversal (€102.50 → €101.00) triggert WEL
+- Grid blijft intact tot echte dip
+
+---
+
+### 9.3: Context-Aware Time Exits (No-Fills Check)
+
+**Probleem met blind "3 uur = exit"**:
+- Grid trades need 4-12 uur om te werken
+- Te vroeg exit = kapt goede trades af
+
+**v2 Oplossing: Exit ALS alle 3 waar**:
+```python
+# 1. Positie ouder dan 6 uur
+age_sec = time.time() - position.entry_time
+if age_sec < 6 * 3600:
+    return "HOLD"  # Te jong, grid needs tijd
+
+# 2. In verlies
+if position.pnl_pct >= 0:
+    return "HOLD"  # Winstgevend, laat lopen
+
+# 3. Stalled OF geen fills
+atr_pct = calculate_atr(symbol)
+movement_last_hour = calculate_movement(symbol, period=3600)
+is_stalled = (movement_last_hour / atr_pct) < 0.3  # < 0.3× ATR
+
+minutes_since_fill = (time.time() - last_fill_time) / 60
+no_recent_fills = minutes_since_fill > 45  # 45min threshold
+
+if is_stalled or no_recent_fills:
+    return "TIME_STOP: Dead position"
+
+# Anders: HOLD (nog niet stalled of nog fills)
+```
+
+**Waarom "no-fills check" cruciaal**:
+- Gezonde grid "ademt" → vult regelmatig orders
+- Geen fills in 45 min = dead liquidity of execution issue
+- Voorkomt eindeloos wachten op dode posities
+
+---
+
+### 9.4: Pause Cooldown (No Flapping)
+
+**Probleem zonder cooldown**:
+```
+Rolling PnL < -2% → PAUSE
+→ 1 winning trade → rolling PnL = -1.5%
+→ RESUME
+→ 2 losing trades → rolling PnL = -2.1%
+→ PAUSE (flapping!)
+```
+
+**v2 Oplossing: 2-hour cooldown + resume check**
+```python
+# Trigger pause
+if rolling_20_trades_pnl < -0.02:
+    pause_until = time.time() + (2 * 3600)  # 2-hour cooldown
+    pause_reason = "Rolling PnL too low: -2.1%"
+    logger.warning("⏸️ PAUSE TRIGGERED (cooldown: 2h)")
+
+# Check if can resume
+if time.time() >= pause_until:
+    # Calculate last 10 trades PnL
+    last_10_pnl = sum(t["pnl"] for t in recent_trades[-10:]) / 10
+
+    if last_10_pnl < 0:
+        # Not improved yet → extend pause
+        pause_until = time.time() + (2 * 3600)
+        logger.warning("⏸️ Pause extended (last 10 trades still negative)")
+    else:
+        # Improved → resume OK
+        pause_until = None
+        logger.info("▶️ Resume trading (last 10 trades positive)")
+```
+
+**Waarom cooldown werkt**:
+- Forceert 2-uur rust (geen impulsief resume)
+- Vereist structurele verbetering (10 trades positief)
+- Voorkomt flapping (pause/resume loop)
+
+---
+
+### 9.5: Config Parameters (v2)
+
+Zie `config.prod.yaml` of `spot_grid_bitget.yaml`:
+
+```yaml
+# ATR-Based Stops (Clamped)
+atr_stop_multiplier: 2.0      # 2× ATR
+min_stop_pct: 0.02            # Min -2%
+max_stop_pct: 0.08            # Max -8%
+
+# Time Exits (Context-Aware)
+time_based_stop_minutes: 360          # 6 hours
+time_stop_requires_stall: true        # Require stall OR no fills
+min_minutes_since_last_fill: 45       # Dead liquidity threshold
+
+# Profit Tiers (High Watermark Drawdown)
+# Defaults in code:
+# [0.01, 0.005, 0.0]   → Peak +1%, drawdown 0.5% → lock 0%
+# [0.02, 0.013, 0.007] → Peak +2%, drawdown 1.3% → lock +0.7%
+# [0.03, 0.015, 0.015] → Peak +3%, drawdown 1.5% → lock +1.5%
+
+# Pause Logic (Cooldown)
+min_rolling_pnl_pct: -0.02           # Trigger: < -2%
+pause_cooldown_minutes: 120          # 2-hour pause
+resume_min_pnl_pct: 0.0              # Resume: last 10 trades >= 0%
+min_win_rate_threshold: 0.35         # Secondary check (35% OK)
+```
+
+---
+
+## 10. CONTROL LOOP (Legacy)
+
+### Stap 9.1: Professional Risk Management (v2)
+
+**⚠️ NIEUWE GRID-AWARE RISK FEATURES**
+
+De bot heeft sinds v2 professionele risk management:
+
+#### 1. **ATR-Based Stops (Clamped)**
+```python
+# NIET meer fixed 2% voor alle coins!
+# Nu dynamic per coin:
+
+atr_pct = calculate_atr(symbol, period=14)
+atr_stop = atr_pct * 2.0  # 2×ATR multiplier
+effective_stop = max(0.02, min(atr_stop, 0.08))  # Clamped: 2%-8%
+
+# Voorbeelden:
+# BTC ATR 1.2% → stop -2.4%
+# RENDER ATR 3.5% → stop -7.0%
+# Ultra volatiel 10% → capped op -8%
+```
+
+**Waarom**: Volatiele coins krijgen wijdere stops, stabiele coins tightere stops.
+
+#### 2. **High Watermark Drawdown (Profit Tiers)**
+```python
+# Track hoogste PnL sinds entry
+peak_pnl = max(peak_pnl, current_pnl)  # High watermark
+drawdown = peak_pnl - current_pnl
+
+# Profit tiers:
+if peak_pnl >= 0.02 and drawdown >= 0.013:  # Peak +2%, drawdown 1.3%
+    close_position(lock_profit=0.007)  # Lock +0.7%
+elif peak_pnl >= 0.01 and drawdown >= 0.005:  # Peak +1%, drawdown 0.5%
+    close_position(lock_profit=0.0)  # Lock breakeven
+```
+
+**Waarom**: Voorkomt dat grid posities terugvallen van +3% naar -2%. Lock profit bij structurele reversal.
+
+#### 3. **Context-Aware Time Exits (No-Fills Check)**
+```python
+# Exit ALS alle 3 waar:
+if (
+    position_age > 6 * 3600  # > 6 uur
+    and pnl < 0  # Verlies
+    and (price_movement_atr < 0.3  # Stalled
+         or minutes_since_last_fill > 45)  # Dead liquidity
+):
+    close_position(reason="TIME_STOP: Dead position")
+```
+
+**Waarom**: Grid needs tijd (6u), maar dode posities (geen fills, geen beweging) moeten eruit.
+
+#### 4. **Pause Cooldown (No Flapping)**
+```python
+# Trigger pause:
+if rolling_20_trades_pnl < -0.02:  # < -2%
+    pause_until = now + 2 * 3600  # 2-hour cooldown
+    pause_reason = "Rolling PnL too low"
+
+# Resume check:
+if now >= pause_until:
+    last_10_pnl = calculate_last_n_pnl(10)
+    if last_10_pnl < 0:
+        extend_pause(2 * 3600)  # Extend 2h more
+    else:
+        resume_trading()
+```
+
+**Waarom**: Voorkomt flapping (pause → 1 win → resume → verlies → pause). Forceert structurele verbetering.
+
+---
+
+## 9. CONTROL LOOP (Legacy)
 
 ### Complete Flow Diagram
 
@@ -1432,9 +1701,10 @@ async def stop(self, controller_id: str):
         │     Grids            │
         └──────────┬───────────┘
                    │
-                   ├─ Check Stop Loss
-                   ├─ Check Take Profit
-                   ├─ Check Trend Reversal
+                   ├─ Check ATR Stop (v2 clamped)
+                   ├─ Check High Watermark Drawdown (profit tiers)
+                   ├─ Check Time Exit (6h + stalled/no-fills)
+                   ├─ Check Pause Cooldown (2h if rolling PnL < -2%)
                    │
                    ▼
         ┌──────────────────────┐
@@ -1500,12 +1770,15 @@ Time      Action
 7. **Close** → When sell fills, take 0.25% profit
 8. **Repeat** → Check if same coin still best, or switch
 
-**Key Points:**
+**Key Points (v2):**
 - ✅ Guardrails prevent selling below entry price
 - ✅ SmartEntry filters ensure good timing
 - ✅ Grid levels spread risk (€60 / 7 = €8.57 per level)
 - ✅ 0.25% take profit per level
-- ✅ 2% stop loss for risk management
+- ✅ **ATR-based stops (clamped 2%-8%)** - volatility-aware, dynamic per coin
+- ✅ **High watermark drawdown** - profit tiers lock gains at structural reversals
+- ✅ **Context-aware time exits** - 6h + stalled/no-fills check (dead liquidity)
+- ✅ **Pause cooldown (2h)** - prevents flapping, requires 10 trades positive to resume
 - ✅ **Story D1**: Adaptive timeout based on volatility (0.7x - 2.0x multiplier)
 - ✅ **Story B2**: Audit trail for every execution (JSONL format)
 - ✅ **Story C2**: KPI metrics and performance analysis

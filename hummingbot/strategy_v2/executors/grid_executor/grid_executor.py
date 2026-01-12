@@ -1075,8 +1075,46 @@ class GridExecutor(ExecutorBase):
 
         # If keep_position=False, close any open position immediately
         if not keep_position:
+            # 🔧 FIX: Force process pending fills BEFORE calculating position
+            # This prevents partial sells when recent fills aren't processed yet
+            try:
+                # Process any pending order updates/fills
+                connector = self.connectors[self.config.connector_name]
+                if hasattr(connector, '_process_trade_fills'):
+                    connector._process_trade_fills()
+
+                # Also update in-flight orders to ensure all fills are tracked
+                if hasattr(connector, '_update_inflight_orders'):
+                    connector._update_inflight_orders()
+
+                self.logger().debug(f"🔄 Processed pending fills before stop for {self.config.trading_pair}")
+            except Exception as e:
+                self.logger().warning(f"⚠️  Could not process pending fills: {e}")
+
             # Update metrics to get current position size and price
             self.update_position_metrics()
+
+            # 🔧 FIX: Double-check position with actual exchange balance
+            # Prevents partial sells when tracked position is outdated
+            try:
+                connector = self.connectors[self.config.connector_name]
+                trading_pair_parts = self.config.trading_pair.split("-")
+                if len(trading_pair_parts) >= 1:
+                    base_asset = trading_pair_parts[0]
+                    actual_balance = connector.get_available_balance(base_asset)
+
+                    # If actual balance > tracked position, use actual balance
+                    if actual_balance > self.position_size_base:
+                        self.logger().warning(
+                            f"⚠️  Position mismatch detected! "
+                            f"Tracked: {self.position_size_base} {base_asset}, "
+                            f"Actual: {actual_balance} {base_asset}. "
+                            f"Using ACTUAL balance for close order."
+                        )
+                        self.position_size_base = actual_balance
+            except Exception as e:
+                self.logger().warning(f"⚠️  Could not verify position with exchange balance: {e}")
+
             # Also update full metrics to ensure mid_price and current_close_quote are set
             try:
                 self.update_metrics()

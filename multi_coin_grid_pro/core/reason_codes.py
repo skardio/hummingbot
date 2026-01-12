@@ -56,6 +56,8 @@ class ReasonCode(str, Enum):
     SPREAD_TOO_WIDE = "SPREAD_TOO_WIDE"
     DEPTH_INSUFFICIENT = "DEPTH_INSUFFICIENT"
     ORDERBOOK_UNAVAILABLE = "ORDERBOOK_UNAVAILABLE"
+    NO_PRICE_DATA = "NO_PRICE_DATA"  # Unable to fetch bid/ask prices
+    NO_ORDERBOOK_DATA = "NO_ORDERBOOK_DATA"  # Orderbook snapshot unavailable
 
     # ===== MTF (2 codes) =====
     MTF_INSUFFICIENT = "MTF_INSUFFICIENT"
@@ -99,6 +101,7 @@ def get_stage_for_reason(reason: ReasonCode) -> Stage:
         ReasonCode.SPIKE_5M_EXCESSIVE, ReasonCode.ACCEL_FALLING_KNIFE, ReasonCode.ACCEL_BLOWOFF,
         ReasonCode.TREND_24H_OUT_OF_RANGE, ReasonCode.SPREAD_TOO_WIDE,
         ReasonCode.DEPTH_INSUFFICIENT, ReasonCode.ORDERBOOK_UNAVAILABLE,
+        ReasonCode.NO_PRICE_DATA, ReasonCode.NO_ORDERBOOK_DATA,
     }
     mtf_codes = {ReasonCode.MTF_INSUFFICIENT, ReasonCode.MTF_CRASH_DETECTED}
     risk_codes = {

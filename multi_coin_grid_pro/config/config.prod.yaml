@@ -572,6 +572,15 @@ coin_profiles:
     rsi_extreme_low: 24.0
     rsi_block_min: 70.0
 
+  SNX-EUR:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5.0       # 6.0→5.0 (strenger!)
+    vwap_max_deviation_pct: 10.0    # 12.0→10.0 (minder extreme moves)
+    rsi_extreme_low: 25.0            # 24.0→25.0 (iets conservatiever)
+    rsi_block_min: 74.0              # 72.0→74.0 (STRIKTER)
+    max_5m_spike_pct: 1.5            # Extra: block 5-min spikes
+
+
 # ==============================================================================
 # GRID CONFIGURATION (Hybrid Grid Engine)
 # ==============================================================================
@@ -632,9 +641,9 @@ coin_discovery_refresh_interval_seconds: 3600  # 1 hour (3600s), set to 0 to dis
 # ==============================================================================
 # CAPITAL & RISK MANAGEMENT
 # ==============================================================================
-max_simultaneous_coins: 2          # 🔧 FIX: 4→2 (focus on best setups, reduce inventory spread)
+max_simultaneous_coins: 3          # 🔧 FIX: 2→3 (€93 per coin, reduce SLOT_FULL misses)
 
-total_amount_quote: 280            # 🚀 200→280 (€70 per coin)
+total_amount_quote: 280            # 🚀 200→280 (€93 per coin with 3 slots)
 min_order_amount_quote: 15         # 🚀 10→15 (larger orders)
 
 risk_reference_balance_quote: 350  # 🚀 250→350 (higher reference)
@@ -644,20 +653,54 @@ risk_max_total_open_risk_pct: 80   # 80% van €350 = €280 totaal
 max_exposure_per_coin_pct: 80      # Each coin: max 80%
 max_total_exposure_pct: 80        # Totaal: 80% van €250 = €200
 
-stop_loss_pct: 0.05                # 5% globale SL per positie
+# Grace period: Give positions time to develop before switching (professional practice)
+switch_grace_period_seconds: 420   # 7 min (balance: professional but flexible, reduce SLOT_FULL)
+
+# ==============================================================================
+# PROFESSIONAL RISK MANAGEMENT (Grid-Aware v2)
+# ==============================================================================
+# ✅ Fixed: max→clamp for ATR stops, drawdown-based profit tiers, no-fills check, pause cooldown
+
+use_professional_risk_mgmt: true
+
+# ATR-Based Stops (CLAMPED: never too tight, never too wide)
+stop_loss_pct: 0.08                # Legacy backup
+atr_stop_multiplier: 2.0           # 2×ATR dynamic stop
+min_stop_pct: 0.02                 # Min -2% (never too tight for BTC)
+max_stop_pct: 0.05                 # Max -5% (conservative cap for grid trading)
+# Examples: BTC 1.2% ATR → -2.4%, RENDER 3.5% ATR → -7%, 10% ATR → capped to -8%
+
 take_profit_pct: 0.07              # 🚀 4→7% TP (inventory +45, higher TP!)
+
+# Context-Aware Time Exits (stall + no fills check)
+time_based_stop_minutes: 360       # 6 hours (grids need time!)
+time_stop_requires_stall: true     # Only exit if stalled OR no fills
+price_stall_threshold_atr: 0.3     # Movement < 0.3×ATR = stalled
+min_minutes_since_last_fill: 45    # Dead liquidity: no fills > 45min = exit
+
+# Profit Tiers (HIGH WATERMARK DRAWDOWN logic - grid-safe)
+# Format: [peak_pct, required_pullback_pct, lock_pct]
+# Peak +1% → drawdown 0.5% → lock breakeven
+# Peak +2% → drawdown 1.3% → lock +0.7%
+# Peak +3% → drawdown 1.5% → lock +1.5%
+
+# PnL-Driven Pauses (equity-based with cooldown)
+min_rolling_pnl_pct: -0.02         # Pause if rolling 20-trade PnL < -2%
+min_win_rate_threshold: 0.35       # 35% WR acceptable for grids
+pause_cooldown_minutes: 120        # 2-hour pause after trigger
+resume_min_pnl_pct: 0.0            # Resume only if last 10 trades >= 0%
 
 min_grid_profit_pct: 2.0           # 1.5 → 2.0 voor fee overhead (€0.04/trade)
 
-# 🛡️ CRASH PROTECTION (Tightened limits)
+# 🛡️ CRASH PROTECTION (Legacy - kept for compatibility)
 emergency_exit_pct: -2.5          # 🛡️ 2.5% emergency (faster reaction)
 hard_stop_pct: -4.0                # 🛡️ 4% hard stop (tighter protection)
 
 # ==============================================================================
-# DRAWDOWN / KILL SWITCH - CRASH PROTECTION
+# DRAWDOWN / KILL SWITCH - CRASH PROTECTION (Grid-Aware)
 # ==============================================================================
 
-max_daily_loss_pct: 2.5      # 🛡️ 2.5% daily (stricter than 3%)
+max_daily_loss_pct: 2.5      # 🛡️ 2.5% daily (managed by ProfessionalRiskManager)
 max_daily_loss_eur: 10.0     # 🛡️ Hard €10 limit per dag
 max_weekly_loss_pct: 7.0     # 🛡️ 7% weekly (stricter than 8%)
 max_monthly_loss_pct: 10.0   # 🛡️ 10% monthly (stricter than 12%)

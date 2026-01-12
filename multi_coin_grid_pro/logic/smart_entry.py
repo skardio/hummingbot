@@ -166,6 +166,19 @@ class SmartEntryFilter:
 
         if bid_price is None or ask_price is None:
             self.logger.debug(f"[SPREAD] {symbol} - Unable to fetch prices, skipping check")
+            # Emit event voor tracking
+            if self.event_logger:
+                try:
+                    self.event_logger.emit_gate_denied(
+                        correlation_id=f"spread_check_{symbol}",
+                        symbol=symbol,
+                        stage=Stage.SMART_ENTRY,
+                        reason_code=ReasonCode.NO_PRICE_DATA,
+                        reason_msg="Prices unavailable for spread check",
+                        metadata={"check_type": "spread"}
+                    )
+                except Exception as e:
+                    self.logger.debug(f"Failed to emit gate_denied event: {e}")
             return True, "Prices unavailable (skipping spread check)", None
 
         if bid_price <= 0 or ask_price <= 0:
@@ -221,11 +234,24 @@ class SmartEntryFilter:
                     is_sufficient_depth,
                 )
 
-            # Get orderbook snapshot (non-blocking, uses cache)
+            # Get orderbook snapshot (with retry logic)
             bids, asks, mid_price = get_orderbook_snapshot(self.exchange_connector, symbol)
 
             if not bids or not asks or not mid_price:
                 self.logger.warning(f"[DEPTH] {symbol} - No orderbook data available")
+                # Emit event voor tracking (critical: dit is de root cause van 99.9% loss)
+                if self.event_logger:
+                    try:
+                        self.event_logger.emit_gate_denied(
+                            correlation_id=f"depth_check_{symbol}",
+                            symbol=symbol,
+                            stage=Stage.SMART_ENTRY,
+                            reason_code=ReasonCode.NO_ORDERBOOK_DATA,
+                            reason_msg="No orderbook data available for depth check",
+                            metadata={"check_type": "depth", "order_size_eur": order_size_eur}
+                        )
+                    except Exception as e:
+                        self.logger.debug(f"Failed to emit gate_denied event: {e}")
                 return True, "No orderbook data (skipping check)", 0.0, 0.0
 
             # Calculate depth metrics (bids/asks are List[OrderBookRow], mid_price is Decimal)

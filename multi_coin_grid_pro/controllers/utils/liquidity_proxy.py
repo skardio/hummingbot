@@ -212,44 +212,73 @@ def format_depth_log(
 
 def get_orderbook_snapshot(
     connector,
-    trading_pair: str
+    trading_pair: str,
+    max_retries: int = 3,
+    retry_delay_ms: int = 500
 ) -> Tuple[Optional[List[OrderBookRow]], Optional[List[OrderBookRow]], Optional[Decimal]]:
     """
-    Get orderbook snapshot from connector (cached, non-blocking).
+    Get orderbook snapshot from connector with retry logic.
 
     Args:
         connector: Exchange connector instance
         trading_pair: Trading pair symbol
+        max_retries: Maximum number of retry attempts (default: 3)
+        retry_delay_ms: Delay between retries in milliseconds (default: 500)
 
     Returns:
-        (bids, asks, mid_price) or (None, None, None) if unavailable
+        (bids, asks, mid_price) or (None, None, None) if unavailable after retries
 
     Note:
         Uses cached orderbook data - no additional REST calls.
+        Retries handle race conditions during orderbook initialization.
     """
-    try:
-        order_book = connector.get_order_book(trading_pair)
-        if not order_book:
-            return None, None, None
+    import time
 
-        snapshot = order_book.snapshot
-        if snapshot is None or snapshot[0] is None or snapshot[1] is None:
-            return None, None, None
+    for attempt in range(max_retries):
+        try:
+            order_book = connector.get_order_book(trading_pair)
+            if not order_book:
+                if attempt < max_retries - 1:
+                    logger.debug(f"[OB_RETRY] {trading_pair} - No order_book object (attempt {attempt + 1}/{max_retries})")
+                    time.sleep((retry_delay_ms / 1000.0) * (attempt + 1))
+                    continue
+                return None, None, None
 
-        bids = snapshot[0]  # List[OrderBookRow]
-        asks = snapshot[1]  # List[OrderBookRow]
+            snapshot = order_book.snapshot
+            if snapshot is None or snapshot[0] is None or snapshot[1] is None:
+                if attempt < max_retries - 1:
+                    logger.debug(f"[OB_RETRY] {trading_pair} - No snapshot (attempt {attempt + 1}/{max_retries})")
+                    time.sleep((retry_delay_ms / 1000.0) * (attempt + 1))
+                    continue
+                return None, None, None
 
-        # Explicit None check to avoid DataFrame ambiguity
-        if bids is None or asks is None or len(bids) == 0 or len(asks) == 0:
-            return None, None, None
+            bids = snapshot[0]  # List[OrderBookRow]
+            asks = snapshot[1]  # List[OrderBookRow]
 
-        # Calculate mid price
-        best_bid = Decimal(str(bids[0].price))
-        best_ask = Decimal(str(asks[0].price))
-        mid_price = (best_bid + best_ask) / Decimal("2")
+            # Explicit None check to avoid DataFrame ambiguity
+            if bids is None or asks is None or len(bids) == 0 or len(asks) == 0:
+                if attempt < max_retries - 1:
+                    logger.debug(f"[OB_RETRY] {trading_pair} - Empty bids/asks (attempt {attempt + 1}/{max_retries})")
+                    time.sleep((retry_delay_ms / 1000.0) * (attempt + 1))
+                    continue
+                return None, None, None
 
-        return bids, asks, mid_price
+            # Calculate mid price
+            best_bid = Decimal(str(bids[0].price))
+            best_ask = Decimal(str(asks[0].price))
+            mid_price = (best_bid + best_ask) / Decimal("2")
 
-    except Exception as e:
-        logger.debug(f"Failed to get orderbook for {trading_pair}: {e}")
-        return None, None, None
+            # Success - log if retry was needed
+            if attempt > 0:
+                logger.info(f"[OB_RETRY] {trading_pair} - Success after {attempt + 1} attempts")
+
+            return bids, asks, mid_price
+
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.debug(f"[OB_RETRY] {trading_pair} - Exception: {e} (attempt {attempt + 1}/{max_retries})")
+                time.sleep((retry_delay_ms / 1000.0) * (attempt + 1))
+            else:
+                logger.debug(f"Failed to get orderbook for {trading_pair} after {max_retries} attempts: {e}")
+
+    return None, None, None

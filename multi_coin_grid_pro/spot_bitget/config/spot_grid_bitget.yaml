@@ -526,12 +526,12 @@ coin_discovery_refresh_interval_seconds: 3600  # 1 hour (3600s), set to 0 to dis
 # Nieuwe trending coins worden automatisch ontdekt zonder herstart!
 
 # ==============================================================================
-# CAPITAL & RISK MANAGEMENT
+# CAPITAL & RISK MANAGEMENT (Grid-Aware)
 # ==============================================================================
 
-max_simultaneous_coins: 3         # 🚀 2→3 (more diversification in bull market)
+max_simultaneous_coins: 4         # 🚀 3→4 (reduce SLOT_FULL, $75 per coin still solid)
 
-total_amount_quote: 300           # 🚀 140→300 (increase capital for better returns)
+total_amount_quote: 300           # 🚀 140→300 (4 coins × $75 each)
 risk_reference_balance_quote: 300  # Total budget: $300 USDT (3 coins × $100 each)
 min_order_amount_quote: 10        # $10 per order
 
@@ -541,20 +541,54 @@ risk_max_total_open_risk_pct: 100.0    # 100% total exposure (2 × $70)
 max_exposure_per_coin_pct: 50.0   # Each coin: 50% van $140 = $70
 max_total_exposure_pct: 100.0      # Totaal: 100% van $140 = $140 (2 coins × $70)
 
-stop_loss_pct: 0.05               # 5% SL per coin
+# Grace period: Give positions time to develop before switching (professional practice)
+switch_grace_period_seconds: 420   # 7 min (balance: professional but flexible, reduce SLOT_FULL)
+
+# ==============================================================================
+# PROFESSIONAL RISK MANAGEMENT (Grid-Aware v2)
+# ==============================================================================
+# ✅ Fixed: max→clamp for ATR stops, drawdown-based profit tiers, no-fills check, pause cooldown
+
+use_professional_risk_mgmt: true
+
+# ATR-Based Stops (CLAMPED: never too tight, never too wide)
+stop_loss_pct: 0.08               # Legacy backup
+atr_stop_multiplier: 2.0          # 2×ATR dynamic stop
+min_stop_pct: 0.02                # Min -2% (never too tight for BTC)
+max_stop_pct: 0.05                # Max -5% (conservative cap for grid trading)
+# Examples: BTC 1.2% ATR → -2.4%, RENDER 3.5% ATR → -7%, 10% ATR → capped to -8%
+
 take_profit_pct: 0.035            # 3.5% TP (let winners run in bull)
+
+# Context-Aware Time Exits (stall + no fills check)
+time_based_stop_minutes: 360      # 6 hours (grids need time!)
+time_stop_requires_stall: true    # Only exit if stalled OR no fills
+price_stall_threshold_atr: 0.3    # Movement < 0.3×ATR = stalled
+min_minutes_since_last_fill: 45   # Dead liquidity: no fills > 45min = exit
+
+# Profit Tiers (HIGH WATERMARK DRAWDOWN logic - grid-safe)
+# Format: [peak_pct, required_pullback_pct, lock_pct]
+# Peak +1% → drawdown 0.5% → lock breakeven
+# Peak +2% → drawdown 1.3% → lock +0.7%
+# Peak +3% → drawdown 1.5% → lock +1.5%
+
+# PnL-Driven Pauses (equity-based with cooldown)
+min_rolling_pnl_pct: -0.02        # Pause if rolling 20-trade PnL < -2%
+min_win_rate_threshold: 0.35      # 35% WR acceptable for grids
+pause_cooldown_minutes: 120       # 2-hour pause after trigger
+resume_min_pnl_pct: 0.0           # Resume only if last 10 trades >= 0%
 
 min_grid_profit_pct: 0.6          # 0.6% min profit (0.2% fees + 0.2% spread + 0.2% buffer)
 
-# 🛡️ CRASH PROTECTION (Tightened for safety)
+# 🛡️ CRASH PROTECTION (Legacy - kept for compatibility)
 emergency_exit_pct: -2.5         # 🛡️ 2.5% emergency (faster reaction than -3%)
 hard_stop_pct: -4.0               # 🛡️ 4% hard stop (tighter than -5%)
 
 # ==============================================================================
-# DRAWDOWN / KILL SWITCH - CRASH PROTECTION
+# DRAWDOWN / KILL SWITCH - CRASH PROTECTION (Grid-Aware)
 # ==============================================================================
 
-max_daily_loss_pct: 3.0      # 🛡️ 3% daily limit = max -$9 per dag (tighter than 5%)
+max_daily_loss_pct: 3.0      # 🛡️ 3% daily limit = max -$9 per dag (managed by ProfessionalRiskManager)
 max_weekly_loss_pct: 8.0     # 🛡️ 8% weekly (tighter than 10%)
 max_monthly_loss_pct: 12.0   # 🛡️ 12% monthly (tighter than 15%)
 

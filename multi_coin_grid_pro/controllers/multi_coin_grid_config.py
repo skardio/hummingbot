@@ -138,6 +138,17 @@ class MultiCoinGridConfig(ControllerConfigBase):
         description="Number of coins to trade simultaneously. Capital is divided equally among coins."
     )
 
+    switch_grace_period_seconds: int = Field(
+        default=600,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Grace period before switching coins (seconds, 0=disabled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        ge=0,
+        description="Minimum time (seconds) before switching to a different coin. Professional practice: give trades time to develop (default: 600 = 10 min)"
+    )
+
     exclude_expensive_coins: bool = Field(
         default=True,
         client_data=ClientFieldData(
@@ -605,9 +616,9 @@ class MultiCoinGridConfig(ControllerConfigBase):
 
     # Risk Management
     stop_loss_pct: Decimal = Field(
-        default=Decimal("0.08"),
+        default=Decimal("0.08"),  # Backup minimum (ATR-based logic uses 2×ATR, this is floor)
         client_data=ClientFieldData(
-            prompt=lambda mi: "Stop loss percentage (e.g., 0.08 for -8%): ",
+            prompt=lambda mi: "Stop loss percentage backup (e.g., 0.08 for -8%, actual stop = max(2×ATR, this)): ",
             prompt_on_new=True,
         ),
         json_schema_extra={"is_updatable": True}
@@ -618,6 +629,124 @@ class MultiCoinGridConfig(ControllerConfigBase):
         client_data=ClientFieldData(
             prompt=lambda mi: "Take profit percentage per grid level (e.g., 0.02 for +2%): ",
             prompt_on_new=True,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # PROFESSIONAL RISK MANAGEMENT (Grid-Aware)
+    use_professional_risk_mgmt: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable professional risk management (ATR stops, profit tiers, context-aware exits)? ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    max_daily_loss_pct: Decimal = Field(
+        default=Decimal("0.03"),  # -3% daily loss limit (HARD)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum daily loss percentage (e.g., 0.03 for -3% stop trading for day): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    atr_stop_multiplier: Decimal = Field(
+        default=Decimal("2.0"),  # Stop at 2×ATR (grid-aware)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "ATR stop multiplier (e.g., 2.0 = stop at 2×ATR, wider for volatile coins): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    min_stop_pct: Decimal = Field(
+        default=Decimal("0.02"),  # Min -2% stop
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum stop loss percentage (e.g., 0.02 = -2%, never too tight): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    max_stop_pct: Decimal = Field(
+        default=Decimal("0.08"),  # Max -8% stop
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum stop loss percentage (e.g., 0.08 = -8%, cap for volatile coins): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    time_based_stop_minutes: int = Field(
+        default=360,  # 6 hours (grid needs time to work)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Time-based stop for stalled positions (minutes, e.g., 360 = 6 hours): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    time_stop_requires_stall: bool = Field(
+        default=True,  # Only exit if price stalled OR no fills
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Require price stall OR no fills for time exit? ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    price_stall_threshold_atr: Decimal = Field(
+        default=Decimal("0.3"),  # < 0.3× ATR = stalled
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Price stall threshold in ATR multiples (e.g., 0.3 = movement < 0.3×ATR is stalled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    min_minutes_since_last_fill: int = Field(
+        default=45,  # Dead liquidity check
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum minutes since last fill to consider position dead (e.g., 45): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    min_rolling_pnl_pct: Decimal = Field(
+        default=Decimal("-0.02"),  # Pause if rolling PnL < -2%
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum rolling PnL to keep trading (e.g., -0.02 = pause if last 20 trades avg < -2%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    min_win_rate_threshold: Decimal = Field(
+        default=Decimal("0.35"),  # 35% WR acceptable for grids
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum win rate threshold (e.g., 0.35 = 35%, grids can be profitable at low WR): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    pause_cooldown_minutes: int = Field(
+        default=120,  # 2-hour pause
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Pause cooldown in minutes after trigger (e.g., 120 = 2 hours): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    resume_min_pnl_pct: Decimal = Field(
+        default=Decimal("0.0"),  # Resume only if last 10 trades >= 0%
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum last 10 trades PnL to resume after pause (e.g., 0.0 = breakeven): ",
+            prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
     )
