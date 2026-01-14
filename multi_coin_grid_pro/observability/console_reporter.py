@@ -34,16 +34,20 @@ class ConsoleReporter:
             bot_name: Name of the bot/strategy for report filename
             config: Bot configuration for threshold values
         """
-        self.aggregator = EventAggregator(log_dir)
+        # Extract connector name from bot_name (e.g., "kraken_multi_coin_grid" → "kraken")
+        connector_name = bot_name.split('_')[0] if '_' in bot_name else bot_name
+
+        self.aggregator = EventAggregator(log_dir, connector_filter=connector_name)
         self.logger = logger or logging.getLogger(__name__)
         self.bot_name = bot_name
         self.config = config or {}
+        self.connector_name = connector_name
 
         # Setup dedicated report logger
         self.report_logger = self._setup_report_logger(log_dir)
 
         # Initialize v2 analyzer
-        self.v2_analyzer = WhyNoTradeV2(log_dir, config=self.config)
+        self.v2_analyzer = WhyNoTradeV2(log_dir, config=self.config, connector_filter=connector_name)
 
     def _setup_report_logger(self, log_dir: Path) -> logging.Logger:
         """Setup dedicated logger for reports with separate file"""

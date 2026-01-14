@@ -92,16 +92,18 @@ class WhyNoTradeV2:
         'RSI_EXTREME_LOW': ('rsi', 'rsi_extreme_low', '>'),
     }
 
-    def __init__(self, log_dir: Path, config: Optional[Dict] = None):
+    def __init__(self, log_dir: Path, config: Optional[Dict] = None, connector_filter: Optional[str] = None):
         """
         Initialize analyzer.
 
         Args:
             log_dir: Directory containing events_*.jsonl files
             config: Bot config for threshold values
+            connector_filter: Only include events from this connector (e.g., "kraken", "bitget")
         """
         self.log_dir = Path(log_dir)
         self.config = config or {}
+        self.connector_filter = connector_filter
         self._metadata_warning_logged = set()  # Track warnings to avoid spam
 
     def analyze(
@@ -180,6 +182,13 @@ class WhyNoTradeV2:
                     for line in f:
                         try:
                             event = json.loads(line.strip())
+
+                            # Filter by connector if specified
+                            if self.connector_filter:
+                                event_connector = event.get('connector')
+                                if event_connector != self.connector_filter:
+                                    continue
+
                             # Parse timestamp
                             event_time = datetime.fromisoformat(event.get('timestamp', ''))
                             if start_time <= event_time < end_time:

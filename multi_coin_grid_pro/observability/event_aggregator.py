@@ -66,14 +66,16 @@ class PeriodSummary:
 class EventAggregator:
     """Aggregates and analyzes events from JSONL logs"""
 
-    def __init__(self, log_dir: Path):
+    def __init__(self, log_dir: Path, connector_filter: Optional[str] = None):
         """
         Initialize aggregator.
 
         Args:
             log_dir: Directory containing events_*.jsonl files
+            connector_filter: Only include events from this connector (e.g., "kraken", "bitget")
         """
         self.log_dir = Path(log_dir)
+        self.connector_filter = connector_filter
 
     def read_events(
         self,
@@ -103,6 +105,12 @@ class EventAggregator:
                             continue
 
                         event = json.loads(line)
+
+                        # Filter by connector if specified
+                        if self.connector_filter:
+                            event_connector = event.get('connector')
+                            if event_connector != self.connector_filter:
+                                continue
 
                         # Apply time filters
                         if start_time or end_time:
