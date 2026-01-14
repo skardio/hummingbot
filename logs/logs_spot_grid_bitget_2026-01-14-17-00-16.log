@@ -22820,9 +22820,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:25:49,794 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6964%, min_req=0.0015%, passes=True
 2026-01-14 21:25:49,794 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6846%, min_req=0.0015%, passes=True
 2026-01-14 21:25:49,794 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6846%, min_req=0.0015%, passes=True
-2026-01-14 21:25:49,794 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:25:49,794 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:25:49,794 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:25:49,794 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:25:49,794 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.685%
 2026-01-14 21:25:49,794 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.685%
@@ -22923,9 +22923,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:25:59,801 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6964%, min_req=0.0015%, passes=True
 2026-01-14 21:25:59,801 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6846%, min_req=0.0015%, passes=True
 2026-01-14 21:25:59,801 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6846%, min_req=0.0015%, passes=True
-2026-01-14 21:25:59,801 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:25:59,801 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:25:59,801 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:25:59,801 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:25:59,801 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.685%
 2026-01-14 21:25:59,801 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.685%
@@ -23025,9 +23025,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:26:09,808 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6964%, min_req=0.0015%, passes=True
 2026-01-14 21:26:09,808 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6846%, min_req=0.0015%, passes=True
 2026-01-14 21:26:09,808 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6846%, min_req=0.0015%, passes=True
-2026-01-14 21:26:09,808 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:26:09,808 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:26:09,808 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:26:09,808 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:26:09,808 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.685%
 2026-01-14 21:26:09,808 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.685%
@@ -23156,9 +23156,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:26:20,191 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6974%, min_req=0.0015%, passes=True
 2026-01-14 21:26:20,191 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6770%, min_req=0.0015%, passes=True
 2026-01-14 21:26:20,191 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6770%, min_req=0.0015%, passes=True
-2026-01-14 21:26:20,191 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:26:20,191 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:26:20,191 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:26:20,191 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:26:20,192 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.677%
 2026-01-14 21:26:20,192 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.677%
@@ -23259,9 +23259,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:26:30,201 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6974%, min_req=0.0015%, passes=True
 2026-01-14 21:26:30,201 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6770%, min_req=0.0015%, passes=True
 2026-01-14 21:26:30,201 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6770%, min_req=0.0015%, passes=True
-2026-01-14 21:26:30,201 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:26:30,201 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:26:30,201 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:26:30,201 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:26:30,201 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.677%
 2026-01-14 21:26:30,201 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.677%
@@ -23349,9 +23349,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:26:40,209 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6974%, min_req=0.0015%, passes=True
 2026-01-14 21:26:40,209 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6770%, min_req=0.0015%, passes=True
 2026-01-14 21:26:40,209 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6770%, min_req=0.0015%, passes=True
-2026-01-14 21:26:40,209 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:26:40,209 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:26:40,209 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:26:40,209 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:26:40,209 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.677%
 2026-01-14 21:26:40,209 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.677%
@@ -23482,9 +23482,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:26:50,893 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6985%, min_req=0.0015%, passes=True
 2026-01-14 21:26:50,893 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6815%, min_req=0.0015%, passes=True
 2026-01-14 21:26:50,893 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6815%, min_req=0.0015%, passes=True
-2026-01-14 21:26:50,893 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:26:50,893 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:26:50,893 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:26:50,893 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:26:50,893 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.682%
 2026-01-14 21:26:50,893 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.682%
@@ -23597,9 +23597,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:27:00,905 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6985%, min_req=0.0015%, passes=True
 2026-01-14 21:27:00,905 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6815%, min_req=0.0015%, passes=True
 2026-01-14 21:27:00,905 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6815%, min_req=0.0015%, passes=True
-2026-01-14 21:27:00,905 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:00,905 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:27:00,905 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:00,905 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:27:00,906 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.682%
 2026-01-14 21:27:00,906 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.682%
@@ -23689,9 +23689,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:27:10,917 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6985%, min_req=0.0015%, passes=True
 2026-01-14 21:27:10,917 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6815%, min_req=0.0015%, passes=True
 2026-01-14 21:27:10,917 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6815%, min_req=0.0015%, passes=True
-2026-01-14 21:27:10,917 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:10,917 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:27:10,917 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:10,917 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:27:10,917 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.682%
 2026-01-14 21:27:10,917 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.682%
@@ -23820,9 +23820,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:27:21,300 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.7013%, min_req=0.0015%, passes=True
 2026-01-14 21:27:21,300 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6406%, min_req=0.0015%, passes=True
 2026-01-14 21:27:21,300 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6406%, min_req=0.0015%, passes=True
-2026-01-14 21:27:21,300 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:21,300 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:27:21,300 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:21,300 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:27:21,300 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.641%
 2026-01-14 21:27:21,300 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.641%
@@ -23926,9 +23926,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:27:31,310 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.7013%, min_req=0.0015%, passes=True
 2026-01-14 21:27:31,310 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6406%, min_req=0.0015%, passes=True
 2026-01-14 21:27:31,310 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6406%, min_req=0.0015%, passes=True
-2026-01-14 21:27:31,310 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:31,310 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:27:31,310 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:31,310 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:27:31,310 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.641%
 2026-01-14 21:27:31,310 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.641%
@@ -24016,9 +24016,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:27:41,317 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.7013%, min_req=0.0015%, passes=True
 2026-01-14 21:27:41,317 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6406%, min_req=0.0015%, passes=True
 2026-01-14 21:27:41,317 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.6406%, min_req=0.0015%, passes=True
-2026-01-14 21:27:41,317 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:41,317 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:27:41,317 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:41,317 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:27:41,317 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.641%
 2026-01-14 21:27:41,317 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.641%
@@ -24147,9 +24147,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:27:51,693 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6322%, min_req=0.0015%, passes=True
 2026-01-14 21:27:51,693 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.5391%, min_req=0.0015%, passes=True
 2026-01-14 21:27:51,693 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.5391%, min_req=0.0015%, passes=True
-2026-01-14 21:27:51,693 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:51,693 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:27:51,693 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:27:51,693 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:27:51,693 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.539%
 2026-01-14 21:27:51,693 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.539%
@@ -24263,9 +24263,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:28:01,705 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6322%, min_req=0.0015%, passes=True
 2026-01-14 21:28:01,705 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.5391%, min_req=0.0015%, passes=True
 2026-01-14 21:28:01,705 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.5391%, min_req=0.0015%, passes=True
-2026-01-14 21:28:01,706 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:01,706 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:28:01,706 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:01,706 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:28:01,706 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.539%
 2026-01-14 21:28:01,706 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.539%
@@ -24353,9 +24353,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:28:11,717 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6322%, min_req=0.0015%, passes=True
 2026-01-14 21:28:11,717 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.5391%, min_req=0.0015%, passes=True
 2026-01-14 21:28:11,717 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.5391%, min_req=0.0015%, passes=True
-2026-01-14 21:28:11,717 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:11,717 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:28:11,717 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:11,717 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:28:11,717 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.539%
 2026-01-14 21:28:11,717 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.539%
@@ -24497,9 +24497,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:28:22,156 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6327%, min_req=0.0015%, passes=True
 2026-01-14 21:28:22,156 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3804%, min_req=0.0015%, passes=True
 2026-01-14 21:28:22,156 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3804%, min_req=0.0015%, passes=True
-2026-01-14 21:28:22,156 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:22,156 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:28:22,156 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:22,156 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:28:22,156 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.380%
 2026-01-14 21:28:22,156 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.380%
@@ -24587,9 +24587,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:28:32,163 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6327%, min_req=0.0015%, passes=True
 2026-01-14 21:28:32,163 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3804%, min_req=0.0015%, passes=True
 2026-01-14 21:28:32,163 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3804%, min_req=0.0015%, passes=True
-2026-01-14 21:28:32,163 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:32,163 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:28:32,163 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:32,163 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:28:32,163 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.380%
 2026-01-14 21:28:32,163 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.380%
@@ -24677,9 +24677,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:28:42,170 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6327%, min_req=0.0015%, passes=True
 2026-01-14 21:28:42,170 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3804%, min_req=0.0015%, passes=True
 2026-01-14 21:28:42,170 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3804%, min_req=0.0015%, passes=True
-2026-01-14 21:28:42,170 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:42,170 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:28:42,170 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:42,170 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:28:42,170 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.380%
 2026-01-14 21:28:42,170 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.380%
@@ -24822,9 +24822,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:28:52,521 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6314%, min_req=0.0015%, passes=True
 2026-01-14 21:28:52,522 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.4098%, min_req=0.0015%, passes=True
 2026-01-14 21:28:52,522 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.4098%, min_req=0.0015%, passes=True
-2026-01-14 21:28:52,522 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:52,522 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:28:52,522 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:28:52,522 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:28:52,522 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.410%
 2026-01-14 21:28:52,522 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.410%
@@ -24923,9 +24923,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:29:02,529 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6314%, min_req=0.0015%, passes=True
 2026-01-14 21:29:02,529 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.4098%, min_req=0.0015%, passes=True
 2026-01-14 21:29:02,529 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.4098%, min_req=0.0015%, passes=True
-2026-01-14 21:29:02,529 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:29:02,529 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:29:02,529 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:29:02,529 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:29:02,529 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.410%
 2026-01-14 21:29:02,529 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.410%
@@ -25016,9 +25016,9 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
 2026-01-14 21:29:12,535 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6314%, min_req=0.0015%, passes=True
 2026-01-14 21:29:12,536 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.4098%, min_req=0.0015%, passes=True
 2026-01-14 21:29:12,536 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.4098%, min_req=0.0015%, passes=True
-2026-01-14 21:29:12,536 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:29:12,536 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
-2026-01-14 21:29:12,536 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+2026-01-14 21:29:12,536 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -
 🔝 TOP 3 COINS (requested 3):
 2026-01-14 21:29:12,536 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.410%
 2026-01-14 21:29:12,536 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.410%
@@ -25066,3 +25066,901 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bi
    - Warm-up mode: AAN
 2026-01-14 21:29:12,537 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ❌ No coin found with trend >= 0.0015%
 2026-01-14 21:29:12,537 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ No better coin found, but keeping UNI-USDT running. Risk management will handle exit if needed.
+2026-01-14 21:29:21,449 - 901951 - hummingbot.core.rate_oracle.rate_oracle - DEBUG - Check network call has timed out. Network status is not connected.
+2026-01-14 21:29:22,018 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-CHECK] bitget configured pairs: ['ETH-USDT', 'SOL-USDT', 'BTC-USDT', 'LINK-USDT', 'UNI-USDT', 'DOGE-USDT', 'PNUT-USDT', 'COMP-USDT', 'SUSHI-USDT', 'YFI-USDT', 'GOAT-USDT']
+2026-01-14 21:29:22,019 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-CHECK] Total pairs to check: 11: ['BTC-USDT', 'COMP-USDT', 'DOGE-USDT', 'ETH-USDT', 'GOAT-USDT', 'LINK-USDT', 'PNUT-USDT', 'SOL-USDT', 'SUSHI-USDT', 'UNI-USDT', 'YFI-USDT']
+2026-01-14 21:29:22,019 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(ETH-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,019 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(DOGE-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,019 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(COMP-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,019 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(GOAT-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,019 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(UNI-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,019 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(YFI-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,019 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(LINK-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,020 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(PNUT-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,020 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(SUSHI-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,020 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(BTC-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,020 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(SOL-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:22,541 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔍 Adaptive filters to apply: ['rsi_buy_min', 'rsi_buy_max', 'rsi_extreme_min', 'vwap_max_deviation_pct', 'max_up_accel_pct', 'max_down_accel_pct', 'atr_min_pct', 'atr_max_pct', 'spike_5m_max_pct', 'wick_ratio_min', 'grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:29:22,545 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔸 Unmapped filters (ignored): ['grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ Adaptive filters applied to SmartEntry:
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_buy_max: 88.2→88.2
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 15.0→25.0
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 25.0→15.0
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    vwap_max_deviation_pct: 38.2→38.2
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_up_accel_pct: 6.3→6.3
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_down_accel_pct: -13.9→-13.9
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_atr_pct_for_grid: 0.1→0.1
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_atr_pct_for_grid: 8.0→8.0
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_5m_spike_pct: 4.5→4.5
+2026-01-14 21:29:22,546 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_wick_ratio: 0.0→0.0
+2026-01-14 21:29:22,547 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 control_task: mdp_ready=True
+2026-01-14 21:29:22,547 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔄 Controller update started
+2026-01-14 21:29:22,547 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Updating trends for 15 coins (last refresh 30.0s ago)
+2026-01-14 21:29:22,547 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:29:22,547 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:29:22,547 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:29:22,548 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔄 Attempting batch API call for 15 symbols (1 API call for all)...
+2026-01-14 21:29:22,548 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔄 Attempting batch API call for 15 symbols (1 API call for all)...
+2026-01-14 21:29:22,938 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch API call successful: 15/15 prices retrieved (100.0% success) in 0.39s - 1 API call instead of 15
+2026-01-14 21:29:22,938 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch API call successful: 15/15 prices retrieved (100.0% success) in 0.39s - 1 API call instead of 15
+2026-01-14 21:29:22,938 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch mode: updating 15 trends using batch-fetched prices
+2026-01-14 21:29:22,938 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch mode: updating 15 trends using batch-fetched prices
+2026-01-14 21:29:22,940 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 LUMIA-USDT   | €  0.1300 | Raw:  -5.80% | Consensus:  -5.65% | Vol: 0.373% | Data: 811/7800 points
+2026-01-14 21:29:22,940 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 LUMIA-USDT   | €  0.1300 | Raw:  -5.80% | Consensus:  -5.65% | Vol: 0.373% | Data: 811/7800 points
+2026-01-14 21:29:22,941 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GOAT-USDT    | €  0.0394 | Raw:  +2.53% | Consensus:  +1.55% | Vol: 0.233% | Data: 811/7800 points
+2026-01-14 21:29:22,941 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GOAT-USDT    | €  0.0394 | Raw:  +2.53% | Consensus:  +1.55% | Vol: 0.233% | Data: 811/7800 points
+2026-01-14 21:29:22,942 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 DBR-USDT     | €  0.0184 | Raw:  -2.69% | Consensus:  -5.57% | Vol: 0.121% | Data: 811/7800 points
+2026-01-14 21:29:22,942 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 DBR-USDT     | €  0.0184 | Raw:  -2.69% | Consensus:  -5.57% | Vol: 0.121% | Data: 811/7800 points
+2026-01-14 21:29:22,944 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 ACT-USDT     | €  0.0248 | Raw:  +2.05% | Consensus:  +0.96% | Vol: 0.234% | Data: 811/7800 points
+2026-01-14 21:29:22,944 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 ACT-USDT     | €  0.0248 | Raw:  +2.05% | Consensus:  +0.96% | Vol: 0.234% | Data: 811/7800 points
+2026-01-14 21:29:22,945 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GRASS-USDT   | €  0.3644 | Raw:  +7.05% | Consensus:  +7.58% | Vol: 0.260% | Data: 811/7800 points
+2026-01-14 21:29:22,945 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GRASS-USDT   | €  0.3644 | Raw:  +7.05% | Consensus:  +7.58% | Vol: 0.260% | Data: 811/7800 points
+2026-01-14 21:29:22,946 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 TRX-USDT     | €  0.3029 | Raw:  +1.24% | Consensus:  +2.63% | Vol: 0.074% | Data: 811/7800 points
+2026-01-14 21:29:22,946 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 TRX-USDT     | €  0.3029 | Raw:  +1.24% | Consensus:  +2.63% | Vol: 0.074% | Data: 811/7800 points
+2026-01-14 21:29:22,948 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 LINK-USDT    | € 14.1920 | Raw:  +6.71% | Consensus:  +9.40% | Vol: 0.146% | Data: 811/7800 points
+2026-01-14 21:29:22,948 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 LINK-USDT    | € 14.1920 | Raw:  +6.71% | Consensus:  +9.40% | Vol: 0.146% | Data: 811/7800 points
+2026-01-14 21:29:22,949 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 UNI-USDT     | €  5.7340 | Raw:  +5.64% | Consensus:  +6.64% | Vol: 0.169% | Data: 811/7800 points
+2026-01-14 21:29:22,949 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 UNI-USDT     | €  5.7340 | Raw:  +5.64% | Consensus:  +6.64% | Vol: 0.169% | Data: 811/7800 points
+2026-01-14 21:29:22,950 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 SUSHI-USDT   | €  0.3466 | Raw:  +5.67% | Consensus:  +4.24% | Vol: 0.236% | Data: 811/7800 points
+2026-01-14 21:29:22,950 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 SUSHI-USDT   | €  0.3466 | Raw:  +5.67% | Consensus:  +4.24% | Vol: 0.236% | Data: 811/7800 points
+2026-01-14 21:29:22,951 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 COMP-USDT    | € 27.4200 | Raw:  +4.90% | Consensus:  +6.79% | Vol: 0.151% | Data: 811/7800 points
+2026-01-14 21:29:22,951 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 COMP-USDT    | € 27.4200 | Raw:  +4.90% | Consensus:  +6.79% | Vol: 0.151% | Data: 811/7800 points
+2026-01-14 21:29:22,953 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 AAVE-USDT    | €177.9200 | Raw:  +3.65% | Consensus:  +4.73% | Vol: 0.171% | Data: 811/7800 points
+2026-01-14 21:29:22,953 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 AAVE-USDT    | €177.9200 | Raw:  +3.65% | Consensus:  +4.73% | Vol: 0.171% | Data: 811/7800 points
+2026-01-14 21:29:22,954 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 YFI-USDT     | €3605.0000 | Raw:  +4.49% | Consensus:  +4.84% | Vol: 0.191% | Data: 811/7800 points
+2026-01-14 21:29:22,954 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 YFI-USDT     | €3605.0000 | Raw:  +4.49% | Consensus:  +4.84% | Vol: 0.191% | Data: 811/7800 points
+2026-01-14 21:29:22,955 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 DOGE-USDT    | €  0.1474 | Raw:  +5.20% | Consensus:  +6.31% | Vol: 0.176% | Data: 811/7800 points
+2026-01-14 21:29:22,955 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 DOGE-USDT    | €  0.1474 | Raw:  +5.20% | Consensus:  +6.31% | Vol: 0.176% | Data: 811/7800 points
+2026-01-14 21:29:22,956 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 CHZ-USDT     | €  0.0558 | Raw:  +3.29% | Consensus:  +3.74% | Vol: 0.282% | Data: 811/7800 points
+2026-01-14 21:29:22,956 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 CHZ-USDT     | €  0.0558 | Raw:  +3.29% | Consensus:  +3.74% | Vol: 0.282% | Data: 811/7800 points
+2026-01-14 21:29:22,957 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 PNUT-USDT    | €  0.0887 | Raw:  +6.00% | Consensus:  +4.88% | Vol: 0.232% | Data: 811/7800 points
+2026-01-14 21:29:22,957 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 PNUT-USDT    | €  0.0887 | Raw:  +6.00% | Consensus:  +4.88% | Vol: 0.232% | Data: 811/7800 points
+2026-01-14 21:29:22,958 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch update complete: 15/15 trends updated successfully
+2026-01-14 21:29:22,958 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch update complete: 15/15 trends updated successfully
+2026-01-14 21:29:22,958 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔎 Analyzing coins for best trading opportunity...
+2026-01-14 21:29:22,958 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🎯 Looking for trend >= 0.0015%
+2026-01-14 21:29:22,958 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator exists = True
+2026-01-14 21:29:22,958 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator.trends has 15 coins
+2026-01-14 21:29:22,958 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🚫 Excluding coins: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:29:22,958 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG -    Config blacklist: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:29:22,958 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - Dynamic slots: balance=€321, regime=baseline, base=4, multiplier=1.0, final=4
+2026-01-14 21:29:22,958 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:29:22,959 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:29:22,959 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6462%, min_req=0.0015%, passes=False
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6462%, min_req=0.0015%, passes=False
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5524%, min_req=0.0015%, passes=True
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5524%, min_req=0.0015%, passes=True
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5725%, min_req=0.0015%, passes=False
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5725%, min_req=0.0015%, passes=False
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9573%, min_req=0.0015%, passes=True
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9573%, min_req=0.0015%, passes=True
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5783%, min_req=0.0015%, passes=True
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5783%, min_req=0.0015%, passes=True
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6322%, min_req=0.0015%, passes=True
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6322%, min_req=0.0015%, passes=True
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3971%, min_req=0.0015%, passes=True
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3971%, min_req=0.0015%, passes=True
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.397%
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.397%
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.578%
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.578%
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.789%
+2026-01-14 21:29:22,959 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.789%
+2026-01-14 21:29:22,959 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Multi-coin mode: All 4 slots filled (['SUSHI-USDT', 'YFI-USDT', 'DOGE-USDT', 'UNI-USDT']) - no room for new coins
+2026-01-14 21:29:22,959 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    📉 Missed opportunities: ['LINK-USDT', 'GRASS-USDT', 'COMP-USDT']
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] Hook triggered - top_coins length: 0
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] No top_coins to prefetch
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Analysis: 15/15 coins with sufficient data
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 1: LUMIA-USDT has 811 points, sufficient=True
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 2: GOAT-USDT has 811 points, sufficient=True
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 3: DBR-USDT has 811 points, sufficient=True
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 4: ACT-USDT has 811 points, sufficient=True
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 5: GRASS-USDT has 811 points, sufficient=True
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Found 9 coins meeting criteria (min 0.0015%)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔝 Top 10 trends:
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   1. LINK-USDT: +9.397% (24h: -0.91%, 4h: -0.76%, 1h: -1.06%, 811 points)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   2. GRASS-USDT: +7.578% (24h: +2.53%, 4h: +6.15%, 1h: -1.09%, 811 points)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   3. COMP-USDT: +6.789% (24h: -0.31%, 4h: -0.22%, 1h: -0.40%, 811 points)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   4. PNUT-USDT: +4.884% (24h: -1.58%, 4h: -2.28%, 1h: -0.87%, 811 points)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   5. AAVE-USDT: +4.731% (24h: -0.49%, 4h: +0.01%, 1h: -0.99%, 811 points)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   6. CHZ-USDT: +3.741% (24h: +0.05%, 4h: +0.72%, 1h: -0.62%, 811 points)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   7. TRX-USDT: +2.632% (24h: -0.12%, 4h: -0.26%, 1h: +0.03%, 811 points)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   8. GOAT-USDT: +1.552% (24h: -2.05%, 4h: -3.03%, 1h: -1.08%, 811 points)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   9. ACT-USDT: +0.957% (24h: -1.16%, 4h: -2.47%, 1h: +0.16%, 811 points)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   10. DBR-USDT: -5.573% (24h: -1.32%, 4h: -2.64%, 1h: +0.00%, 811 points)
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🏆 BEST: LINK-USDT with +9.40% trend
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 VALIDATION STATUS (Top 5):
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ LINK-USDT    | BULLISH  | Score:  +9.40% | Candles: 411
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ GRASS-USDT   | BULLISH  | Score:  +7.58% | Candles: 411
+2026-01-14 21:29:22,960 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ COMP-USDT    | BULLISH  | Score:  +6.79% | Candles: 411
+2026-01-14 21:29:22,961 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ PNUT-USDT    | BULLISH  | Score:  +4.88% | Candles: 411
+2026-01-14 21:29:22,961 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ AAVE-USDT    | BULLISH  | Score:  +4.73% | Candles: 411
+2026-01-14 21:29:22,961 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Selected coin: None (no coin meets criteria)
+2026-01-14 21:29:22,961 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 MONITORING: Active Coin: None
+2026-01-14 21:29:22,961 - 901951 - hummingbot.strategy_v2.runnable_base - WARNING - ⚠️  Best coin LINK-USDT (consensus: +9.40%) werd afgewezen:
+   - Consensus trend: +9.40% (overall score)
+   - 24h trend: -0.91%
+   - 4h trend: -0.76%
+   - 1h trend: -1.06%
+   - Multi-timeframe: AAN
+   - Warm-up mode: AAN
+2026-01-14 21:29:22,961 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ❌ No coin found with trend >= 0.0015%
+2026-01-14 21:29:22,961 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ No better coin found, but keeping UNI-USDT running. Risk management will handle exit if needed.
+2026-01-14 21:29:25,710 - 901951 - hummingbot.strategy_v2.executors.grid_executor.grid_executor - DEBUG - ⏳ PHASE 3.5: Close order pending - order_id: SSIUT6485c6236f27d91c00b97d33266308028637b96862475, balance: 0.0000473000000000 SUSHI, min_order: 0.0001 SUSHI
+2026-01-14 21:29:25,710 - 901951 - hummingbot.strategy_v2.executors.grid_executor.grid_executor - DEBUG - ⏳ PHASE 3.5: Close order pending - order_id: SYIUT6485c63b9356591c00b97d33266308028637b96862475, balance: 0.0000949000000000 YFI, min_order: 0.0001 YFI
+2026-01-14 21:29:32,962 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔍 Adaptive filters to apply: ['rsi_buy_min', 'rsi_buy_max', 'rsi_extreme_min', 'vwap_max_deviation_pct', 'max_up_accel_pct', 'max_down_accel_pct', 'atr_min_pct', 'atr_max_pct', 'spike_5m_max_pct', 'wick_ratio_min', 'grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔸 Unmapped filters (ignored): ['grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ Adaptive filters applied to SmartEntry:
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_buy_max: 88.2→88.2
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 15.0→25.0
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 25.0→15.0
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    vwap_max_deviation_pct: 38.2→38.2
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_up_accel_pct: 6.3→6.3
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_down_accel_pct: -13.9→-13.9
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_atr_pct_for_grid: 0.1→0.1
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_atr_pct_for_grid: 8.0→8.0
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_5m_spike_pct: 4.5→4.5
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_wick_ratio: 0.0→0.0
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 control_task: mdp_ready=True
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔄 Controller update started
+2026-01-14 21:29:32,963 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - ⏳ Skipping trend update (10.0s since last fetch, min interval 30.0s)
+2026-01-14 21:29:32,964 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔎 Analyzing coins for best trading opportunity...
+2026-01-14 21:29:32,964 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🎯 Looking for trend >= 0.0015%
+2026-01-14 21:29:32,964 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator exists = True
+2026-01-14 21:29:32,964 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator.trends has 15 coins
+2026-01-14 21:29:32,964 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🚫 Excluding coins: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:29:32,964 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG -    Config blacklist: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:29:32,964 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - Dynamic slots: balance=€321, regime=baseline, base=4, multiplier=1.0, final=4
+2026-01-14 21:29:32,964 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:29:32,964 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:29:32,964 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:29:32,964 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6462%, min_req=0.0015%, passes=False
+2026-01-14 21:29:32,964 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6462%, min_req=0.0015%, passes=False
+2026-01-14 21:29:32,964 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5524%, min_req=0.0015%, passes=True
+2026-01-14 21:29:32,964 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5524%, min_req=0.0015%, passes=True
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5725%, min_req=0.0015%, passes=False
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5725%, min_req=0.0015%, passes=False
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9573%, min_req=0.0015%, passes=True
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9573%, min_req=0.0015%, passes=True
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5783%, min_req=0.0015%, passes=True
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5783%, min_req=0.0015%, passes=True
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6322%, min_req=0.0015%, passes=True
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6322%, min_req=0.0015%, passes=True
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3971%, min_req=0.0015%, passes=True
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3971%, min_req=0.0015%, passes=True
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.397%
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.397%
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.578%
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.578%
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.789%
+2026-01-14 21:29:32,965 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.789%
+2026-01-14 21:29:32,965 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Multi-coin mode: All 4 slots filled (['SUSHI-USDT', 'YFI-USDT', 'DOGE-USDT', 'UNI-USDT']) - no room for new coins
+2026-01-14 21:29:32,965 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    📉 Missed opportunities: ['LINK-USDT', 'GRASS-USDT', 'COMP-USDT']
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] Hook triggered - top_coins length: 0
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] No top_coins to prefetch
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Analysis: 15/15 coins with sufficient data
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 1: LUMIA-USDT has 811 points, sufficient=True
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 2: GOAT-USDT has 811 points, sufficient=True
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 3: DBR-USDT has 811 points, sufficient=True
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 4: ACT-USDT has 811 points, sufficient=True
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 5: GRASS-USDT has 811 points, sufficient=True
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Found 9 coins meeting criteria (min 0.0015%)
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔝 Top 10 trends:
+2026-01-14 21:29:32,966 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   1. LINK-USDT: +9.397% (24h: -0.91%, 4h: -0.76%, 1h: -1.06%, 811 points)
+2026-01-14 21:29:32,967 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   2. GRASS-USDT: +7.578% (24h: +2.53%, 4h: +6.15%, 1h: -1.09%, 811 points)
+2026-01-14 21:29:32,967 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   3. COMP-USDT: +6.789% (24h: -0.31%, 4h: -0.22%, 1h: -0.40%, 811 points)
+2026-01-14 21:29:32,967 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   4. PNUT-USDT: +4.884% (24h: -1.58%, 4h: -2.28%, 1h: -0.87%, 811 points)
+2026-01-14 21:29:32,967 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   5. AAVE-USDT: +4.731% (24h: -0.49%, 4h: +0.01%, 1h: -0.99%, 811 points)
+2026-01-14 21:29:32,967 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   6. CHZ-USDT: +3.741% (24h: +0.05%, 4h: +0.72%, 1h: -0.62%, 811 points)
+2026-01-14 21:29:32,967 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   7. TRX-USDT: +2.632% (24h: -0.12%, 4h: -0.26%, 1h: +0.03%, 811 points)
+2026-01-14 21:29:32,967 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   8. GOAT-USDT: +1.552% (24h: -2.05%, 4h: -3.03%, 1h: -1.08%, 811 points)
+2026-01-14 21:29:32,967 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   9. ACT-USDT: +0.957% (24h: -1.16%, 4h: -2.47%, 1h: +0.16%, 811 points)
+2026-01-14 21:29:32,967 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   10. DBR-USDT: -5.573% (24h: -1.32%, 4h: -2.64%, 1h: +0.00%, 811 points)
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🏆 BEST: LINK-USDT with +9.40% trend
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 VALIDATION STATUS (Top 5):
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ LINK-USDT    | BULLISH  | Score:  +9.40% | Candles: 411
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ GRASS-USDT   | BULLISH  | Score:  +7.58% | Candles: 411
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ COMP-USDT    | BULLISH  | Score:  +6.79% | Candles: 411
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ PNUT-USDT    | BULLISH  | Score:  +4.88% | Candles: 411
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ AAVE-USDT    | BULLISH  | Score:  +4.73% | Candles: 411
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Selected coin: None (no coin meets criteria)
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 MONITORING: Active Coin: None
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - WARNING - ⚠️  Best coin LINK-USDT (consensus: +9.40%) werd afgewezen:
+   - Consensus trend: +9.40% (overall score)
+   - 24h trend: -0.91%
+   - 4h trend: -0.76%
+   - 1h trend: -1.06%
+   - Multi-timeframe: AAN
+   - Warm-up mode: AAN
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ❌ No coin found with trend >= 0.0015%
+2026-01-14 21:29:32,968 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ No better coin found, but keeping UNI-USDT running. Risk management will handle exit if needed.
+2026-01-14 21:29:42,971 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔍 Adaptive filters to apply: ['rsi_buy_min', 'rsi_buy_max', 'rsi_extreme_min', 'vwap_max_deviation_pct', 'max_up_accel_pct', 'max_down_accel_pct', 'atr_min_pct', 'atr_max_pct', 'spike_5m_max_pct', 'wick_ratio_min', 'grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:29:42,971 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔸 Unmapped filters (ignored): ['grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ Adaptive filters applied to SmartEntry:
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_buy_max: 88.2→88.2
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 15.0→25.0
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 25.0→15.0
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    vwap_max_deviation_pct: 38.2→38.2
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_up_accel_pct: 6.3→6.3
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_down_accel_pct: -13.9→-13.9
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_atr_pct_for_grid: 0.1→0.1
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_atr_pct_for_grid: 8.0→8.0
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_5m_spike_pct: 4.5→4.5
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_wick_ratio: 0.0→0.0
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 control_task: mdp_ready=True
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔄 Controller update started
+2026-01-14 21:29:42,972 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - ⏳ Skipping trend update (20.0s since last fetch, min interval 30.0s)
+2026-01-14 21:29:42,973 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔎 Analyzing coins for best trading opportunity...
+2026-01-14 21:29:42,973 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🎯 Looking for trend >= 0.0015%
+2026-01-14 21:29:42,973 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator exists = True
+2026-01-14 21:29:42,973 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator.trends has 15 coins
+2026-01-14 21:29:42,973 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🚫 Excluding coins: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:29:42,973 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG -    Config blacklist: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:29:42,973 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - Dynamic slots: balance=€321, regime=baseline, base=4, multiplier=1.0, final=4
+2026-01-14 21:29:42,973 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:29:42,973 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:29:42,973 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6462%, min_req=0.0015%, passes=False
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6462%, min_req=0.0015%, passes=False
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5524%, min_req=0.0015%, passes=True
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5524%, min_req=0.0015%, passes=True
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5725%, min_req=0.0015%, passes=False
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5725%, min_req=0.0015%, passes=False
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9573%, min_req=0.0015%, passes=True
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9573%, min_req=0.0015%, passes=True
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5783%, min_req=0.0015%, passes=True
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5783%, min_req=0.0015%, passes=True
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6322%, min_req=0.0015%, passes=True
+2026-01-14 21:29:42,974 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6322%, min_req=0.0015%, passes=True
+2026-01-14 21:29:42,975 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3971%, min_req=0.0015%, passes=True
+2026-01-14 21:29:42,975 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3971%, min_req=0.0015%, passes=True
+2026-01-14 21:29:42,975 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:29:42,975 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:29:42,975 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.397%
+2026-01-14 21:29:42,975 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.397%
+2026-01-14 21:29:42,975 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.578%
+2026-01-14 21:29:42,975 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.578%
+2026-01-14 21:29:42,975 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.789%
+2026-01-14 21:29:42,975 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.789%
+2026-01-14 21:29:42,975 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Multi-coin mode: All 4 slots filled (['SUSHI-USDT', 'YFI-USDT', 'DOGE-USDT', 'UNI-USDT']) - no room for new coins
+2026-01-14 21:29:42,975 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    📉 Missed opportunities: ['LINK-USDT', 'GRASS-USDT', 'COMP-USDT']
+2026-01-14 21:29:42,975 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] Hook triggered - top_coins length: 0
+2026-01-14 21:29:42,975 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] No top_coins to prefetch
+2026-01-14 21:29:42,975 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Analysis: 15/15 coins with sufficient data
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 1: LUMIA-USDT has 811 points, sufficient=True
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 2: GOAT-USDT has 811 points, sufficient=True
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 3: DBR-USDT has 811 points, sufficient=True
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 4: ACT-USDT has 811 points, sufficient=True
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 5: GRASS-USDT has 811 points, sufficient=True
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Found 9 coins meeting criteria (min 0.0015%)
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔝 Top 10 trends:
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   1. LINK-USDT: +9.397% (24h: -0.91%, 4h: -0.76%, 1h: -1.06%, 811 points)
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   2. GRASS-USDT: +7.578% (24h: +2.53%, 4h: +6.15%, 1h: -1.09%, 811 points)
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   3. COMP-USDT: +6.789% (24h: -0.31%, 4h: -0.22%, 1h: -0.40%, 811 points)
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   4. PNUT-USDT: +4.884% (24h: -1.58%, 4h: -2.28%, 1h: -0.87%, 811 points)
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   5. AAVE-USDT: +4.731% (24h: -0.49%, 4h: +0.01%, 1h: -0.99%, 811 points)
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   6. CHZ-USDT: +3.741% (24h: +0.05%, 4h: +0.72%, 1h: -0.62%, 811 points)
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   7. TRX-USDT: +2.632% (24h: -0.12%, 4h: -0.26%, 1h: +0.03%, 811 points)
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   8. GOAT-USDT: +1.552% (24h: -2.05%, 4h: -3.03%, 1h: -1.08%, 811 points)
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   9. ACT-USDT: +0.957% (24h: -1.16%, 4h: -2.47%, 1h: +0.16%, 811 points)
+2026-01-14 21:29:42,976 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   10. DBR-USDT: -5.573% (24h: -1.32%, 4h: -2.64%, 1h: +0.00%, 811 points)
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🏆 BEST: LINK-USDT with +9.40% trend
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 VALIDATION STATUS (Top 5):
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ LINK-USDT    | BULLISH  | Score:  +9.40% | Candles: 411
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ GRASS-USDT   | BULLISH  | Score:  +7.58% | Candles: 411
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ COMP-USDT    | BULLISH  | Score:  +6.79% | Candles: 411
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ PNUT-USDT    | BULLISH  | Score:  +4.88% | Candles: 411
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ AAVE-USDT    | BULLISH  | Score:  +4.73% | Candles: 411
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Selected coin: None (no coin meets criteria)
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 MONITORING: Active Coin: None
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - WARNING - ⚠️  Best coin LINK-USDT (consensus: +9.40%) werd afgewezen:
+   - Consensus trend: +9.40% (overall score)
+   - 24h trend: -0.91%
+   - 4h trend: -0.76%
+   - 1h trend: -1.06%
+   - Multi-timeframe: AAN
+   - Warm-up mode: AAN
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ❌ No coin found with trend >= 0.0015%
+2026-01-14 21:29:42,977 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ No better coin found, but keeping UNI-USDT running. Risk management will handle exit if needed.
+2026-01-14 21:29:52,024 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-CHECK] bitget configured pairs: ['ETH-USDT', 'SOL-USDT', 'BTC-USDT', 'LINK-USDT', 'UNI-USDT', 'DOGE-USDT', 'PNUT-USDT', 'COMP-USDT', 'SUSHI-USDT', 'YFI-USDT', 'GOAT-USDT']
+2026-01-14 21:29:52,024 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-CHECK] Total pairs to check: 11: ['BTC-USDT', 'COMP-USDT', 'DOGE-USDT', 'ETH-USDT', 'GOAT-USDT', 'LINK-USDT', 'PNUT-USDT', 'SOL-USDT', 'SUSHI-USDT', 'UNI-USDT', 'YFI-USDT']
+2026-01-14 21:29:52,024 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(ETH-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,024 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(DOGE-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,024 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(COMP-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,024 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(GOAT-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,024 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(UNI-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,024 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(YFI-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,024 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(LINK-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,025 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(PNUT-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,025 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(SUSHI-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,025 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(BTC-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,025 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(SOL-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:29:52,980 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔍 Adaptive filters to apply: ['rsi_buy_min', 'rsi_buy_max', 'rsi_extreme_min', 'vwap_max_deviation_pct', 'max_up_accel_pct', 'max_down_accel_pct', 'atr_min_pct', 'atr_max_pct', 'spike_5m_max_pct', 'wick_ratio_min', 'grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:29:52,980 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔸 Unmapped filters (ignored): ['grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:29:52,980 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ Adaptive filters applied to SmartEntry:
+2026-01-14 21:29:52,980 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_buy_max: 88.2→88.2
+2026-01-14 21:29:52,980 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 15.0→25.0
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 25.0→15.0
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    vwap_max_deviation_pct: 38.2→38.2
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_up_accel_pct: 6.3→6.3
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_down_accel_pct: -13.9→-13.9
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_atr_pct_for_grid: 0.1→0.1
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_atr_pct_for_grid: 8.0→8.0
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_5m_spike_pct: 4.5→4.5
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_wick_ratio: 0.0→0.0
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 control_task: mdp_ready=True
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔄 Controller update started
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Updating trends for 15 coins (last refresh 30.0s ago)
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:29:52,981 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:29:52,981 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔄 Attempting batch API call for 15 symbols (1 API call for all)...
+2026-01-14 21:29:52,981 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔄 Attempting batch API call for 15 symbols (1 API call for all)...
+2026-01-14 21:29:53,329 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch API call successful: 15/15 prices retrieved (100.0% success) in 0.35s - 1 API call instead of 15
+2026-01-14 21:29:53,329 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch API call successful: 15/15 prices retrieved (100.0% success) in 0.35s - 1 API call instead of 15
+2026-01-14 21:29:53,330 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch mode: updating 15 trends using batch-fetched prices
+2026-01-14 21:29:53,330 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch mode: updating 15 trends using batch-fetched prices
+2026-01-14 21:29:53,331 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 LUMIA-USDT   | €  0.1300 | Raw:  -5.80% | Consensus:  -5.61% | Vol: 0.373% | Data: 812/7800 points
+2026-01-14 21:29:53,331 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 LUMIA-USDT   | €  0.1300 | Raw:  -5.80% | Consensus:  -5.61% | Vol: 0.373% | Data: 812/7800 points
+2026-01-14 21:29:53,333 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GOAT-USDT    | €  0.0394 | Raw:  +2.53% | Consensus:  +1.55% | Vol: 0.233% | Data: 812/7800 points
+2026-01-14 21:29:53,333 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GOAT-USDT    | €  0.0394 | Raw:  +2.53% | Consensus:  +1.55% | Vol: 0.233% | Data: 812/7800 points
+2026-01-14 21:29:53,334 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 DBR-USDT     | €  0.0184 | Raw:  -2.69% | Consensus:  -5.59% | Vol: 0.121% | Data: 812/7800 points
+2026-01-14 21:29:53,334 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 DBR-USDT     | €  0.0184 | Raw:  -2.69% | Consensus:  -5.59% | Vol: 0.121% | Data: 812/7800 points
+2026-01-14 21:29:53,335 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 ACT-USDT     | €  0.0248 | Raw:  +2.05% | Consensus:  +0.96% | Vol: 0.234% | Data: 812/7800 points
+2026-01-14 21:29:53,335 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 ACT-USDT     | €  0.0248 | Raw:  +2.05% | Consensus:  +0.96% | Vol: 0.234% | Data: 812/7800 points
+2026-01-14 21:29:53,337 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GRASS-USDT   | €  0.3644 | Raw:  +7.05% | Consensus:  +7.56% | Vol: 0.259% | Data: 812/7800 points
+2026-01-14 21:29:53,337 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GRASS-USDT   | €  0.3644 | Raw:  +7.05% | Consensus:  +7.56% | Vol: 0.259% | Data: 812/7800 points
+2026-01-14 21:29:53,338 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 TRX-USDT     | €  0.3029 | Raw:  +1.24% | Consensus:  +2.63% | Vol: 0.074% | Data: 812/7800 points
+2026-01-14 21:29:53,338 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 TRX-USDT     | €  0.3029 | Raw:  +1.24% | Consensus:  +2.63% | Vol: 0.074% | Data: 812/7800 points
+2026-01-14 21:29:53,340 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 LINK-USDT    | € 14.1920 | Raw:  +6.71% | Consensus:  +9.39% | Vol: 0.146% | Data: 812/7800 points
+2026-01-14 21:29:53,340 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 LINK-USDT    | € 14.1920 | Raw:  +6.71% | Consensus:  +9.39% | Vol: 0.146% | Data: 812/7800 points
+2026-01-14 21:29:53,341 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 UNI-USDT     | €  5.7370 | Raw:  +5.69% | Consensus:  +6.69% | Vol: 0.168% | Data: 812/7800 points
+2026-01-14 21:29:53,341 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 UNI-USDT     | €  5.7370 | Raw:  +5.69% | Consensus:  +6.69% | Vol: 0.168% | Data: 812/7800 points
+2026-01-14 21:29:53,342 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 SUSHI-USDT   | €  0.3466 | Raw:  +5.67% | Consensus:  +4.22% | Vol: 0.236% | Data: 812/7800 points
+2026-01-14 21:29:53,342 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 SUSHI-USDT   | €  0.3466 | Raw:  +5.67% | Consensus:  +4.22% | Vol: 0.236% | Data: 812/7800 points
+2026-01-14 21:29:53,344 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 COMP-USDT    | € 27.4000 | Raw:  +4.82% | Consensus:  +6.71% | Vol: 0.151% | Data: 812/7800 points
+2026-01-14 21:29:53,344 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 COMP-USDT    | € 27.4000 | Raw:  +4.82% | Consensus:  +6.71% | Vol: 0.151% | Data: 812/7800 points
+2026-01-14 21:29:53,345 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 AAVE-USDT    | €177.9900 | Raw:  +3.69% | Consensus:  +4.77% | Vol: 0.171% | Data: 812/7800 points
+2026-01-14 21:29:53,345 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 AAVE-USDT    | €177.9900 | Raw:  +3.69% | Consensus:  +4.77% | Vol: 0.171% | Data: 812/7800 points
+2026-01-14 21:29:53,347 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 YFI-USDT     | €3605.0000 | Raw:  +4.49% | Consensus:  +4.84% | Vol: 0.191% | Data: 812/7800 points
+2026-01-14 21:29:53,347 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 YFI-USDT     | €3605.0000 | Raw:  +4.49% | Consensus:  +4.84% | Vol: 0.191% | Data: 812/7800 points
+2026-01-14 21:29:53,348 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 DOGE-USDT    | €  0.1474 | Raw:  +5.22% | Consensus:  +6.32% | Vol: 0.176% | Data: 812/7800 points
+2026-01-14 21:29:53,348 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 DOGE-USDT    | €  0.1474 | Raw:  +5.22% | Consensus:  +6.32% | Vol: 0.176% | Data: 812/7800 points
+2026-01-14 21:29:53,349 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 CHZ-USDT     | €  0.0560 | Raw:  +3.61% | Consensus:  +3.93% | Vol: 0.282% | Data: 812/7800 points
+2026-01-14 21:29:53,349 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 CHZ-USDT     | €  0.0560 | Raw:  +3.61% | Consensus:  +3.93% | Vol: 0.282% | Data: 812/7800 points
+2026-01-14 21:29:53,351 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 PNUT-USDT    | €  0.0888 | Raw:  +6.05% | Consensus:  +4.91% | Vol: 0.232% | Data: 812/7800 points
+2026-01-14 21:29:53,351 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 PNUT-USDT    | €  0.0888 | Raw:  +6.05% | Consensus:  +4.91% | Vol: 0.232% | Data: 812/7800 points
+2026-01-14 21:29:53,351 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch update complete: 15/15 trends updated successfully
+2026-01-14 21:29:53,351 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch update complete: 15/15 trends updated successfully
+2026-01-14 21:29:53,351 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔎 Analyzing coins for best trading opportunity...
+2026-01-14 21:29:53,351 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🎯 Looking for trend >= 0.0015%
+2026-01-14 21:29:53,351 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator exists = True
+2026-01-14 21:29:53,351 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator.trends has 15 coins
+2026-01-14 21:29:53,351 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🚫 Excluding coins: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:29:53,351 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG -    Config blacklist: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:29:53,351 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - Dynamic slots: balance=€321, regime=baseline, base=4, multiplier=1.0, final=4
+2026-01-14 21:29:53,351 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:29:53,351 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:29:53,352 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6123%, min_req=0.0015%, passes=False
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6123%, min_req=0.0015%, passes=False
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5456%, min_req=0.0015%, passes=True
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5456%, min_req=0.0015%, passes=True
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5879%, min_req=0.0015%, passes=False
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5879%, min_req=0.0015%, passes=False
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9570%, min_req=0.0015%, passes=True
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9570%, min_req=0.0015%, passes=True
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5577%, min_req=0.0015%, passes=True
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5577%, min_req=0.0015%, passes=True
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6329%, min_req=0.0015%, passes=True
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6329%, min_req=0.0015%, passes=True
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3937%, min_req=0.0015%, passes=True
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3937%, min_req=0.0015%, passes=True
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.394%
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.394%
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.558%
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.558%
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.707%
+2026-01-14 21:29:53,352 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.707%
+2026-01-14 21:29:53,352 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Multi-coin mode: All 4 slots filled (['SUSHI-USDT', 'YFI-USDT', 'DOGE-USDT', 'UNI-USDT']) - no room for new coins
+2026-01-14 21:29:53,352 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    📉 Missed opportunities: ['LINK-USDT', 'GRASS-USDT', 'COMP-USDT']
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] Hook triggered - top_coins length: 0
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] No top_coins to prefetch
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Analysis: 15/15 coins with sufficient data
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 1: LUMIA-USDT has 812 points, sufficient=True
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 2: GOAT-USDT has 812 points, sufficient=True
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 3: DBR-USDT has 812 points, sufficient=True
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 4: ACT-USDT has 812 points, sufficient=True
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 5: GRASS-USDT has 812 points, sufficient=True
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Found 9 coins meeting criteria (min 0.0015%)
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔝 Top 10 trends:
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   1. LINK-USDT: +9.394% (24h: -1.01%, 4h: -0.87%, 1h: -1.16%, 812 points)
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   2. GRASS-USDT: +7.558% (24h: +2.26%, 4h: +5.93%, 1h: -1.41%, 812 points)
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   3. COMP-USDT: +6.707% (24h: -0.38%, 4h: -0.29%, 1h: -0.47%, 812 points)
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   4. PNUT-USDT: +4.913% (24h: -1.57%, 4h: -2.30%, 1h: -0.85%, 812 points)
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   5. AAVE-USDT: +4.766% (24h: -0.47%, 4h: -0.06%, 1h: -0.89%, 812 points)
+2026-01-14 21:29:53,353 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   6. CHZ-USDT: +3.927% (24h: +0.14%, 4h: +1.01%, 1h: -0.73%, 812 points)
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   7. TRX-USDT: +2.633% (24h: -0.10%, 4h: -0.30%, 1h: +0.10%, 812 points)
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   8. GOAT-USDT: +1.546% (24h: -2.18%, 4h: -3.10%, 1h: -1.25%, 812 points)
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   9. ACT-USDT: +0.957% (24h: -1.16%, 4h: -2.47%, 1h: +0.16%, 812 points)
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   10. DBR-USDT: -5.588% (24h: -1.32%, 4h: -2.64%, 1h: +0.00%, 812 points)
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🏆 BEST: LINK-USDT with +9.39% trend
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 VALIDATION STATUS (Top 5):
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ LINK-USDT    | BULLISH  | Score:  +9.39% | Candles: 411
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ GRASS-USDT   | BULLISH  | Score:  +7.56% | Candles: 411
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ COMP-USDT    | BULLISH  | Score:  +6.71% | Candles: 411
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ PNUT-USDT    | BULLISH  | Score:  +4.91% | Candles: 411
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ AAVE-USDT    | BULLISH  | Score:  +4.77% | Candles: 411
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Selected coin: None (no coin meets criteria)
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 MONITORING: Active Coin: None
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - WARNING - ⚠️  Best coin LINK-USDT (consensus: +9.39%) werd afgewezen:
+   - Consensus trend: +9.39% (overall score)
+   - 24h trend: -1.01%
+   - 4h trend: -0.87%
+   - 1h trend: -1.16%
+   - Multi-timeframe: AAN
+   - Warm-up mode: AAN
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ❌ No coin found with trend >= 0.0015%
+2026-01-14 21:29:53,355 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ No better coin found, but keeping UNI-USDT running. Risk management will handle exit if needed.
+2026-01-14 21:30:00,023 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Diff messages processed: 3534, rejected: 0, queued: 0
+2026-01-14 21:30:00,024 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 576 order book diffs for ETH-USDT.
+2026-01-14 21:30:00,042 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 484 order book diffs for SOL-USDT.
+2026-01-14 21:30:00,061 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 490 order book diffs for DOGE-USDT.
+2026-01-14 21:30:00,104 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 235 order book diffs for GOAT-USDT.
+2026-01-14 21:30:00,133 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 360 order book diffs for LINK-USDT.
+2026-01-14 21:30:00,150 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 568 order book diffs for BTC-USDT.
+2026-01-14 21:30:00,151 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 422 order book diffs for PNUT-USDT.
+2026-01-14 21:30:00,173 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Trade messages processed: 467, rejected: 0
+2026-01-14 21:30:00,190 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 264 order book diffs for UNI-USDT.
+2026-01-14 21:30:02,383 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 84 order book diffs for SUSHI-USDT.
+2026-01-14 21:30:03,358 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔍 Adaptive filters to apply: ['rsi_buy_min', 'rsi_buy_max', 'rsi_extreme_min', 'vwap_max_deviation_pct', 'max_up_accel_pct', 'max_down_accel_pct', 'atr_min_pct', 'atr_max_pct', 'spike_5m_max_pct', 'wick_ratio_min', 'grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:30:03,358 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔸 Unmapped filters (ignored): ['grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ Adaptive filters applied to SmartEntry:
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_buy_max: 88.2→88.2
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 15.0→25.0
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 25.0→15.0
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    vwap_max_deviation_pct: 38.2→38.2
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_up_accel_pct: 6.3→6.3
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_down_accel_pct: -13.9→-13.9
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_atr_pct_for_grid: 0.1→0.1
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_atr_pct_for_grid: 8.0→8.0
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_5m_spike_pct: 4.5→4.5
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_wick_ratio: 0.0→0.0
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 control_task: mdp_ready=True
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔄 Controller update started
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - ⏳ Skipping trend update (10.0s since last fetch, min interval 30.0s)
+2026-01-14 21:30:03,359 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔎 Analyzing coins for best trading opportunity...
+2026-01-14 21:30:03,360 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🎯 Looking for trend >= 0.0015%
+2026-01-14 21:30:03,360 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator exists = True
+2026-01-14 21:30:03,360 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator.trends has 15 coins
+2026-01-14 21:30:03,360 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🚫 Excluding coins: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:30:03,360 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG -    Config blacklist: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:30:03,360 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - Dynamic slots: balance=€321, regime=baseline, base=4, multiplier=1.0, final=4
+2026-01-14 21:30:03,360 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:30:03,360 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:30:03,360 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:30:03,360 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6123%, min_req=0.0015%, passes=False
+2026-01-14 21:30:03,360 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6123%, min_req=0.0015%, passes=False
+2026-01-14 21:30:03,360 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5456%, min_req=0.0015%, passes=True
+2026-01-14 21:30:03,360 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5456%, min_req=0.0015%, passes=True
+2026-01-14 21:30:03,360 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5879%, min_req=0.0015%, passes=False
+2026-01-14 21:30:03,360 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5879%, min_req=0.0015%, passes=False
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9570%, min_req=0.0015%, passes=True
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9570%, min_req=0.0015%, passes=True
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5577%, min_req=0.0015%, passes=True
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5577%, min_req=0.0015%, passes=True
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6329%, min_req=0.0015%, passes=True
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6329%, min_req=0.0015%, passes=True
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3937%, min_req=0.0015%, passes=True
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3937%, min_req=0.0015%, passes=True
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.394%
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.394%
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.558%
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.558%
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.707%
+2026-01-14 21:30:03,361 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.707%
+2026-01-14 21:30:03,361 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Multi-coin mode: All 4 slots filled (['SUSHI-USDT', 'YFI-USDT', 'DOGE-USDT', 'UNI-USDT']) - no room for new coins
+2026-01-14 21:30:03,361 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    📉 Missed opportunities: ['LINK-USDT', 'GRASS-USDT', 'COMP-USDT']
+2026-01-14 21:30:03,361 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] Hook triggered - top_coins length: 0
+2026-01-14 21:30:03,361 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] No top_coins to prefetch
+2026-01-14 21:30:03,361 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Analysis: 15/15 coins with sufficient data
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 1: LUMIA-USDT has 812 points, sufficient=True
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 2: GOAT-USDT has 812 points, sufficient=True
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 3: DBR-USDT has 812 points, sufficient=True
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 4: ACT-USDT has 812 points, sufficient=True
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 5: GRASS-USDT has 812 points, sufficient=True
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Found 9 coins meeting criteria (min 0.0015%)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔝 Top 10 trends:
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   1. LINK-USDT: +9.394% (24h: -1.01%, 4h: -0.87%, 1h: -1.16%, 812 points)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   2. GRASS-USDT: +7.558% (24h: +2.26%, 4h: +5.93%, 1h: -1.41%, 812 points)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   3. COMP-USDT: +6.707% (24h: -0.38%, 4h: -0.29%, 1h: -0.47%, 812 points)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   4. PNUT-USDT: +4.913% (24h: -1.57%, 4h: -2.30%, 1h: -0.85%, 812 points)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   5. AAVE-USDT: +4.766% (24h: -0.47%, 4h: -0.06%, 1h: -0.89%, 812 points)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   6. CHZ-USDT: +3.927% (24h: +0.14%, 4h: +1.01%, 1h: -0.73%, 812 points)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   7. TRX-USDT: +2.633% (24h: -0.10%, 4h: -0.30%, 1h: +0.10%, 812 points)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   8. GOAT-USDT: +1.546% (24h: -2.18%, 4h: -3.10%, 1h: -1.25%, 812 points)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   9. ACT-USDT: +0.957% (24h: -1.16%, 4h: -2.47%, 1h: +0.16%, 812 points)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   10. DBR-USDT: -5.588% (24h: -1.32%, 4h: -2.64%, 1h: +0.00%, 812 points)
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🏆 BEST: LINK-USDT with +9.39% trend
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 VALIDATION STATUS (Top 5):
+2026-01-14 21:30:03,362 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ LINK-USDT    | BULLISH  | Score:  +9.39% | Candles: 411
+2026-01-14 21:30:03,363 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ GRASS-USDT   | BULLISH  | Score:  +7.56% | Candles: 411
+2026-01-14 21:30:03,363 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ COMP-USDT    | BULLISH  | Score:  +6.71% | Candles: 411
+2026-01-14 21:30:03,363 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ PNUT-USDT    | BULLISH  | Score:  +4.91% | Candles: 411
+2026-01-14 21:30:03,363 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ AAVE-USDT    | BULLISH  | Score:  +4.77% | Candles: 411
+2026-01-14 21:30:03,363 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Selected coin: None (no coin meets criteria)
+2026-01-14 21:30:03,363 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 MONITORING: Active Coin: None
+2026-01-14 21:30:03,363 - 901951 - hummingbot.strategy_v2.runnable_base - WARNING - ⚠️  Best coin LINK-USDT (consensus: +9.39%) werd afgewezen:
+   - Consensus trend: +9.39% (overall score)
+   - 24h trend: -1.01%
+   - 4h trend: -0.87%
+   - 1h trend: -1.16%
+   - Multi-timeframe: AAN
+   - Warm-up mode: AAN
+2026-01-14 21:30:03,363 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ❌ No coin found with trend >= 0.0015%
+2026-01-14 21:30:03,363 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ No better coin found, but keeping UNI-USDT running. Risk management will handle exit if needed.
+2026-01-14 21:30:03,450 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 46 order book diffs for COMP-USDT.
+2026-01-14 21:30:05,810 - 901951 - hummingbot.core.data_type.order_book_tracker - DEBUG - Processed 5 order book diffs for YFI-USDT.
+2026-01-14 21:30:13,366 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔍 Adaptive filters to apply: ['rsi_buy_min', 'rsi_buy_max', 'rsi_extreme_min', 'vwap_max_deviation_pct', 'max_up_accel_pct', 'max_down_accel_pct', 'atr_min_pct', 'atr_max_pct', 'spike_5m_max_pct', 'wick_ratio_min', 'grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔸 Unmapped filters (ignored): ['grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ Adaptive filters applied to SmartEntry:
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_buy_max: 88.2→88.2
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 15.0→25.0
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 25.0→15.0
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    vwap_max_deviation_pct: 38.2→38.2
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_up_accel_pct: 6.3→6.3
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_down_accel_pct: -13.9→-13.9
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_atr_pct_for_grid: 0.1→0.1
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_atr_pct_for_grid: 8.0→8.0
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_5m_spike_pct: 4.5→4.5
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_wick_ratio: 0.0→0.0
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 control_task: mdp_ready=True
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔄 Controller update started
+2026-01-14 21:30:13,367 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - ⏳ Skipping trend update (20.0s since last fetch, min interval 30.0s)
+2026-01-14 21:30:13,368 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔎 Analyzing coins for best trading opportunity...
+2026-01-14 21:30:13,368 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🎯 Looking for trend >= 0.0015%
+2026-01-14 21:30:13,368 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator exists = True
+2026-01-14 21:30:13,368 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator.trends has 15 coins
+2026-01-14 21:30:13,368 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🚫 Excluding coins: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:30:13,368 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG -    Config blacklist: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:30:13,368 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - Dynamic slots: balance=€321, regime=baseline, base=4, multiplier=1.0, final=4
+2026-01-14 21:30:13,368 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:30:13,368 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:30:13,368 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:30:13,368 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6123%, min_req=0.0015%, passes=False
+2026-01-14 21:30:13,368 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6123%, min_req=0.0015%, passes=False
+2026-01-14 21:30:13,368 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5456%, min_req=0.0015%, passes=True
+2026-01-14 21:30:13,368 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5456%, min_req=0.0015%, passes=True
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5879%, min_req=0.0015%, passes=False
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5879%, min_req=0.0015%, passes=False
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9570%, min_req=0.0015%, passes=True
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9570%, min_req=0.0015%, passes=True
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5577%, min_req=0.0015%, passes=True
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.5577%, min_req=0.0015%, passes=True
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6329%, min_req=0.0015%, passes=True
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.6329%, min_req=0.0015%, passes=True
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3937%, min_req=0.0015%, passes=True
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3937%, min_req=0.0015%, passes=True
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.394%
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.394%
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.558%
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.558%
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.707%
+2026-01-14 21:30:13,369 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.707%
+2026-01-14 21:30:13,369 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Multi-coin mode: All 4 slots filled (['SUSHI-USDT', 'YFI-USDT', 'DOGE-USDT', 'UNI-USDT']) - no room for new coins
+2026-01-14 21:30:13,369 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    📉 Missed opportunities: ['LINK-USDT', 'GRASS-USDT', 'COMP-USDT']
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] Hook triggered - top_coins length: 0
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] No top_coins to prefetch
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Analysis: 15/15 coins with sufficient data
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 1: LUMIA-USDT has 812 points, sufficient=True
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 2: GOAT-USDT has 812 points, sufficient=True
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 3: DBR-USDT has 812 points, sufficient=True
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 4: ACT-USDT has 812 points, sufficient=True
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 5: GRASS-USDT has 812 points, sufficient=True
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Found 9 coins meeting criteria (min 0.0015%)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔝 Top 10 trends:
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   1. LINK-USDT: +9.394% (24h: -1.01%, 4h: -0.87%, 1h: -1.16%, 812 points)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   2. GRASS-USDT: +7.558% (24h: +2.26%, 4h: +5.93%, 1h: -1.41%, 812 points)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   3. COMP-USDT: +6.707% (24h: -0.38%, 4h: -0.29%, 1h: -0.47%, 812 points)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   4. PNUT-USDT: +4.913% (24h: -1.57%, 4h: -2.30%, 1h: -0.85%, 812 points)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   5. AAVE-USDT: +4.766% (24h: -0.47%, 4h: -0.06%, 1h: -0.89%, 812 points)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   6. CHZ-USDT: +3.927% (24h: +0.14%, 4h: +1.01%, 1h: -0.73%, 812 points)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   7. TRX-USDT: +2.633% (24h: -0.10%, 4h: -0.30%, 1h: +0.10%, 812 points)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   8. GOAT-USDT: +1.546% (24h: -2.18%, 4h: -3.10%, 1h: -1.25%, 812 points)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   9. ACT-USDT: +0.957% (24h: -1.16%, 4h: -2.47%, 1h: +0.16%, 812 points)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   10. DBR-USDT: -5.588% (24h: -1.32%, 4h: -2.64%, 1h: +0.00%, 812 points)
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🏆 BEST: LINK-USDT with +9.39% trend
+2026-01-14 21:30:13,370 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 VALIDATION STATUS (Top 5):
+2026-01-14 21:30:13,371 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ LINK-USDT    | BULLISH  | Score:  +9.39% | Candles: 411
+2026-01-14 21:30:13,371 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ GRASS-USDT   | BULLISH  | Score:  +7.56% | Candles: 411
+2026-01-14 21:30:13,371 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ COMP-USDT    | BULLISH  | Score:  +6.71% | Candles: 411
+2026-01-14 21:30:13,371 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ PNUT-USDT    | BULLISH  | Score:  +4.91% | Candles: 411
+2026-01-14 21:30:13,371 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ AAVE-USDT    | BULLISH  | Score:  +4.77% | Candles: 411
+2026-01-14 21:30:13,371 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Selected coin: None (no coin meets criteria)
+2026-01-14 21:30:13,371 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 MONITORING: Active Coin: None
+2026-01-14 21:30:13,371 - 901951 - hummingbot.strategy_v2.runnable_base - WARNING - ⚠️  Best coin LINK-USDT (consensus: +9.39%) werd afgewezen:
+   - Consensus trend: +9.39% (overall score)
+   - 24h trend: -1.01%
+   - 4h trend: -0.87%
+   - 1h trend: -1.16%
+   - Multi-timeframe: AAN
+   - Warm-up mode: AAN
+2026-01-14 21:30:13,371 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ❌ No coin found with trend >= 0.0015%
+2026-01-14 21:30:13,371 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ No better coin found, but keeping UNI-USDT running. Risk management will handle exit if needed.
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-CHECK] bitget configured pairs: ['ETH-USDT', 'SOL-USDT', 'BTC-USDT', 'LINK-USDT', 'UNI-USDT', 'DOGE-USDT', 'PNUT-USDT', 'COMP-USDT', 'SUSHI-USDT', 'YFI-USDT', 'GOAT-USDT']
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-CHECK] Total pairs to check: 11: ['BTC-USDT', 'COMP-USDT', 'DOGE-USDT', 'ETH-USDT', 'GOAT-USDT', 'LINK-USDT', 'PNUT-USDT', 'SOL-USDT', 'SUSHI-USDT', 'UNI-USDT', 'YFI-USDT']
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(ETH-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(DOGE-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(COMP-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(GOAT-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(UNI-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(YFI-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(LINK-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(PNUT-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(SUSHI-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(BTC-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:22,031 - 901951 - hummingbot.data_feed.market_data_provider - DEBUG - [STALE-DEBUG] _is_ready(SOL-USDT): price_age=-0.00s, ob_age=-0.00s, ready=True
+2026-01-14 21:30:23,373 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔍 Adaptive filters to apply: ['rsi_buy_min', 'rsi_buy_max', 'rsi_extreme_min', 'vwap_max_deviation_pct', 'max_up_accel_pct', 'max_down_accel_pct', 'atr_min_pct', 'atr_max_pct', 'spike_5m_max_pct', 'wick_ratio_min', 'grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔸 Unmapped filters (ignored): ['grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ Adaptive filters applied to SmartEntry:
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_buy_max: 88.2→88.2
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 15.0→25.0
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 25.0→15.0
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    vwap_max_deviation_pct: 38.2→38.2
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_up_accel_pct: 6.3→6.3
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_down_accel_pct: -13.9→-13.9
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_atr_pct_for_grid: 0.1→0.1
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_atr_pct_for_grid: 8.0→8.0
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_5m_spike_pct: 4.5→4.5
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_wick_ratio: 0.0→0.0
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 control_task: mdp_ready=True
+2026-01-14 21:30:23,374 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔄 Controller update started
+2026-01-14 21:30:23,375 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Updating trends for 15 coins (last refresh 30.0s ago)
+2026-01-14 21:30:23,375 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:30:23,375 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:30:23,375 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:30:23,375 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔄 Attempting batch API call for 15 symbols (1 API call for all)...
+2026-01-14 21:30:23,375 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔄 Attempting batch API call for 15 symbols (1 API call for all)...
+2026-01-14 21:30:23,725 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch API call successful: 15/15 prices retrieved (100.0% success) in 0.35s - 1 API call instead of 15
+2026-01-14 21:30:23,725 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch API call successful: 15/15 prices retrieved (100.0% success) in 0.35s - 1 API call instead of 15
+2026-01-14 21:30:23,726 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch mode: updating 15 trends using batch-fetched prices
+2026-01-14 21:30:23,726 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch mode: updating 15 trends using batch-fetched prices
+2026-01-14 21:30:23,727 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 LUMIA-USDT   | €  0.1300 | Raw:  -5.80% | Consensus:  -5.62% | Vol: 0.373% | Data: 813/7800 points
+2026-01-14 21:30:23,727 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 LUMIA-USDT   | €  0.1300 | Raw:  -5.80% | Consensus:  -5.62% | Vol: 0.373% | Data: 813/7800 points
+2026-01-14 21:30:23,729 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GOAT-USDT    | €  0.0394 | Raw:  +2.53% | Consensus:  +1.54% | Vol: 0.233% | Data: 813/7800 points
+2026-01-14 21:30:23,729 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GOAT-USDT    | €  0.0394 | Raw:  +2.53% | Consensus:  +1.54% | Vol: 0.233% | Data: 813/7800 points
+2026-01-14 21:30:23,730 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 DBR-USDT     | €  0.0184 | Raw:  -2.69% | Consensus:  -5.59% | Vol: 0.121% | Data: 813/7800 points
+2026-01-14 21:30:23,730 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📉 DBR-USDT     | €  0.0184 | Raw:  -2.69% | Consensus:  -5.59% | Vol: 0.121% | Data: 813/7800 points
+2026-01-14 21:30:23,731 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 ACT-USDT     | €  0.0248 | Raw:  +2.05% | Consensus:  +0.96% | Vol: 0.234% | Data: 813/7800 points
+2026-01-14 21:30:23,731 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 ACT-USDT     | €  0.0248 | Raw:  +2.05% | Consensus:  +0.96% | Vol: 0.234% | Data: 813/7800 points
+2026-01-14 21:30:23,732 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GRASS-USDT   | €  0.3649 | Raw:  +7.20% | Consensus:  +7.63% | Vol: 0.259% | Data: 813/7800 points
+2026-01-14 21:30:23,732 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 GRASS-USDT   | €  0.3649 | Raw:  +7.20% | Consensus:  +7.63% | Vol: 0.259% | Data: 813/7800 points
+2026-01-14 21:30:23,734 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 TRX-USDT     | €  0.3030 | Raw:  +1.27% | Consensus:  +2.70% | Vol: 0.074% | Data: 813/7800 points
+2026-01-14 21:30:23,734 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 TRX-USDT     | €  0.3030 | Raw:  +1.27% | Consensus:  +2.70% | Vol: 0.074% | Data: 813/7800 points
+2026-01-14 21:30:23,735 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 LINK-USDT    | € 14.1920 | Raw:  +6.71% | Consensus:  +9.39% | Vol: 0.146% | Data: 813/7800 points
+2026-01-14 21:30:23,735 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 LINK-USDT    | € 14.1920 | Raw:  +6.71% | Consensus:  +9.39% | Vol: 0.146% | Data: 813/7800 points
+2026-01-14 21:30:23,737 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 UNI-USDT     | €  5.7340 | Raw:  +5.64% | Consensus:  +6.64% | Vol: 0.168% | Data: 813/7800 points
+2026-01-14 21:30:23,737 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 UNI-USDT     | €  5.7340 | Raw:  +5.64% | Consensus:  +6.64% | Vol: 0.168% | Data: 813/7800 points
+2026-01-14 21:30:23,738 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 SUSHI-USDT   | €  0.3466 | Raw:  +5.67% | Consensus:  +4.22% | Vol: 0.236% | Data: 813/7800 points
+2026-01-14 21:30:23,738 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 SUSHI-USDT   | €  0.3466 | Raw:  +5.67% | Consensus:  +4.22% | Vol: 0.236% | Data: 813/7800 points
+2026-01-14 21:30:23,739 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 COMP-USDT    | € 27.4000 | Raw:  +4.82% | Consensus:  +6.71% | Vol: 0.151% | Data: 813/7800 points
+2026-01-14 21:30:23,739 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 COMP-USDT    | € 27.4000 | Raw:  +4.82% | Consensus:  +6.71% | Vol: 0.151% | Data: 813/7800 points
+2026-01-14 21:30:23,741 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 AAVE-USDT    | €178.0100 | Raw:  +3.71% | Consensus:  +4.77% | Vol: 0.171% | Data: 813/7800 points
+2026-01-14 21:30:23,741 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 AAVE-USDT    | €178.0100 | Raw:  +3.71% | Consensus:  +4.77% | Vol: 0.171% | Data: 813/7800 points
+2026-01-14 21:30:23,742 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 YFI-USDT     | €3605.0000 | Raw:  +4.49% | Consensus:  +4.84% | Vol: 0.191% | Data: 813/7800 points
+2026-01-14 21:30:23,742 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 YFI-USDT     | €3605.0000 | Raw:  +4.49% | Consensus:  +4.84% | Vol: 0.191% | Data: 813/7800 points
+2026-01-14 21:30:23,743 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 DOGE-USDT    | €  0.1474 | Raw:  +5.25% | Consensus:  +6.33% | Vol: 0.175% | Data: 813/7800 points
+2026-01-14 21:30:23,743 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 DOGE-USDT    | €  0.1474 | Raw:  +5.25% | Consensus:  +6.33% | Vol: 0.175% | Data: 813/7800 points
+2026-01-14 21:30:23,745 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 CHZ-USDT     | €  0.0560 | Raw:  +3.66% | Consensus:  +3.96% | Vol: 0.282% | Data: 813/7800 points
+2026-01-14 21:30:23,745 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 CHZ-USDT     | €  0.0560 | Raw:  +3.66% | Consensus:  +3.96% | Vol: 0.282% | Data: 813/7800 points
+2026-01-14 21:30:23,746 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 PNUT-USDT    | €  0.0888 | Raw:  +6.06% | Consensus:  +4.91% | Vol: 0.232% | Data: 813/7800 points
+2026-01-14 21:30:23,746 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 📈 PNUT-USDT    | €  0.0888 | Raw:  +6.06% | Consensus:  +4.91% | Vol: 0.232% | Data: 813/7800 points
+2026-01-14 21:30:23,746 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch update complete: 15/15 trends updated successfully
+2026-01-14 21:30:23,746 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - ✅ Batch update complete: 15/15 trends updated successfully
+2026-01-14 21:30:23,746 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔎 Analyzing coins for best trading opportunity...
+2026-01-14 21:30:23,746 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🎯 Looking for trend >= 0.0015%
+2026-01-14 21:30:23,746 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator exists = True
+2026-01-14 21:30:23,746 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator.trends has 15 coins
+2026-01-14 21:30:23,746 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🚫 Excluding coins: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:30:23,746 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG -    Config blacklist: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:30:23,747 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - Dynamic slots: balance=€321, regime=baseline, base=4, multiplier=1.0, final=4
+2026-01-14 21:30:23,747 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:30:23,747 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:30:23,747 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6205%, min_req=0.0015%, passes=False
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6205%, min_req=0.0015%, passes=False
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5394%, min_req=0.0015%, passes=True
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5394%, min_req=0.0015%, passes=True
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5937%, min_req=0.0015%, passes=False
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5937%, min_req=0.0015%, passes=False
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9567%, min_req=0.0015%, passes=True
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9567%, min_req=0.0015%, passes=True
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.6314%, min_req=0.0015%, passes=True
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.6314%, min_req=0.0015%, passes=True
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.7034%, min_req=0.0015%, passes=True
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.7034%, min_req=0.0015%, passes=True
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3890%, min_req=0.0015%, passes=True
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3890%, min_req=0.0015%, passes=True
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.389%
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.389%
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.631%
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.631%
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.706%
+2026-01-14 21:30:23,747 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.706%
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Multi-coin mode: All 4 slots filled (['SUSHI-USDT', 'YFI-USDT', 'DOGE-USDT', 'UNI-USDT']) - no room for new coins
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    📉 Missed opportunities: ['LINK-USDT', 'GRASS-USDT', 'COMP-USDT']
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] Hook triggered - top_coins length: 0
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] No top_coins to prefetch
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Analysis: 15/15 coins with sufficient data
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 1: LUMIA-USDT has 813 points, sufficient=True
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 2: GOAT-USDT has 813 points, sufficient=True
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 3: DBR-USDT has 813 points, sufficient=True
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 4: ACT-USDT has 813 points, sufficient=True
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 5: GRASS-USDT has 813 points, sufficient=True
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Found 9 coins meeting criteria (min 0.0015%)
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔝 Top 10 trends:
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   1. LINK-USDT: +9.389% (24h: -0.86%, 4h: -0.81%, 1h: -0.91%, 813 points)
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   2. GRASS-USDT: +7.631% (24h: +2.60%, 4h: +6.08%, 1h: -0.87%, 813 points)
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   3. COMP-USDT: +6.706% (24h: -0.31%, 4h: -0.29%, 1h: -0.33%, 813 points)
+2026-01-14 21:30:23,748 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   4. PNUT-USDT: +4.907% (24h: -1.56%, 4h: -2.29%, 1h: -0.84%, 813 points)
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   5. AAVE-USDT: +4.767% (24h: -0.31%, 4h: -0.03%, 1h: -0.59%, 813 points)
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   6. CHZ-USDT: +3.964% (24h: +0.30%, 4h: +1.06%, 1h: -0.46%, 813 points)
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   7. TRX-USDT: +2.703% (24h: +0.03%, 4h: -0.16%, 1h: +0.23%, 813 points)
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   8. GOAT-USDT: +1.539% (24h: -2.11%, 4h: -2.96%, 1h: -1.25%, 813 points)
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   9. ACT-USDT: +0.957% (24h: -1.16%, 4h: -2.47%, 1h: +0.16%, 813 points)
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   10. DBR-USDT: -5.594% (24h: -1.32%, 4h: -2.64%, 1h: +0.00%, 813 points)
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🏆 BEST: LINK-USDT with +9.39% trend
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 VALIDATION STATUS (Top 5):
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ LINK-USDT    | BULLISH  | Score:  +9.39% | Candles: 412
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ GRASS-USDT   | BULLISH  | Score:  +7.63% | Candles: 412
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ COMP-USDT    | BULLISH  | Score:  +6.71% | Candles: 412
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ PNUT-USDT    | BULLISH  | Score:  +4.91% | Candles: 412
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ AAVE-USDT    | BULLISH  | Score:  +4.77% | Candles: 412
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Selected coin: None (no coin meets criteria)
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 MONITORING: Active Coin: None
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - WARNING - ⚠️  Best coin LINK-USDT (consensus: +9.39%) werd afgewezen:
+   - Consensus trend: +9.39% (overall score)
+   - 24h trend: -0.86%
+   - 4h trend: -0.81%
+   - 1h trend: -0.91%
+   - Multi-timeframe: AAN
+   - Warm-up mode: AAN
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ❌ No coin found with trend >= 0.0015%
+2026-01-14 21:30:23,750 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ No better coin found, but keeping UNI-USDT running. Risk management will handle exit if needed.
+2026-01-14 21:30:33,752 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔍 Adaptive filters to apply: ['rsi_buy_min', 'rsi_buy_max', 'rsi_extreme_min', 'vwap_max_deviation_pct', 'max_up_accel_pct', 'max_down_accel_pct', 'atr_min_pct', 'atr_max_pct', 'spike_5m_max_pct', 'wick_ratio_min', 'grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔸 Unmapped filters (ignored): ['grid_spacing_mult', 'max_active_grids', 'entry_confidence_min']
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ Adaptive filters applied to SmartEntry:
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_buy_max: 88.2→88.2
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 15.0→25.0
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    rsi_extreme_low: 25.0→15.0
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    vwap_max_deviation_pct: 38.2→38.2
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_up_accel_pct: 6.3→6.3
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_down_accel_pct: -13.9→-13.9
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_atr_pct_for_grid: 0.1→0.1
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_atr_pct_for_grid: 8.0→8.0
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    max_5m_spike_pct: 4.5→4.4
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    min_wick_ratio: 0.0→0.0
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 control_task: mdp_ready=True
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔄 Controller update started
+2026-01-14 21:30:33,753 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - ⏳ Skipping trend update (10.0s since last fetch, min interval 30.0s)
+2026-01-14 21:30:33,754 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔎 Analyzing coins for best trading opportunity...
+2026-01-14 21:30:33,754 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🎯 Looking for trend >= 0.0015%
+2026-01-14 21:30:33,754 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator exists = True
+2026-01-14 21:30:33,754 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: trend_calculator.trends has 15 coins
+2026-01-14 21:30:33,754 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🚫 Excluding coins: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:30:33,754 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG -    Config blacklist: {'BTC-USD', 'BUSD-USDT', 'FDUSD-USDT', 'NFP-USDT', 'TUSD-USDT', 'USDC-USDT', 'ETH-USD', 'OORT-USDT', 'DAI-USDT', 'FIS-USDT', 'USDT-USD'}
+2026-01-14 21:30:33,754 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - Dynamic slots: balance=€321, regime=baseline, base=4, multiplier=1.0, final=4
+2026-01-14 21:30:33,754 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: _build_orderbook_config() called
+2026-01-14 21:30:33,754 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - 🔧 DEBUG: orderbook_config_dict = {'enabled': True, 'mode': 'live', 'regime_aware': False, 'depth_pct_range': 0.5, 'depth_levels': 10, 'min_depth_multiplier': 3.0, 'use_for_ranking': False, 'use_for_entry': True, 'log_depth_metrics': True}
+2026-01-14 21:30:33,754 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔧 DEBUG: Built orderbook config: mode=live, order_size=300, multiplier=3.0
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6205%, min_req=0.0015%, passes=False
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LUMIA-USDT: consensus=-5.6205%, min_req=0.0015%, passes=False
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5394%, min_req=0.0015%, passes=True
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GOAT-USDT: consensus=1.5394%, min_req=0.0015%, passes=True
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5937%, min_req=0.0015%, passes=False
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG DBR-USDT: consensus=-5.5937%, min_req=0.0015%, passes=False
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9567%, min_req=0.0015%, passes=True
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG ACT-USDT: consensus=0.9567%, min_req=0.0015%, passes=True
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.6314%, min_req=0.0015%, passes=True
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG GRASS-USDT: consensus=7.6314%, min_req=0.0015%, passes=True
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.7034%, min_req=0.0015%, passes=True
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG TRX-USDT: consensus=2.7034%, min_req=0.0015%, passes=True
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3890%, min_req=0.0015%, passes=True
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 🔍 DEBUG LINK-USDT: consensus=9.3890%, min_req=0.0015%, passes=True
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO - 
+🔝 TOP 3 COINS (requested 3):
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.389%
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   1. LINK-USDT: +9.389%
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.631%
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   2. GRASS-USDT: +7.631%
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.706%
+2026-01-14 21:30:33,755 - 901951 - multi_coin_grid_pro.utils.trend_calculator - INFO -   3. COMP-USDT: +6.706%
+2026-01-14 21:30:33,755 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 Multi-coin mode: All 4 slots filled (['SUSHI-USDT', 'YFI-USDT', 'DOGE-USDT', 'UNI-USDT']) - no room for new coins
+2026-01-14 21:30:33,755 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    📉 Missed opportunities: ['LINK-USDT', 'GRASS-USDT', 'COMP-USDT']
+2026-01-14 21:30:33,755 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] Hook triggered - top_coins length: 0
+2026-01-14 21:30:33,755 - 901951 - hummingbot.strategy_v2.runnable_base - DEBUG - [PREFETCH] No top_coins to prefetch
+2026-01-14 21:30:33,755 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Analysis: 15/15 coins with sufficient data
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 1: LUMIA-USDT has 813 points, sufficient=True
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 2: GOAT-USDT has 813 points, sufficient=True
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 3: DBR-USDT has 813 points, sufficient=True
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 4: ACT-USDT has 813 points, sufficient=True
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   Sample 5: GRASS-USDT has 813 points, sufficient=True
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Found 9 coins meeting criteria (min 0.0015%)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔝 Top 10 trends:
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   1. LINK-USDT: +9.389% (24h: -0.86%, 4h: -0.81%, 1h: -0.91%, 813 points)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   2. GRASS-USDT: +7.631% (24h: +2.60%, 4h: +6.08%, 1h: -0.87%, 813 points)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   3. COMP-USDT: +6.706% (24h: -0.31%, 4h: -0.29%, 1h: -0.33%, 813 points)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   4. PNUT-USDT: +4.907% (24h: -1.56%, 4h: -2.29%, 1h: -0.84%, 813 points)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   5. AAVE-USDT: +4.767% (24h: -0.31%, 4h: -0.03%, 1h: -0.59%, 813 points)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   6. CHZ-USDT: +3.964% (24h: +0.30%, 4h: +1.06%, 1h: -0.46%, 813 points)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   7. TRX-USDT: +2.703% (24h: +0.03%, 4h: -0.16%, 1h: +0.23%, 813 points)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   8. GOAT-USDT: +1.539% (24h: -2.11%, 4h: -2.96%, 1h: -1.25%, 813 points)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   9. ACT-USDT: +0.957% (24h: -1.16%, 4h: -2.47%, 1h: +0.16%, 813 points)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -   10. DBR-USDT: -5.594% (24h: -1.32%, 4h: -2.64%, 1h: +0.00%, 813 points)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🏆 BEST: LINK-USDT with +9.39% trend
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 VALIDATION STATUS (Top 5):
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ LINK-USDT    | BULLISH  | Score:  +9.39% | Candles: 412
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ GRASS-USDT   | BULLISH  | Score:  +7.63% | Candles: 412
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ COMP-USDT    | BULLISH  | Score:  +6.71% | Candles: 412
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ PNUT-USDT    | BULLISH  | Score:  +4.91% | Candles: 412
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO -    ✅ AAVE-USDT    | BULLISH  | Score:  +4.77% | Candles: 412
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 🔍 Selected coin: None (no coin meets criteria)
+2026-01-14 21:30:33,756 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - 📊 MONITORING: Active Coin: None
+2026-01-14 21:30:33,757 - 901951 - hummingbot.strategy_v2.runnable_base - WARNING - ⚠️  Best coin LINK-USDT (consensus: +9.39%) werd afgewezen:
+   - Consensus trend: +9.39% (overall score)
+   - 24h trend: -0.86%
+   - 4h trend: -0.81%
+   - 1h trend: -0.91%
+   - Multi-timeframe: AAN
+   - Warm-up mode: AAN
+2026-01-14 21:30:33,757 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ❌ No coin found with trend >= 0.0015%
+2026-01-14 21:30:33,757 - 901951 - hummingbot.strategy_v2.runnable_base - INFO - ✅ No better coin found, but keeping UNI-USDT running. Risk management will handle exit if needed.
