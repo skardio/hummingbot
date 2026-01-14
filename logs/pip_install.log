@@ -1,0 +1,1 @@
+Requirement already satisfied: eip712-structs in /home/mo/anaconda3/envs/hummingbot/lib/python3.13/site-packages (from -r setup/pip_packages.txt (line 1)) (1.1.0)

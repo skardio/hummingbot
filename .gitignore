@@ -45,7 +45,7 @@ __pycache__
 **/.DS_Store
 portfolio_value.csv
 /notebooks
-/data
+# /data
 debug.log
 /installation/docker-commands/hummingbot_files
 
@@ -59,11 +59,11 @@ secrets/
 credentials/
 
 # Trading bot specific
-logs/*.log
+# logs/*.log
 logs/*.jsonl
 logs/*.csv
 *.db
-*.sqlite
+# *.sqlite
 *.sqlite3
 
 # Distribution files
@@ -99,7 +99,7 @@ coverage.xml
 *.srl
 *.key
 *.crt
-*.log
+# *.log
 
 # Debug console
 .debug_console_ssh_host_key

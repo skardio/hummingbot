@@ -1,0 +1,2 @@
+nohup: ignoring input
+2025-11-09 03:59:41,150 - hummingbot.connector.exchange.kraken.kraken_api_order_book_data_source.KrakenAPIOrderBookDataSource - WARNING - The websocket connection was closed (The WS connection was closed unexpectedly. Close code = 1006 msg data: None)

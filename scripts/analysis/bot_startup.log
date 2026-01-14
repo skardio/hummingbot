@@ -1,0 +1,9 @@
+nohup: ignoring input
+Traceback (most recent call last):
+  File "/home/mo/repos/hummingbot/bin/hummingbot_quickstart.py", line 15, in <module>
+    from bin.hummingbot import UIStartListener, detect_available_port
+  File "/home/mo/repos/hummingbot/bin/hummingbot.py", line 10, in <module>
+    from hummingbot.client.config.client_config_map import ClientConfigMap
+  File "/home/mo/repos/hummingbot/hummingbot/client/config/client_config_map.py", line 10, in <module>
+    from tabulate import tabulate_formats
+ModuleNotFoundError: No module named 'tabulate'

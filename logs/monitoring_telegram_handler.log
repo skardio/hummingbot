@@ -1,0 +1,3 @@
+2025-12-14 13:51:23,717 - __main__ - INFO - 🤖 Starting Telegram command handler (polling mode)
+2025-12-14 13:51:23,717 - __main__ - INFO - 📱 Listening for commands in chat 8586283471
+2025-12-14 13:52:52,848 - multi_coin_grid_pro.monitoring.trade_analyzer - INFO - Database empty, parsing trades from log file...
