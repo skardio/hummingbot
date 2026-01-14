@@ -486,6 +486,19 @@ class TrendCalculator:
                     # Remove old candles (keep last 720 = 60 hours)
                     if len(trend.candles) > 720:
                         trend.candles = trend.candles[-720:]
+            else:
+                # CRITICAL FIX: Initialize first candle if empty (e.g., after dynamic discovery)
+                # Without this, candle_count stays 0 forever and SmartEntry always rejects with WARMUP
+                current_candle_start = int(current_time / 300) * 300  # Floor to 5-min boundary
+                first_candle = CandleData(
+                    timestamp=current_candle_start,
+                    open=price,
+                    high=price,
+                    low=price,
+                    close=price,
+                    volume=Decimal("0")
+                )
+                trend.candles.append(first_candle)
 
             # Add to price history (LEGACY)
             prev_price_value = Decimal(str(trend.price_history[-1]['price'])) if trend.price_history else price
@@ -631,6 +644,19 @@ class TrendCalculator:
                     # Remove old candles (keep last 720 = 60 hours)
                     if len(trend.candles) > 720:
                         trend.candles = trend.candles[-720:]
+            else:
+                # CRITICAL FIX: Initialize first candle if empty (e.g., after dynamic discovery)
+                # Without this, candle_count stays 0 forever and SmartEntry always rejects with WARMUP
+                current_candle_start = int(current_time / 300) * 300  # Floor to 5-min boundary
+                first_candle = CandleData(
+                    timestamp=current_candle_start,
+                    open=price,
+                    high=price,
+                    low=price,
+                    close=price,
+                    volume=Decimal("0")
+                )
+                trend.candles.append(first_candle)
 
             # Add to price history (LEGACY)
             prev_price_value = Decimal(str(trend.price_history[-1]['price'])) if trend.price_history else price
