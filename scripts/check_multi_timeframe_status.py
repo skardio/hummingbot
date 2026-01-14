@@ -11,8 +11,8 @@ try:
     from multi_coin_grid_pro.config.config_manager import ConfigManager
 
     cm = ConfigManager()
-    env = cm.get_environment()
-    config = cm.load_config('multi_coin_grid', env)
+    # Use new config name: spot_grid_kraken_eur
+    config = cm.load_config('spot_grid_kraken_eur')
 
     use_multi_timeframe = config.get('use_multi_timeframe', True)  # Default True
     trend_short = config.get('trend_lookback_short_minutes', 60)
@@ -22,8 +22,7 @@ try:
     print("=" * 70)
     print("  MULTI-TIMEFRAME TREND ENGINE STATUS")
     print("=" * 70)
-    print(f"Environment: {env}")
-    print(f"Config File: {cm.get_config_path('multi_coin_grid')}")
+    print(f"Config File: {cm.get_config_path('spot_grid_kraken_eur')}")
     print()
     print(f"Multi-Timeframe Enabled: {use_multi_timeframe}")
     print()
@@ -58,7 +57,7 @@ try:
         print()
         print("To enable:")
         print("  1. Edit config file:")
-        print(f"     {cm.get_config_path('multi_coin_grid')}")
+        print(f"     {cm.get_config_path('spot_grid_kraken_eur')}")
         print("  2. Add: use_multi_timeframe: true")
         print("  3. Restart bot")
 

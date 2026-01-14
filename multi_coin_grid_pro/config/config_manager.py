@@ -41,55 +41,72 @@ class ConfigManager:
 
     def get_environment(self) -> str:
         """
-        Get current environment from env var
+        Get current environment (not used anymore, kept for compatibility)
 
         Returns:
-            Environment name (dev/test/prod), defaults to 'dev'
+            Always returns 'prod'
         """
-        return os.getenv("BOT_ENV", "dev").lower()
+        return "prod"
 
     def load_config(
         self,
-        config_name: str = "multi_coin_grid",
+        config_name: str = "spot_grid_kraken_eur",
         environment: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Load configuration file
 
         Args:
-            config_name: Base name of config file (without extension)
-            environment: Environment name (dev/test/prod), defaults to current env
+            config_name: Base name of config file (without extension) - defaults to spot_grid_kraken_eur
+            environment: Environment name (deprecated, kept for compatibility)
 
         Returns:
             Configuration dictionary
         """
+        # Environment is deprecated but kept for backwards compatibility
         if environment is None:
-            environment = self.get_environment()
+            environment = "prod"
 
         cache_key = f"{config_name}_{environment}"
         if cache_key in self.config_cache:
             return self.config_cache[cache_key]
 
-        # Prefer config files that match the requested config_name before falling back to shared env configs
-        specific_env_path = self.config_dir / f"{config_name}.{environment}.yaml"
+        # Try different config file patterns
+        # 1. Direct match: spot_grid_kraken_eur.yaml
+        # 2. With environment: spot_grid_kraken_eur.prod.yaml (legacy)
+        # 3. Old names for backwards compatibility
         base_config_path = self.config_dir / f"{config_name}.yaml"
-        env_config_path = self.config_dir / f"config.{environment}.yaml"
+        specific_env_path = self.config_dir / f"{config_name}.{environment}.yaml"
 
-        if specific_env_path.exists():
-            config_path = specific_env_path
-        elif base_config_path.exists():
+        # Backwards compatibility paths
+        legacy_paths = [
+            self.config_dir / f"multi_coin_grid.{environment}.yaml",
+            self.config_dir / "multi_coin_grid.yaml",
+            self.config_dir / f"config.{environment}.yaml"
+        ]
+
+        if base_config_path.exists():
             config_path = base_config_path
-        elif env_config_path.exists():
-            config_path = env_config_path
+        elif specific_env_path.exists():
+            config_path = specific_env_path
         else:
-            raise FileNotFoundError(
-                f"Config file not found. Tried:\n"
-                f"  - {specific_env_path}\n"
-                f"  - {base_config_path}\n"
-                f"  - {env_config_path}"
-            )
+            # Try legacy paths
+            config_path = None
+            for legacy_path in legacy_paths:
+                if legacy_path.exists():
+                    config_path = legacy_path
+                    logger.warning(f"Using legacy config path: {legacy_path}")
+                    break
 
-        logger.info(f"Loading config from {config_path} (env: {environment})")
+            if config_path is None:
+                raise FileNotFoundError(
+                    f"Config file not found. Tried:\n"
+                    f"  - {base_config_path}\n"
+                    f"  - {specific_env_path}\n"
+                    f"  - {' - '.join(str(p) for p in legacy_paths)}"
+                )
+
+        logger.info(f"Loading config from {config_path}")
 
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)

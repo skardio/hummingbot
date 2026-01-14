@@ -6,12 +6,12 @@ Functionaliteit:
 - Monitort meerdere cryptos: XRP, ADA, DOT, SOL, LINK
 - Berekent 30min trend voor elke coin
 - Switcht automatisch naar de coin met de beste trend
-- Ondersteunt EUR/USD via BOT_ENV (prod=EUR, usd=USD)
+- EUR trading (Kraken)
 - Cancelt oude orders en plaatst nieuwe grid op beste coin
 - Minimum 1 uur tussen switches (vermijd fee churning)
 - Trade alleen coins met positieve trend (>0.5%)
 
-Capital: €133.18 (EUR) / $110 (USD)
+Capital: €133.18 (EUR)
 Fees: 0.25% maker, 0.40% taker
 """
 
@@ -25,10 +25,8 @@ from typing import Dict, List, Optional, Tuple
 
 import ccxt
 
-# Logging setup - dynamic log file based on BOT_ENV
-bot_env = os.getenv('BOT_ENV', 'prod').lower()
-log_suffix = f"_{bot_env}" if bot_env != 'prod' else ""
-log_file = f'/home/mo/repos/hummingbot/logs/multi_coin_grid{log_suffix}.log'
+# Logging setup
+log_file = '/home/mo/repos/hummingbot/logs/multi_coin_grid.log'
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,16 +56,12 @@ class MultiCoinGridBot:
     """
 
     def __init__(self):
-        # Detect quote currency from BOT_ENV (prod=EUR, usd=USD)
-        bot_env = os.getenv('BOT_ENV', 'prod').lower()
-        self.quote_currency = 'USD' if bot_env == 'usd' else 'EUR'
+        # EUR trading bot
+        self.quote_currency = 'EUR'
+        self.monitoring_only = False
 
-        # MONITORING MODE for USD bot (no trading)
-        self.monitoring_only = bot_env == 'usd'
-        mode_text = "📊 MONITORING MODE (trends only)" if self.monitoring_only else "🤖 TRADING MODE"
-
-        logger.info(f"🌍 Bot Environment: {bot_env} → Quote Currency: {self.quote_currency}")
-        logger.info(f"{mode_text}")
+        logger.info(f"🌍 Quote Currency: {self.quote_currency}")
+        logger.info("🤖 TRADING MODE")
 
         self.config = {
             # Coins worden automatisch opgehaald!

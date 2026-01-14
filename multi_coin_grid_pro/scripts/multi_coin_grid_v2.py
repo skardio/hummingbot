@@ -45,7 +45,7 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
     """
 
     # Strategy configuration - markets will be set dynamically by controllers
-    CONFIG_NAME: str = "multi_coin_grid"
+    CONFIG_NAME: str = "spot_grid_kraken_eur"  # Kraken EUR spot grid config
     CONFIG_MANAGER_CLASS = None
     CONTROLLER_CLASS = MultiCoinGridController
     CONTROLLER_CONFIG_CLASS = MultiCoinGridConfig
@@ -142,13 +142,12 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
         self.logger().info(f"✅ Logging configured - Level: {strategy_log_level}")
         self.logger().info("✅ SQLAlchemy logging set to WARNING level")
 
-        # Load controller config using ConfigManager (supports dev/test/prod)
+        # Load controller config using ConfigManager
         try:
             config_manager = self._get_config_manager_instance()
-            environment = config_manager.get_environment()
-            config_data = config_manager.load_config(self.CONFIG_NAME, environment)
+            config_data = config_manager.load_config(self.CONFIG_NAME)
             config_path = config_manager.get_config_path(self.CONFIG_NAME)
-            self.logger().info(f"✅ Loaded config from {config_path} (env: {environment})")
+            self.logger().info(f"✅ Loaded config from {config_path}")
         except Exception as e:
             self.logger().warning(f"⚠️  ConfigManager failed, using fallback: {e}")
             config_data, config_path = self._load_config_from_file()
@@ -162,17 +161,15 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
         """
         Initialize controllers - called by StrategyV2Base
         """
-        # Load controller config using ConfigManager (supports dev/test/prod)
+        # Load controller config using ConfigManager
         try:
             config_manager = self._get_config_manager_instance()
-            environment = config_manager.get_environment()
-            config_data = config_manager.load_config(self.CONFIG_NAME, environment)
+            config_data = config_manager.load_config(self.CONFIG_NAME)
             config_path = config_manager.get_config_path(self.CONFIG_NAME)
-            self.logger().info(f"✅ Loaded controller config from {config_path} (env: {environment})")
+            self.logger().info(f"✅ Loaded controller config from {config_path}")
         except Exception as e:
             self.logger().warning(f"⚠️  ConfigManager failed, using fallback: {e}")
             config_data, config_path = self._load_config_from_file()
-            environment = None
             self.logger().info(f"✅ Loaded controller config from {config_path} (fallback)")
 
         # Check if paper trading is enabled

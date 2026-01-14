@@ -73,8 +73,8 @@ class TestControllerMomentumIntegration:
         """Test: Config files contain momentum guard configuration"""
         import yaml
 
-        # ASSERT: Check config.prod.yaml
-        with open("/home/mo/repos/hummingbot/multi_coin_grid_pro/config/config.prod.yaml") as f:
+        # ASSERT: Check spot_grid_kraken_eur.yaml
+        with open("/home/mo/repos/hummingbot/multi_coin_grid_pro/config/spot_grid_kraken_eur.yaml") as f:
             config_prod = yaml.safe_load(f)
 
         assert "vwap_slope_guard_enabled" in config_prod["smart_entry_filter"], "Config should have vwap_slope_guard_enabled"

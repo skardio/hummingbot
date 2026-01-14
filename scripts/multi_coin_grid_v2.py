@@ -89,18 +89,26 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
         2. If not set, use dynamic discovery via REST API
         3. Fallback to default seed pairs
         """
-        import os
         from pathlib import Path
 
         import yaml
 
-        # Determine config file based on BOT_ENV
-        env = os.environ.get("BOT_ENV", "prod")
-        config_file = f"config.{env}.yaml"
-        config_path = Path(__file__).parent.parent / "multi_coin_grid_pro" / "config" / config_file
+        # Try new config name first, then fall back to legacy names
+        config_files = [
+            "spot_grid_kraken_eur.yaml",
+            "config.prod.yaml",
+            "multi_coin_grid.yaml"
+        ]
 
-        # Fallback to default config
-        if not config_path.exists():
+        config_path = None
+        for config_file in config_files:
+            test_path = Path(__file__).parent.parent / "multi_coin_grid_pro" / "config" / config_file
+            if test_path.exists():
+                config_path = test_path
+                break
+
+        if config_path is None:
+            # Fallback to default config
             config_path = Path(__file__).parent.parent / "multi_coin_grid_pro" / "config" / "config.prod.yaml"
 
         # Default seed pairs (always liquid, used as fallback)
@@ -394,17 +402,15 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
 
             self.logger().info("🔧 Loading controller config...")
 
-            # Load config using ConfigManager (supports dev/test/prod)
+            # Load config using ConfigManager
             config_manager = ConfigManager()
-            env = config_manager.get_environment()
-            config_data = config_manager.load_config('multi_coin_grid', env)
+            config_data = config_manager.load_config('spot_grid_kraken_eur')
 
             # Expand environment variables in config
             config_data = expand_env_vars(config_data)
 
-            config_path = config_manager.get_config_path('multi_coin_grid')
+            config_path = config_manager.get_config_path('spot_grid_kraken_eur')
             self.logger().info(f"📁 Config path: {config_path}")
-            self.logger().info(f"🌍 Environment: {env}")
 
             self.logger().info("📝 Creating controller config...")
 
@@ -494,8 +500,7 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
             try:
                 from multi_coin_grid_pro.config.config_manager import ConfigManager
                 config_manager = ConfigManager()
-                env = config_manager.get_environment()
-                yaml_config = config_manager.load_config('multi_coin_grid', env)
+                yaml_config = config_manager.load_config('spot_grid_kraken_eur')
                 connector_name = yaml_config.get('connector_name', 'kraken')
                 quote_asset = yaml_config.get('quote_asset', 'EUR')
                 paper_trading = yaml_config.get('paper_trading', False)

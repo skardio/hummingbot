@@ -15,8 +15,8 @@ paper_trading: false
 # ==============================================================================
 
 use_dynamic_pair_discovery: true
-max_coins_to_monitor: 50
-min_24h_volume_eur: 100000          # Lager dan 100k → minder idle, nog steeds niet illiquide
+max_coins_to_monitor: 12            # 🚀 TASK 1.0: Universe throttling (was 50)
+min_24h_volume_eur: 150000          # 🚀 Higher volume = more liquid (was 100k)
 exclude_expensive_coins: false
 
 blacklist:
@@ -96,7 +96,7 @@ adaptive_filters:
     spike_5m_max_pct: 4.0           # 🚀 3.0→4.0 (bigger moves OK)
     wick_ratio_min: 0.0
     grid_spacing_mult: 1.0
-    max_active_grids: 2             # 🚀 1→2 (more concurrent grids)
+    max_active_grids: 4             # 🚀 TASK 1.2: 2→4 (was 2)
     entry_confidence_min: 0.65      # 🚀 0.70→0.65 (lower bar)
 
   # BULL regime: relaxed filters
@@ -108,7 +108,7 @@ adaptive_filters:
     atr_min_pct: 0.08
     spike_5m_max_pct: 3.5
     grid_spacing_mult: 1.2
-    max_active_grids: 3
+    max_active_grids: 6             # 🚀 TASK 1.2: 3→6 (was 3)
     entry_confidence_min: 0.60
 
   # CHOP regime: strict filters
@@ -120,7 +120,7 @@ adaptive_filters:
     atr_min_pct: 0.10               # 🔧 FIX: 0.15→0.10 (Kraken EUR pairs)
     spike_5m_max_pct: 2.5           # 🔧 FIX: 2.0→2.5
     grid_spacing_mult: 0.8
-    max_active_grids: 1
+    max_active_grids: 3             # 🚀 TASK 1.2: 1→3 (was 1)
     entry_confidence_min: 0.75
 
   # BEAR regime: STOP TRADING (inventory protection)
@@ -341,8 +341,8 @@ orderbook_liquidity:
 orderbook_prefetch:
   enabled: true                    # Enable prefetch observation
   mode: live                       # 🚀 LIVE MODE: Actually prefetch orderbooks (was: shadow = log-only)
-  top_n: 3                         # Number of top candidates to prefetch
-  max_subscriptions_per_minute: 6  # Rate limit protection
+  top_n: 15                        # Number of top candidates to prefetch (was: 3 → 15 to reduce NO_ORDERBOOK_DATA rejections)
+  max_subscriptions_per_minute: 20 # Rate limit protection (increased from 6 to support more prefetching)
 
 # ==============================================================================
 # SMART ENTRY FILTER v2
@@ -647,14 +647,16 @@ total_amount_quote: 280            # 🚀 200→280 (€93 per coin with 3 slots
 min_order_amount_quote: 15         # 🚀 10→15 (larger orders)
 
 risk_reference_balance_quote: 350  # 🚀 250→350 (higher reference)
-risk_max_balance_per_trade_pct: 80  # 80% van €350 = €280 totaal
-risk_max_total_open_risk_pct: 80   # 80% van €350 = €280 totaal
+risk_max_balance_per_trade_pct: 60  # 🚀 TASK 1.2: 80%→60% (safer with 4-6 grids, was 80)
+risk_max_total_open_risk_pct: 75   # 🚀 TASK 1.2: Total exposure cap (was 80)
+
+# Note: Additional risk limits (reserve %, max per grid) will be added in Fase 2
 
 max_exposure_per_coin_pct: 80      # Each coin: max 80%
 max_total_exposure_pct: 80        # Totaal: 80% van €250 = €200
 
 # Grace period: Give positions time to develop before switching (professional practice)
-switch_grace_period_seconds: 420   # 7 min (balance: professional but flexible, reduce SLOT_FULL)
+switch_grace_period_seconds: 180   # 🚀 TASK 1.1: 7min→3min (faster rotations, was 420)
 
 # ==============================================================================
 # PROFESSIONAL RISK MANAGEMENT (Grid-Aware v2)
@@ -762,3 +764,36 @@ observability:
   buffer_size: 100
   why_no_trade_report_enabled: false  # Phase 1B (future)
   report_interval_seconds: 3600
+
+# ==============================================================================
+# ORDERBOOK PREFETCH (Smart Subscription Strategy)
+# ==============================================================================
+# Pre-warms orderbook data for top candidates BEFORE SmartEntry validation.
+# Only subscribes to:
+#   - Active grids (1-2 pairs currently trading)
+#   - Top N candidates (default: 5 best trend scores)
+# Total max subscriptions: ~7 pairs (not all 13!)
+# ==============================================================================
+
+# ==============================================================================
+# DYNAMIC SLOT MANAGER (Task 3.1: Account-Size + Regime-Aware Slots)
+# ==============================================================================
+# Automatically scales max simultaneous trading slots based on:
+#   1. Account balance (€350 → 4 slots, €1000 → 6, €2000 → 8)
+#   2. Market regime (BULL 1.5x, CHOP 0.75x, BEAR 0.25x)
+#
+# Example: €1000 account
+#   - baseline: 6 slots
+#   - BULL: 9 slots (6 * 1.5)
+#   - CHOP: 4 slots (6 * 0.75)
+#   - BEAR: 1 slot (6 * 0.25)
+# ==============================================================================
+
+dynamic_slots:
+  enabled: true                       # 🚀 Enable dynamic slot scaling
+  min_slots: 1                        # Minimum slots (always trade at least 1)
+  max_slots: 12                       # Maximum slots (resource constraint)
+  regime_multipliers:
+    BULL: 1.5                         # +50% slots in bull market
+    CHOP: 0.75                        # -25% slots in choppy market
+    BEAR: 0.25                        # Defensive: only 1 slot typically

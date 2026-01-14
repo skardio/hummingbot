@@ -11,8 +11,7 @@ try:
     from multi_coin_grid_pro.config.config_manager import ConfigManager
 
     cm = ConfigManager()
-    env = cm.get_environment()
-    config = cm.load_config('multi_coin_grid', env)
+    config = cm.load_config('spot_grid_kraken_eur')
 
     paper_trading = config.get('paper_trading', False)
     connector_name = config.get('connector_name', 'kraken')
@@ -20,8 +19,7 @@ try:
     print("=" * 70)
     print("  PAPER TRADING STATUS CHECK")
     print("=" * 70)
-    print(f"Environment: {env}")
-    print(f"Config File: {cm.get_config_path('multi_coin_grid')}")
+    print(f"Config File: {cm.get_config_path('spot_grid_kraken_eur')}")
     print()
     print(f"Paper Trading Setting: {paper_trading}")
     print(f"Connector Name: {connector_name}")

@@ -481,6 +481,10 @@ class TestMultiCoinGridController:
         # No active coin - should be allowed after delay
         controller.active_coin = None
 
+        # Task 2.1.1: Initialize stale detection state
+        controller._last_price_update = {"XRP-EUR": time.time()}
+        controller._last_ob_update = {"XRP-EUR": time.time()}
+
         # Mock trend calculator to return a valid trend
         mock_trend = MagicMock()
         mock_trend.trend_60m = 1.5

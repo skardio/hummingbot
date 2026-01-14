@@ -22,6 +22,47 @@ if TYPE_CHECKING:
 
 
 class KrakenAPIOrderBookDataSource(OrderBookTrackerDataSource):
+    async def resubscribe_pair(self, trading_pair: str, ws: Optional[WSAssistant] = None):
+        """
+        Unsubscribes and then re-subscribes to order book and trade channels for a single trading pair.
+        If ws is not provided, a new connection will be created and used for the operation.
+        """
+        symbol = convert_to_exchange_trading_pair(trading_pair, '/')
+        ws_to_use = ws
+        if ws_to_use is None:
+            ws_to_use = await self._connected_websocket_assistant()
+        # Unsubscribe payloads
+        unsubscribe_trade = {
+            "event": "unsubscribe",
+            "pair": [symbol],
+            "subscription": {"name": "trade"},
+        }
+        unsubscribe_orderbook = {
+            "event": "unsubscribe",
+            "pair": [symbol],
+            "subscription": {"name": "book"},
+        }
+        await ws_to_use.send(WSJSONRequest(payload=unsubscribe_trade))
+        await ws_to_use.send(WSJSONRequest(payload=unsubscribe_orderbook))
+        self.logger().info(f"Unsubscribed from {trading_pair} order book and trade channels.")
+        await asyncio.sleep(1.0)  # Give Kraken time to process unsubscribe
+        # Subscribe payloads
+        subscribe_trade = {
+            "event": "subscribe",
+            "pair": [symbol],
+            "subscription": {"name": "trade"},
+        }
+        subscribe_orderbook = {
+            "event": "subscribe",
+            "pair": [symbol],
+            "subscription": {"name": "book", "depth": 1000},
+        }
+        await ws_to_use.send(WSJSONRequest(payload=subscribe_trade))
+        await ws_to_use.send(WSJSONRequest(payload=subscribe_orderbook))
+        self.logger().info(f"Re-subscribed to {trading_pair} order book and trade channels.")
+        # If we created a new ws, disconnect it after use
+        if ws is None:
+            await ws_to_use.disconnect()
     MESSAGE_TIMEOUT = 30.0
 
     # PING_TIMEOUT = 10.0

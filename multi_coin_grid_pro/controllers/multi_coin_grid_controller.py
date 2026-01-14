@@ -47,6 +47,9 @@ from multi_coin_grid_pro.core.reason_codes import ReasonCode, Stage
 
 # Feature 1.2: Time-Based Trading Rules
 from multi_coin_grid_pro.core.time_based_integration import TimeBasedIntegration
+
+# Task 3.1: Dynamic Slot Manager
+from multi_coin_grid_pro.execution.dynamic_slot_manager import DynamicSlotManager
 from multi_coin_grid_pro.filters import CandleIndicators, SmartEntryConfig, SmartEntryFilter
 
 # Story 6 Part 2: Momentum Indicators
@@ -224,6 +227,26 @@ class MultiCoinGridController(ControllerBase):
         self._active_executor_notional: Decimal = Decimal("0")
         self._realised_executors_tracked: Dict[str, Decimal] = {}
         self._next_allocation_quote: Optional[Decimal] = None
+
+        # Memory cleanup tracking (TTL-based)
+        self._executor_creation_timestamps: Dict[str, float] = {}  # {executor_id: creation_time}
+        self._trend_last_seen: Dict[str, float] = {}  # {coin: last_access_time}
+        self._last_memory_cleanup_log: float = 0  # Hourly summary
+
+        # Task 3.1: Dynamic Slot Manager
+        dynamic_slots_cfg = getattr(config, 'dynamic_slots', {})
+        self.dynamic_slot_manager = DynamicSlotManager(
+            config=dynamic_slots_cfg,
+            logger=self.logger()
+        )
+        if self.dynamic_slot_manager.enabled:
+            self.logger().info(
+                f"✅ Dynamic Slot Manager enabled "
+                f"(min={self.dynamic_slot_manager.min_slots}, "
+                f"max={self.dynamic_slot_manager.max_slots})"
+            )
+        else:
+            self.logger().info(f"ℹ️  Dynamic Slot Manager disabled (using static max_simultaneous_coins={self.max_simultaneous_coins})")
 
         # Phase 1C: Observability - EventLogger
         observability_cfg = getattr(config, 'observability', {})
@@ -765,6 +788,45 @@ class MultiCoinGridController(ControllerBase):
             # Fallback to quote balance only
             return self.connector.get_balance(self.config.quote_asset)
 
+    def _get_current_max_slots(self) -> int:
+        """
+        Task 3.1: Get current max slots based on dynamic slot manager or static config.
+
+        Returns dynamic slots if enabled, otherwise falls back to static max_simultaneous_coins.
+
+        Returns:
+            int: Current maximum simultaneous trading slots
+        """
+        if not self.dynamic_slot_manager.enabled:
+            return self.max_simultaneous_coins
+
+        # Get current portfolio value
+        try:
+            account_balance = self._calculate_portfolio_value()
+        except Exception as e:
+            self.logger().warning(f"Failed to calculate portfolio value for dynamic slots: {e}, using static fallback")
+            return self.max_simultaneous_coins
+
+        # Get current regime
+        try:
+            if self.market_regime_filter:
+                regime_state = self.market_regime_filter.get_market_regime_state()
+                current_regime = regime_state.regime if regime_state else "baseline"
+            else:
+                current_regime = "baseline"
+        except Exception as e:
+            self.logger().warning(f"Failed to get regime for dynamic slots: {e}, using baseline")
+            current_regime = "baseline"
+
+        # Calculate dynamic slots
+        dynamic_slots = self.dynamic_slot_manager.get_dynamic_slots(
+            account_balance_eur=account_balance,
+            current_regime=current_regime,
+            static_fallback=self.max_simultaneous_coins
+        )
+
+        return dynamic_slots
+
     async def _handle_api_error(self, error: Exception, operation: str) -> None:
         """
         Phase 1.3: Handle API errors with consecutive counting, exponential backoff,
@@ -1276,21 +1338,163 @@ class MultiCoinGridController(ControllerBase):
             except Exception as e:
                 self.logger().error(f"❌ Story 10: Cooldown cleanup failed: {e}")
 
-        # Phase 6: Periodic memory cleanup (every 5 minutes) - MEMORY LEAK FIX
+        # Phase 6: Periodic memory cleanup (every 5 minutes) - PRODUCTION-GRADE MEMORY LEAK FIX
         if (current_time - getattr(self, '_last_memory_cleanup', 0)) >= 300:  # 5 minutes
             try:
-                # Clean up price histories for coins no longer active
+                import os
+
+                import psutil
+
+                cleanup_stats = {}
+                process = psutil.Process(os.getpid())
+                rss_before_mb = process.memory_info().rss / 1024 / 1024
+
+                # Hard caps
+                MAX_REALISED_TRACKED = 300
+                MAX_TIMEOUT_TRACKED = 200
+                MAX_EXECUTOR_TIMES = 500
+                MAX_TREND_DATA = 50  # Keep max 50 trends (more than monitored_coins)
+
+                # Get current state (safe iteration with list())
                 active_coins_set = set(self.active_coins.keys())
-                stale_coins = [coin for coin in self.price_history_for_volatility.keys()
-                               if coin not in active_coins_set]
-                for coin in stale_coins:
+                monitored_set = set(self.monitored_coins) if hasattr(self, 'monitored_coins') else set()
+                current_executor_ids = {e.id for e in self.executors_info}
+                cooldown_pairs = set(self.session_blacklist.keys()) if hasattr(self, 'session_blacklist') else set()
+                important_coins = active_coins_set | monitored_set | cooldown_pairs
+
+                # 1. Clean up price histories (keep only important coins + TTL grace)
+                stale_price_histories = [
+                    coin for coin in list(self.price_history_for_volatility.keys())
+                    if coin not in important_coins
+                ]
+
+                for coin in stale_price_histories:
                     del self.price_history_for_volatility[coin]
 
-                if stale_coins:
-                    self.logger().info(
-                        f"🧹 Memory cleanup: Removed {len(stale_coins)} stale price histories "
-                        f"(active: {len(active_coins_set)}, total before: {len(self.price_history_for_volatility) + len(stale_coins)})"
-                    )
+                if stale_price_histories:
+                    cleanup_stats['price_histories'] = len(stale_price_histories)
+
+                # 2. Clean up _executor_creation_times for terminated executors
+                if hasattr(self, '_executor_creation_times'):
+                    stale_exec_times = [
+                        exec_id for exec_id in list(self._executor_creation_times.keys())
+                        if exec_id not in current_executor_ids
+                    ]
+
+                    for exec_id in stale_exec_times:
+                        del self._executor_creation_times[exec_id]
+                        if hasattr(self, '_executor_creation_timestamps') and exec_id in self._executor_creation_timestamps:
+                            del self._executor_creation_timestamps[exec_id]
+
+                    # Hard cap enforcement (FIFO - oldest first)
+                    if len(self._executor_creation_times) > MAX_EXECUTOR_TIMES:
+                        excess = len(self._executor_creation_times) - MAX_EXECUTOR_TIMES
+                        oldest_ids = list(self._executor_creation_times.keys())[:excess]
+                        for exec_id in oldest_ids:
+                            del self._executor_creation_times[exec_id]
+                            if hasattr(self, '_executor_creation_timestamps') and exec_id in self._executor_creation_timestamps:
+                                del self._executor_creation_timestamps[exec_id]
+                        stale_exec_times.extend(oldest_ids)
+
+                    if stale_exec_times:
+                        cleanup_stats['executor_times'] = len(stale_exec_times)
+
+                # 3. Clean up trend_calculator.trends (keep only monitored + hard cap)
+                if hasattr(self, 'trend_calculator') and self.trend_calculator and hasattr(self.trend_calculator, 'trends'):
+                    # Remove coins not in monitored set
+                    stale_trends = [
+                        coin for coin in list(self.trend_calculator.trends.keys())
+                        if coin not in monitored_set
+                    ]
+
+                    for coin in stale_trends:
+                        del self.trend_calculator.trends[coin]
+
+                    # Enforce hard cap even for monitored coins (keep most recent)
+                    if len(self.trend_calculator.trends) > MAX_TREND_DATA:
+                        excess = len(self.trend_calculator.trends) - MAX_TREND_DATA
+                        # Remove oldest (assuming dict insertion order)
+                        oldest_trend_coins = list(self.trend_calculator.trends.keys())[:excess]
+                        for coin in oldest_trend_coins:
+                            del self.trend_calculator.trends[coin]
+                        stale_trends.extend(oldest_trend_coins)
+
+                    if stale_trends:
+                        cleanup_stats['trend_data'] = len(stale_trends)
+
+                # 4. Clean up _realised_executors_tracked with hard cap
+                if len(self._realised_executors_tracked) > MAX_REALISED_TRACKED:
+                    stale_tracked = [
+                        exec_id for exec_id in list(self._realised_executors_tracked.keys())
+                        if exec_id not in current_executor_ids
+                    ]
+                    # Remove all stale
+                    for exec_id in stale_tracked:
+                        del self._realised_executors_tracked[exec_id]
+
+                    # If still over cap, remove oldest (FIFO)
+                    if len(self._realised_executors_tracked) > MAX_REALISED_TRACKED:
+                        excess = len(self._realised_executors_tracked) - MAX_REALISED_TRACKED
+                        oldest_ids = list(self._realised_executors_tracked.keys())[:excess]
+                        for exec_id in oldest_ids:
+                            del self._realised_executors_tracked[exec_id]
+                        stale_tracked.extend(oldest_ids)
+
+                    if stale_tracked:
+                        cleanup_stats['realised_tracked'] = len(stale_tracked)
+
+                # 5. Clean up _processed_timeout_executors with hard cap
+                if len(self._processed_timeout_executors) > MAX_TIMEOUT_TRACKED:
+                    stale_timeout = [
+                        exec_id for exec_id in list(self._processed_timeout_executors)
+                        if exec_id not in current_executor_ids
+                    ]
+                    for exec_id in stale_timeout:
+                        self._processed_timeout_executors.discard(exec_id)
+
+                    # Enforce hard cap (convert to list, remove oldest)
+                    if len(self._processed_timeout_executors) > MAX_TIMEOUT_TRACKED:
+                        excess = len(self._processed_timeout_executors) - MAX_TIMEOUT_TRACKED
+                        oldest_ids = list(self._processed_timeout_executors)[:excess]
+                        for exec_id in oldest_ids:
+                            self._processed_timeout_executors.discard(exec_id)
+                        stale_timeout.extend(oldest_ids)
+
+                    if stale_timeout:
+                        cleanup_stats['timeout_executors'] = len(stale_timeout)
+
+                # Measure RSS after cleanup
+                rss_after_mb = process.memory_info().rss / 1024 / 1024
+                rss_delta = rss_after_mb - rss_before_mb
+
+                # Log only if something was cleaned OR hourly summary
+                should_log = bool(cleanup_stats) or (current_time - getattr(self, '_last_memory_cleanup_log', 0)) >= 3600
+
+                if should_log:
+                    trend_count = len(self.trend_calculator.trends) if hasattr(self, 'trend_calculator') and self.trend_calculator and hasattr(self.trend_calculator, 'trends') else 0
+                    exec_times_count = len(self._executor_creation_times) if hasattr(self, '_executor_creation_times') else 0
+
+                    if cleanup_stats:
+                        stats_str = ', '.join(f"{v} {k}" for k, v in cleanup_stats.items())
+                        self.logger().info(
+                            f"🧹 Memory cleanup: Removed {stats_str} | "
+                            f"RSS: {rss_after_mb:.1f}MB ({rss_delta:+.1f}MB) | "
+                            f"Tracking: {len(self._realised_executors_tracked)} executors, "
+                            f"{len(self.price_history_for_volatility)} prices, "
+                            f"{trend_count} trends, {exec_times_count} exec_times"
+                        )
+                    else:
+                        # Hourly summary even if nothing cleaned
+                        self.logger().info(
+                            f"🧠 Memory status: RSS: {rss_after_mb:.1f}MB | "
+                            f"Tracking: {len(self._realised_executors_tracked)} executors, "
+                            f"{len(self.price_history_for_volatility)} prices, "
+                            f"{trend_count} trends, {exec_times_count} exec_times"
+                        )
+
+                    if not hasattr(self, '_last_memory_cleanup_log'):
+                        self._last_memory_cleanup_log = 0
+                    self._last_memory_cleanup_log = current_time
 
                 self._last_memory_cleanup = current_time
             except Exception as e:
@@ -2260,8 +2464,11 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().debug(f"   Story A2 session blacklist: {blacklisted_coins}")
 
             # MULTI-COIN: Get top N coins (where N = available slots)
+            # Task 3.1: Calculate dynamic slots if enabled
+            max_slots = self._get_current_max_slots()
+
             # Calculate how many slots are available
-            available_slots = self.max_simultaneous_coins - len(self.active_coins)
+            available_slots = max_slots - len(self.active_coins)
 
             # Add currently active coins to exclusion list (avoid selecting coins we're already trading)
             excluded_coins_with_active = excluded_coins | set(self.active_coins.keys())
@@ -2279,7 +2486,7 @@ class MultiCoinGridController(ControllerBase):
                 )
 
                 self.logger().info(
-                    f"📊 Multi-coin mode: All {self.max_simultaneous_coins} slots filled "
+                    f"📊 Multi-coin mode: All {max_slots} slots filled "
                     f"({list(self.active_coins.keys())}) - no room for new coins"
                 )
 
@@ -2296,10 +2503,10 @@ class MultiCoinGridController(ControllerBase):
                 self._emit_execution_denial(
                     symbol=missed_symbol,
                     reason_code=ReasonCode.SLOT_FULL,
-                    reason_msg=f"All {self.max_simultaneous_coins} slots filled",
+                    reason_msg=f"All {max_slots} slots filled",
                     correlation_id=correlation_id,
                     metadata={
-                        "max_slots": self.max_simultaneous_coins,
+                        "max_slots": max_slots,
                         "active_coins": list(self.active_coins.keys()),
                         "missed_candidates": missed_candidates[:3],  # Top 3 missed opportunities
                         "timestamp": self.market_data_provider.time()
@@ -2346,8 +2553,9 @@ class MultiCoinGridController(ControllerBase):
                     orderbook_config=orderbook_config,
                 )
 
+                max_slots = self._get_current_max_slots()
                 self.logger().info(
-                    f"📊 Multi-coin mode: {len(self.active_coins)}/{self.max_simultaneous_coins} slots used, "
+                    f"📊 Multi-coin mode: {len(self.active_coins)}/{max_slots} slots used, "
                     f"{len(top_coins)} qualifying coins found for available slots"
                 )
 
@@ -2945,7 +3153,8 @@ class MultiCoinGridController(ControllerBase):
 
             # 🔧 MULTI-COIN FIX: Only "switch" if all slots are full
             # If we have free slots, we ADD coins, not SWITCH them
-            slots_available = len(self.active_coins) < self.max_simultaneous_coins
+            max_slots = self._get_current_max_slots()
+            slots_available = len(self.active_coins) < max_slots
 
             # Stop old executor if exists and is actually active (ONLY in single-coin mode or when slots full)
             if not slots_available and self.active_coin and self.active_executor_id and self._is_executor_actually_active():
@@ -2958,18 +3167,28 @@ class MultiCoinGridController(ControllerBase):
                     grace_period = getattr(self.config, 'switch_grace_period_seconds', 600)  # Default 10 min
 
                     if grid_age_seconds < grace_period:
-                        remaining = grace_period - grid_age_seconds
-                        self.logger().info(
-                            f"🛡️  GRACE PERIOD: {self.active_coin} is only {grid_age_seconds / 60:.1f} min old - "
-                            f"wait {remaining / 60:.1f} more minutes before switching (professional practice: "
-                            f"give trades room to breathe)"
-                        )
-                        # Grace period active - only emergency exits allowed (stop-loss will override this)
-                        # Don't create new executor, don't switch
-                        return actions
+                        # Task 2.2: Check if grace period should be bypassed
+                        should_bypass, bypass_reason = self._should_bypass_grace_period(executor_info, self.active_coin)
+
+                        if should_bypass:
+                            self.logger().info(
+                                f"✅ GRACE BYPASS: {self.active_coin} rotation allowed - {bypass_reason} "
+                                f"(age: {grid_age_seconds / 60:.1f} min, grace: {grace_period / 60:.1f} min)"
+                            )
+                            # Continue to rotation logic below
+                        else:
+                            remaining = grace_period - grid_age_seconds
+                            self.logger().info(
+                                f"🛡️  GRACE PERIOD: {self.active_coin} is only {grid_age_seconds / 60:.1f} min old - "
+                                f"wait {remaining / 60:.1f} more minutes before switching (professional practice: "
+                                f"give trades room to breathe)"
+                            )
+                            # Grace period active - only emergency exits allowed (stop-loss will override this)
+                            # Don't create new executor, don't switch
+                            return actions
 
                 self.logger().info(
-                    f"🔄 SWITCHING: {self.active_coin} → {best_coin} (all {self.max_simultaneous_coins} slots full)"
+                    f"🔄 SWITCHING: {self.active_coin} → {best_coin} (all {max_slots} slots full)"
                 )
 
                 # CRITICAL: Check if executor has open position before switching
@@ -3111,7 +3330,7 @@ class MultiCoinGridController(ControllerBase):
                     if grid_action.executor_config and grid_action.executor_config.id:
                         self.active_coins[best_coin] = grid_action.executor_config.id
                         self.logger().info(
-                            f"📊 Active coins: {list(self.active_coins.keys())} ({len(self.active_coins)}/{self.max_simultaneous_coins})")  # noqa: E501
+                            f"📊 Active coins: {list(self.active_coins.keys())} ({len(self.active_coins)}/{self._get_current_max_slots()})")  # noqa: E501
                 else:
                     self.logger().error(f"❌ Failed to create grid action for {best_coin}")
             except Exception as e:
@@ -3128,16 +3347,17 @@ class MultiCoinGridController(ControllerBase):
             self.last_switch_time = self.market_data_provider.time()
 
         # MULTI-COIN: Process remaining coins from top_coins (if any slots still available)
-        if len(top_coins) > 1 and len(self.active_coins) < self.max_simultaneous_coins:
+        max_slots_for_loop = self._get_current_max_slots()
+        if len(top_coins) > 1 and len(self.active_coins) < max_slots_for_loop:
             self.logger().info(
                 f"\n🔄 MULTI-COIN: Processing remaining {len(top_coins) - 1} qualifying coins..."
             )
 
             for coin_index, candidate_coin in enumerate(top_coins[1:], start=2):  # Skip first coin (already processed)
                 # Check if we've filled all slots
-                if len(self.active_coins) >= self.max_simultaneous_coins:
+                if len(self.active_coins) >= max_slots_for_loop:
                     self.logger().info(
-                        f"📊 All {self.max_simultaneous_coins} slots filled - stopping coin processing"
+                        f"📊 All {max_slots_for_loop} slots filled - stopping coin processing"
                     )
                     break
 
@@ -3243,7 +3463,7 @@ class MultiCoinGridController(ControllerBase):
                             self.active_coins[candidate_coin] = grid_action.executor_config.id
                             self.logger().info(
                                 f"      📊 Added {candidate_coin} to active coins: "
-                                f"{list(self.active_coins.keys())} ({len(self.active_coins)}/{self.max_simultaneous_coins})"  # noqa: E501
+                                f"{list(self.active_coins.keys())} ({len(self.active_coins)}/{max_slots_for_loop})"  # noqa: E501
                             )
 
                         # Reset performance counter
@@ -3438,6 +3658,133 @@ class MultiCoinGridController(ControllerBase):
             return False
 
         return True
+
+    def _should_bypass_grace_period(self, executor_info: ExecutorInfo, trading_pair: str) -> tuple[bool, str]:
+        """
+        Task 2.2: Check if grace period should be bypassed for immediate rotation/exit
+
+        Args:
+            executor_info: Executor to check
+            trading_pair: Trading pair (e.g., "BTC-EUR")
+
+        Returns:
+            (should_bypass, reason) tuple
+        """
+        # Check 1: Executor in error state
+        if getattr(self.config, 'grace_bypass_on_executor_error', True):
+            if executor_info and not executor_info.is_active:
+                close_type = str(executor_info.close_type) if executor_info.close_type else ""
+                if 'FAILED' in close_type or 'ERROR' in close_type or 'INSUFFICIENT_BALANCE' in close_type:
+                    return True, f"executor error: {close_type}"
+
+        # Check 2: Stop-loss hit
+        if getattr(self.config, 'grace_bypass_on_sl_hit', True):
+            if executor_info and executor_info.custom_info:
+                sl_hit = executor_info.custom_info.get('stop_loss_hit', False)
+                if sl_hit:
+                    return True, "stop-loss triggered"
+
+        # Check 3: Regime flip (BULL→BEAR or vice versa)
+        if getattr(self.config, 'grace_bypass_on_regime_flip', True):
+            if hasattr(self, 'market_regime_filter') and self.market_regime_filter:
+                entry_regime = executor_info.custom_info.get('entry_regime') if executor_info and executor_info.custom_info else None
+                current_regime = self.market_regime_filter.get_current_regime()
+
+                # Extreme flip: BULL→BEAR or BEAR→BULL
+                if entry_regime and current_regime:
+                    if (entry_regime == 'BULL' and current_regime == 'BEAR') or \
+                       (entry_regime == 'BEAR' and current_regime == 'BULL'):
+                        return True, f"regime flip: {entry_regime}→{current_regime}"
+
+        # Check 4: Slot pressure (all slots full + better opportunity)
+        if getattr(self.config, 'grace_bypass_on_slot_pressure', True):
+            # Check if all slots are full
+            active_count = len([e for e in self.executors_info if e.is_active])
+            max_grids = getattr(self.config, 'max_simultaneous_coins', 2)
+            if active_count >= max_grids:
+                return True, f"slot pressure ({active_count}/{max_grids} full)"
+
+        # Check 5: Stale/unavailable market data
+        if getattr(self.config, 'grace_bypass_on_stale_data', True):
+            # Check if market data provider marks this symbol as stale
+            if hasattr(self.market_data_provider, '_stale_symbols'):
+                if trading_pair in self.market_data_provider._stale_symbols:
+                    return True, "stale market data"
+
+            # Also check if we can't get current price
+            try:
+                current_price = self.connector.get_mid_price(trading_pair)
+                if current_price is None or current_price <= 0:
+                    return True, "no price data available"
+            except Exception:
+                return True, "market data error"
+
+        return False, ""
+
+    def _can_safely_close_position(self, trading_pair: str, executor_info: ExecutorInfo) -> tuple[bool, str]:
+        """
+        Task 2.3: Pre-close validation to prevent FAILED closes and dust issues
+
+        Args:
+            trading_pair: Trading pair (e.g., "BTC-EUR")
+            executor_info: Executor information
+
+        Returns:
+            (can_close, reason) tuple
+        """
+        try:
+            # Extract base asset from trading pair (e.g., "BTC" from "BTC-EUR")
+            base_asset = trading_pair.split("-")[0]
+
+            # Get actual exchange balance (NOT bot's tracked balance)
+            try:
+                actual_balance = self.connector.get_balance(base_asset)
+            except Exception as e:
+                return False, f"Can't query balance: {e}"
+
+            # Get exchange trading rules (min order size varies per pair!)
+            try:
+                trading_rule = self.connector.trading_rules.get(trading_pair)
+                if not trading_rule:
+                    return False, f"No trading rules found for {trading_pair}"
+
+                min_order_size = trading_rule.min_order_size
+                min_notional = trading_rule.min_notional
+            except Exception as e:
+                return False, f"Can't get trading rules: {e}"
+
+            # Check 1: Do we have enough tokens to place close order?
+            if actual_balance < min_order_size:
+                value_eur = actual_balance * self.connector.get_mid_price(trading_pair) if self.connector.get_mid_price(trading_pair) else Decimal("0")
+                return False, f"Dust: {actual_balance:.8f} {base_asset} < min {min_order_size:.8f} (€{value_eur:.2f})"
+
+            # Check 2: Is value > min notional?
+            mid_price = self.connector.get_mid_price(trading_pair)
+            if mid_price is None or mid_price <= 0:
+                return False, "No price data available"
+
+            order_value = actual_balance * mid_price
+            if order_value < min_notional:
+                return False, f"Below min notional: €{order_value:.2f} < €{min_notional:.2f}"
+
+            # Check 3: Verify position size matches executor tracking
+            if executor_info and executor_info.custom_info:
+                tracked_position = executor_info.custom_info.get('position_size_base', Decimal("0"))
+                if tracked_position > 0:
+                    # Allow 1% tolerance for rounding
+                    diff_pct = abs(actual_balance - tracked_position) / tracked_position
+                    if diff_pct > Decimal("0.01"):
+                        self.logger().warning(
+                            f"⚠️ Position mismatch for {trading_pair}: "
+                            f"exchange={actual_balance:.8f}, tracked={tracked_position:.8f} "
+                            f"(diff={diff_pct * 100:.2f}%)"
+                        )
+
+            return True, "OK"
+
+        except Exception as e:
+            self.logger().error(f"Error in pre-close validation for {trading_pair}: {e}")
+            return False, f"Validation error: {e}"
 
     def _monitor_stop_loss_and_volatility(self) -> None:
         """
@@ -3663,6 +4010,8 @@ class MultiCoinGridController(ControllerBase):
     def _sync_risk_state(self) -> None:
         """
         Synchronize realised PnL and cooldown information with the global risk manager.
+
+        Memory cleanup moved to control_loop() for better frequency and comprehensive coverage.
         """
         now = self.market_data_provider.time()
 
@@ -4117,9 +4466,10 @@ class MultiCoinGridController(ControllerBase):
             return False
 
         # MULTI-COIN: Check if we have room for more coins
-        if self.max_simultaneous_coins > 1:
+        max_slots_for_capital = self._get_current_max_slots()
+        if max_slots_for_capital > 1:
             current_count = len(self.active_coins)
-            if current_count < self.max_simultaneous_coins:
+            if current_count < max_slots_for_capital:
                 # Room available - create executor for best_coin (if meets other criteria)
                 self.logger().info(
                     f"📊 Multi-coin mode: {current_count}/{self.max_simultaneous_coins} slots used - "
@@ -6278,7 +6628,13 @@ class MultiCoinGridController(ControllerBase):
             # BUG FIX: Track executor creation time for grace period check
             if not hasattr(self, '_executor_creation_times'):
                 self._executor_creation_times = {}
-            self._executor_creation_times[grid_config.id] = self.market_data_provider.time()
+            current_timestamp = self.market_data_provider.time()
+            self._executor_creation_times[grid_config.id] = current_timestamp
+
+            # Track creation timestamp for TTL-based cleanup
+            if not hasattr(self, '_executor_creation_timestamps'):
+                self._executor_creation_timestamps = {}
+            self._executor_creation_timestamps[grid_config.id] = current_timestamp
 
             # Phase 1.1: Track entry price for stop-loss monitoring
             self.entry_prices[symbol] = current_price
@@ -6351,6 +6707,20 @@ class MultiCoinGridController(ControllerBase):
 
         has_open_position = False
         if executor_info:
+            # Task 2.3: Pre-close validation before stopping executor
+            can_close, close_reason = self._can_safely_close_position(self.active_coin, executor_info)
+
+            if not can_close:
+                self.logger().warning(
+                    f"⚠️ PRE-CLOSE CHECK FAILED: {self.active_coin} cannot be closed safely\n"
+                    f"   Reason: {close_reason}\n"
+                    f"   Action: Marking executor for manual review (will not attempt close)"
+                )
+                # Still create stop action, but log the issue
+                # Executor's early_stop() will handle the dust scenario gracefully
+            else:
+                self.logger().info(f"✅ Pre-close check passed: {self.active_coin} can be closed safely")
+
             # Check custom_info for grid executor position
             custom_info = executor_info.custom_info
             position_size_quote = custom_info.get("position_size_quote", Decimal("0"))

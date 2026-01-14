@@ -2,13 +2,13 @@
 """
 Check if the running bot is using paper trading mode
 """
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Check if bot process is running
-import subprocess
+from multi_coin_grid_pro.config.config_manager import ConfigManager  # noqa: E402
 
 print("=" * 70)
 print("  PAPER TRADING RUNTIME CHECK")
@@ -38,14 +38,11 @@ else:
 print()
 
 # Check config
-from multi_coin_grid_pro.config.config_manager import ConfigManager
-
 config_manager = ConfigManager()
-environment = config_manager.get_environment()
-print(f"Environment: {environment}")
+print("Environment: prod")
 
 try:
-    config_data = config_manager.load_config("multi_coin_grid", environment)
+    config_data = config_manager.load_config("spot_grid_kraken_eur")
     paper_trading_setting = config_data.get('paper_trading', False)
     connector_name = config_data.get('connector_name', 'kraken')
 
@@ -53,7 +50,7 @@ try:
     if paper_trading_setting and not expected_connector_name.endswith('_paper_trade'):
         expected_connector_name = f"{connector_name}_paper_trade"
 
-    print(f"Config File: {config_manager.get_config_path('multi_coin_grid')}")
+    print(f"Config File: {config_manager.get_config_path('spot_grid_kraken_eur')}")
     print(f"Paper Trading Setting: {paper_trading_setting}")
     print(f"Connector Name in Config: {connector_name}")
     print(f"Expected Connector (if paper trading): {expected_connector_name}")

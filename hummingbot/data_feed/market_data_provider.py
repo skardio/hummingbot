@@ -49,6 +49,157 @@ class MarketDataProvider:
         self._rates_required = GroupedSetDict[str, ConnectorPair]()
         self.conn_settings = AllConnectorSettings.get_connector_settings()
 
+        # === Task 2.1.1: Stale detection state ===
+        self._last_price_update: Dict[str, float] = {}
+        self._last_ob_update: Dict[str, float] = {}
+        self._stale_symbols: set = set()
+        from collections import defaultdict
+        self._resubscribe_backoff: Dict[str, float] = defaultdict(lambda: 1.0)
+        self._max_stale_seconds = 5.0
+        self._stale_check_task = None
+
+        # Start periodic stale check
+        self._stale_check_task = safe_ensure_future(self._periodic_stale_check())
+    # === Task 2.1.1: Data freshness update ===
+
+    def mark_data_update(self, symbol: str, data_type: str = "both"):
+        now = time.time()
+        if data_type in ("price", "both"):
+            self._last_price_update[symbol] = now
+            self.logger().debug(f"[STALE-DEBUG] mark_data_update: {symbol} price @ {now}")
+        if data_type in ("orderbook", "both"):
+            self._last_ob_update[symbol] = now
+            self.logger().debug(f"[STALE-DEBUG] mark_data_update: {symbol} orderbook @ {now}")
+
+    def _is_ready(self, symbol: str) -> bool:
+        now = time.time()
+        # Check if we have recent manual updates
+        price_age = now - self._last_price_update.get(symbol, 0)
+        ob_age = now - self._last_ob_update.get(symbol, 0)
+
+        # Also check connector's order book directly for fresh data
+        for connector_name, conn in self.connectors.items():
+            if hasattr(conn, 'trading_pairs') and symbol in getattr(conn, 'trading_pairs', []):
+                try:
+                    order_book = conn.get_order_book(symbol)
+                    if order_book and hasattr(order_book, 'last_diff_uid'):
+                        # Update our tracking with fresh timestamp from order book
+                        ob_timestamp = getattr(order_book, 'last_trade_timestamp', None) or time.time()
+                        ob_age_from_connector = now - ob_timestamp
+                        if ob_age_from_connector < self._max_stale_seconds:
+                            # Fresh data found, update our tracking
+                            self._last_ob_update[symbol] = ob_timestamp
+                            self._last_price_update[symbol] = ob_timestamp
+                            ob_age = ob_age_from_connector
+                            price_age = ob_age_from_connector
+                            break
+                except Exception:
+                    pass
+
+        ready = price_age < self._max_stale_seconds and ob_age < self._max_stale_seconds
+        self.logger().debug(f"[STALE-DEBUG] _is_ready({symbol}): price_age={price_age:.2f}s, ob_age={ob_age:.2f}s, ready={ready}")
+        return ready
+
+    def _mark_stale(self, symbol: str):
+        if symbol not in self._stale_symbols:
+            self._stale_symbols.add(symbol)
+            self.logger().warning(f"⚠️  {symbol} market data STALE - triggering resubscribe")
+            safe_ensure_future(self._recover_symbol(symbol))
+
+    async def _recover_symbol(self, symbol: str):
+        backoff = self._resubscribe_backoff[symbol]
+        await asyncio.sleep(backoff)
+        try:
+            connector_name = None
+            for name, conn in self.connectors.items():
+                if hasattr(conn, 'trading_pairs') and symbol in getattr(conn, 'trading_pairs', []):
+                    connector_name = name
+                    break
+            if connector_name is not None:
+                conn = self.connectors[connector_name]
+                # Kraken-specific: use per-pair resubscribe if available
+                if conn.__class__.__name__ == "KrakenExchange":
+                    try:
+                        # Try multiple attribute names for order book data source
+                        ob_data_source = getattr(conn, "_orderbook_ds", None) or getattr(conn, "_order_book_data_source", None)
+                        if ob_data_source and hasattr(ob_data_source, "resubscribe_pair"):
+                            await ob_data_source.resubscribe_pair(symbol)
+                            self.logger().info(f"✅ Kraken resubscribed {symbol} via order book data source")
+                        else:
+                            self.logger().warning(f"[STALE-DEBUG] Kraken connector missing resubscribe_pair for {symbol} (ob_data_source={ob_data_source})")
+                    except Exception as e:
+                        self.logger().error(f"Kraken resubscribe_pair failed for {symbol}: {e}")
+                # Generic fallback for other connectors
+                elif hasattr(conn, 'unsubscribe_ticker') and hasattr(conn, 'unsubscribe_order_book') and hasattr(conn, 'subscribe_ticker') and hasattr(conn, 'subscribe_order_book'):
+                    await conn.unsubscribe_ticker(symbol)
+                    await conn.unsubscribe_order_book(symbol)
+                    await asyncio.sleep(0.5)
+                    await conn.subscribe_ticker(symbol)
+                    await conn.subscribe_order_book(symbol)
+                    self.logger().info(f"✅ Resubscribed {symbol} on {connector_name}")
+                else:
+                    self.logger().warning(f"[STALE-DEBUG] {connector_name} does not support subscribe/unsubscribe methods for {symbol}")
+            else:
+                self.logger().warning(f"[STALE-DEBUG] No connector found for {symbol} to resubscribe")
+
+            # Wait to verify recovery
+            await asyncio.sleep(5)
+            if self._is_ready(symbol):
+                self._stale_symbols.discard(symbol)
+                self._resubscribe_backoff[symbol] = 1.0
+                self.logger().info(f"✅ {symbol} recovered")
+            else:
+                self._resubscribe_backoff[symbol] = min(backoff * 2, 60.0)
+                self.logger().warning(f"⚠️  {symbol} still stale, will retry in {self._resubscribe_backoff[symbol]:.1f}s")
+                safe_ensure_future(self._recover_symbol(symbol))
+        except Exception as e:
+            self.logger().error(f"Failed to recover {symbol}: {e}")
+            self._resubscribe_backoff[symbol] = min(backoff * 2, 60.0)
+
+    async def _periodic_stale_check(self):
+        try:
+            while True:
+                await asyncio.sleep(30)
+                # Collect all pairs to check from multiple sources
+                pairs_to_check = set()
+
+                for connector_name, conn in self.connectors.items():
+                    # Check connector's configured trading pairs
+                    if hasattr(conn, 'trading_pairs'):
+                        configured_pairs = getattr(conn, 'trading_pairs', [])
+                        pairs_to_check.update(configured_pairs)
+                        self.logger().debug(f"[STALE-CHECK] {connector_name} configured pairs: {configured_pairs}")
+
+                    # Also check all pairs with active order books via order_book_tracker
+                    if hasattr(conn, '_order_book_tracker'):
+                        tracker = getattr(conn, '_order_book_tracker', None)
+                        if tracker and hasattr(tracker, '_order_books'):
+                            order_books = getattr(tracker, '_order_books', {})
+                            if isinstance(order_books, dict):
+                                ob_pairs = list(order_books.keys())
+                                pairs_to_check.update(ob_pairs)
+                                self.logger().debug(f"[STALE-CHECK] {connector_name} order book pairs: {ob_pairs}")
+
+                    # Fallback: check _order_books directly on connector
+                    if hasattr(conn, '_order_books'):
+                        order_books = getattr(conn, '_order_books', {})
+                        if isinstance(order_books, dict):
+                            ob_pairs = list(order_books.keys())
+                            pairs_to_check.update(ob_pairs)
+                            self.logger().debug(f"[STALE-CHECK] {connector_name} connector order books: {ob_pairs}")
+
+                self.logger().debug(f"[STALE-CHECK] Total pairs to check: {len(pairs_to_check)}: {sorted(pairs_to_check)}")
+
+                # Check each discovered pair for staleness
+                for symbol in pairs_to_check:
+                    if not self._is_ready(symbol):
+                        self._mark_stale(symbol)
+        except asyncio.CancelledError:
+            self.logger().info("Stale check task cancelled")
+            raise
+        except Exception as e:
+            self.logger().error(f"Error in periodic stale check: {e}")
+
     def stop(self):
         for candle_feed in self.candles_feeds.values():
             candle_feed.stop()
@@ -328,7 +479,10 @@ class MarketDataProvider:
         :return: Order book instance.
         """
         connector = self.get_connector_with_fallback(connector_name)
-        return connector.get_order_book(trading_pair)
+        ob = connector.get_order_book(trading_pair)
+        if ob is not None:
+            self.mark_data_update(trading_pair, data_type="orderbook")
+        return ob
 
     def get_price_by_type(self, connector_name: str, trading_pair: str, price_type: PriceType):
         """
@@ -339,7 +493,10 @@ class MarketDataProvider:
         :return: Price instance.
         """
         connector = self.get_connector_with_fallback(connector_name)
-        return connector.get_price_by_type(trading_pair, price_type)
+        price = connector.get_price_by_type(trading_pair, price_type)
+        if price is not None:
+            self.mark_data_update(trading_pair, data_type="price")
+        return price
 
     def get_funding_info(self, connector_name: str, trading_pair: str):
         """
@@ -552,6 +709,8 @@ class MarketDataProvider:
         """
         connector = self.get_connector_with_fallback(connector_name)
         order_book = connector.get_order_book(trading_pair)
+        if order_book is not None:
+            self.mark_data_update(trading_pair, data_type="orderbook")
         return order_book.snapshot
 
     def get_price_for_quote_volume(self, connector_name: str, trading_pair: str, quote_volume: float,

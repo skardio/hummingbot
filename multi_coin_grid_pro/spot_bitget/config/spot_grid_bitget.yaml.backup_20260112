@@ -28,45 +28,6 @@ observability:
   report_interval_seconds: 3600
 
 # ==============================================================================
-# ORDERBOOK PREFETCH (Smart Subscription Strategy)
-# ==============================================================================
-# Pre-warms orderbook data for top candidates BEFORE SmartEntry validation.
-# Only subscribes to:
-#   - Active grids (1-2 pairs currently trading)
-#   - Top N candidates (default: 5 best trend scores)
-# Total max subscriptions: ~7 pairs (not all 15!)
-# ==============================================================================
-
-orderbook_prefetch:
-  enabled: true                       # 🚀 TASK 1.0: Enable smart prefetch
-  mode: 'live'                        # 'live' = actually subscribe | 'shadow' = log only
-  top_n: 5                            # Prefetch top 5 candidates
-  max_subscriptions_per_minute: 10   # Rate limit for safety
-
-# ==============================================================================
-# DYNAMIC SLOT MANAGER (Task 3.1: Account-Size + Regime-Aware Slots)
-# ==============================================================================
-# Automatically scales max simultaneous trading slots based on:
-#   1. Account balance (€350 → 4 slots, €1000 → 6, €2000 → 8)
-#   2. Market regime (BULL 1.5x, CHOP 0.75x, BEAR 0.25x)
-#
-# Example: €1000 account
-#   - baseline: 6 slots
-#   - BULL: 9 slots (6 * 1.5)
-#   - CHOP: 4 slots (6 * 0.75)
-#   - BEAR: 1 slot (6 * 0.25)
-# ==============================================================================
-
-# dynamic_slots:
-#   enabled: true                       # 🚀 Enable dynamic slot scaling
-#   min_slots: 1                        # Minimum slots (always trade at least 1)
-#   max_slots: 12                       # Maximum slots (resource constraint)
-#   regime_multipliers:
-#     BULL: 1.5                         # +50% slots in bull market
-#     CHOP: 0.75                        # -25% slots in choppy market
-#     BEAR: 0.25                        # Defensive: only 1 slot typically
-
-# ==============================================================================
 # ADAPTIVE REGIME DETECTION (Phase 1: Logging Only)
 # ==============================================================================
 
@@ -104,7 +65,7 @@ adaptive_filters:
     spike_5m_max_pct: 3.5           # 🚀 2.5→3.5 (allow bigger spikes)
     wick_ratio_min: 0.0
     grid_spacing_mult: 1.0
-    max_active_grids: 4             # 🚀 TASK 1.2: 2→4 (was 2)
+    max_active_grids: 2             # 🚀 1→2 (allow 2 concurrent grids)
     entry_confidence_min: 0.65      # 🚀 0.70→0.65 (lower bar for entry)
 
   # BULL regime: very relaxed filters for bull market
@@ -116,7 +77,7 @@ adaptive_filters:
     atr_min_pct: 0.08               # 🚀 0.10→0.08 (more coins)
     spike_5m_max_pct: 5.0           # 🚀 3.5→5 (big moves OK)
     grid_spacing_mult: 1.2
-    max_active_grids: 6             # 🚀 TASK 1.2: 3→6 (was 3)
+    max_active_grids: 3
     entry_confidence_min: 0.55      # 🚀 0.60→0.55 (lower bar)
 
   # CHOP regime: moderate filters (not too strict)
@@ -128,7 +89,7 @@ adaptive_filters:
     atr_min_pct: 0.10               # 🚀 0.12→0.10
     spike_5m_max_pct: 3.0           # 🚀 2.5→3 (bigger moves)
     grid_spacing_mult: 0.8
-    max_active_grids: 3             # 🚀 TASK 1.2: 2→3 (was 2)
+    max_active_grids: 2             # 🚀 1→2 (more grids in chop)
     entry_confidence_min: 0.70      # 🚀 0.75→0.70
 
   # BEAR regime: relaxed to allow counter-trend altcoin pumps
@@ -157,9 +118,9 @@ quote_asset: USDT                 # Quote currency
 # ==============================================================================
 
 use_dynamic_pair_discovery: true   # ❌ Disable dynamic discovery (volume = 0 issue)
-max_coins_to_monitor: 15            # 🚀 TASK 1.0: Universe throttling (was 60)
+max_coins_to_monitor: 60            # Manual list size
 exclude_expensive_coins: false
-min_24h_volume_usdt: 500000         # 🚀 Higher volume = more liquid (was 0, but broken API)
+min_24h_volume_usdt: 0              # 🔧 FIX: 1000000→0 (Bitget API returns volume=0, can't use this filter)
 
 # Bitget-specific fee overrides (Bitget standard fees)
 bitget_maker_fee_pct: 0.001  # 0.1% maker fee
@@ -368,22 +329,11 @@ orderbook_liquidity:
 # ORDERBOOK PREFETCH (Phase 2: LIVE - Active Prefetching)
 # ==============================================================================
 
-# ==============================================================================
-# DYNAMIC SLOT MANAGER (Task 3.1: Account-Size + Regime-Aware Slots)
-# ==============================================================================
-# Automatically scales max simultaneous trading slots based on:
-#   1. Account balance ($350 → 4 slots, $1000 → 6, $2000 → 8)
-#   2. Market regime (BULL 1.5x, CHOP 0.75x, BEAR 0.25x)
-# ==============================================================================
-
-dynamic_slots:
-  enabled: true                       # 🚀 Enable dynamic slot scaling
-  min_slots: 1                        # Minimum slots (always trade at least 1)
-  max_slots: 12                       # Maximum slots (resource constraint)
-  regime_multipliers:
-    BULL: 1.5                         # +50% slots in bull market
-    CHOP: 0.75                        # -25% slots in choppy market
-    BEAR: 0.25                        # Defensive: only 1 slot typically
+orderbook_prefetch:
+  enabled: true                    # Enable prefetch observation
+  mode: live                       # 🚀 LIVE MODE: Actually prefetch orderbooks (was: shadow = log-only)
+  top_n: 3                         # Number of top candidates to prefetch
+  max_subscriptions_per_minute: 6  # Rate limit protection
 
 # ==============================================================================
 # SMART ENTRY FILTER v2
@@ -592,7 +542,7 @@ max_exposure_per_coin_pct: 50.0   # Each coin: 50% van $140 = $70
 max_total_exposure_pct: 100.0      # Totaal: 100% van $140 = $140 (2 coins × $70)
 
 # Grace period: Give positions time to develop before switching (professional practice)
-switch_grace_period_seconds: 180   # 🚀 TASK 1.1: 7min→3min (faster rotations, was 420)
+switch_grace_period_seconds: 420   # 7 min (balance: professional but flexible, reduce SLOT_FULL)
 
 # ==============================================================================
 # PROFESSIONAL RISK MANAGEMENT (Grid-Aware v2)

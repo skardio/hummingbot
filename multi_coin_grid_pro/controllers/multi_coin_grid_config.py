@@ -149,6 +149,32 @@ class MultiCoinGridConfig(ControllerConfigBase):
         description="Minimum time (seconds) before switching to a different coin. Professional practice: give trades time to develop (default: 600 = 10 min)"
     )
 
+    # Task 2.2: Grace Period Bypass Logic
+    grace_bypass_on_executor_error: bool = Field(
+        default=True,
+        description="Bypass grace period if executor is FAILED/ERROR state (immediate rotation)"
+    )
+
+    grace_bypass_on_sl_hit: bool = Field(
+        default=True,
+        description="Bypass grace period if stop-loss is hit (immediate exit)"
+    )
+
+    grace_bypass_on_regime_flip: bool = Field(
+        default=True,
+        description="Bypass grace period on extreme regime change (BULL→BEAR or vice versa)"
+    )
+
+    grace_bypass_on_slot_pressure: bool = Field(
+        default=True,
+        description="Bypass grace period if all slots are full and better opportunity exists"
+    )
+
+    grace_bypass_on_stale_data: bool = Field(
+        default=True,
+        description="Bypass grace period if market data for the pair is stale/unavailable"
+    )
+
     exclude_expensive_coins: bool = Field(
         default=True,
         client_data=ClientFieldData(
@@ -498,6 +524,19 @@ class MultiCoinGridConfig(ControllerConfigBase):
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
+    )
+
+    # Task 3.1: Dynamic Slot Manager (account-size and regime-aware slot scaling)
+    dynamic_slots: dict = Field(
+        default_factory=dict,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Dynamic slot manager config (dict, leave empty for defaults): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={
+            "is_updatable": True,
+            "description": "Account-size and regime-aware slot scaling. Keys: enabled (bool), min_slots (int), max_slots (int), regime_multipliers (dict)"
+        }
     )
 
     # Hybrid Grid v2.0: Core Universe (manual trading pairs for v2.0)
@@ -1331,6 +1370,37 @@ class MultiCoinGridConfig(ControllerConfigBase):
         invalid_keys = set(v.keys()) - valid_keys
         if invalid_keys:
             raise ValueError(f"Invalid SmartEntryFilter keys: {invalid_keys}")
+
+        return v
+
+    @field_validator('dynamic_slots')
+    @classmethod
+    def validate_dynamic_slots(cls, v: dict) -> dict:
+        """Validate dynamic_slots config dict"""
+        if not v:  # Empty dict is OK (uses defaults)
+            return v
+
+        # Validate known keys
+        valid_keys = {'enabled', 'min_slots', 'max_slots', 'regime_multipliers'}
+        invalid_keys = set(v.keys()) - valid_keys
+        if invalid_keys:
+            raise ValueError(f"Invalid dynamic_slots keys: {invalid_keys}")
+
+        # Validate slot counts
+        if 'min_slots' in v and v['min_slots'] < 1:
+            raise ValueError("min_slots must be at least 1")
+        if 'max_slots' in v and v['max_slots'] > 20:
+            raise ValueError("max_slots should not exceed 20 (resource constraints)")
+        if 'min_slots' in v and 'max_slots' in v and v['min_slots'] > v['max_slots']:
+            raise ValueError("min_slots must be less than or equal to max_slots")
+
+        # Validate regime multipliers if present
+        if 'regime_multipliers' in v and isinstance(v['regime_multipliers'], dict):
+            for regime, multiplier in v['regime_multipliers'].items():
+                if not isinstance(multiplier, (int, float)) or multiplier < 0:
+                    raise ValueError(f"Regime multiplier for {regime} must be a non-negative number")
+                if multiplier > 3.0:
+                    raise ValueError(f"Regime multiplier for {regime} should not exceed 3.0 (risk management)")
 
         return v
 

@@ -219,7 +219,8 @@ class TrendCalculator:
         connector: ConnectorBase,
         lookback_minutes: int = 30,
         bot_start_time: Optional[float] = None,
-        base_connector: Optional[ConnectorBase] = None
+        base_connector: Optional[ConnectorBase] = None,
+        data_freshness_callback: Optional[callable] = None
     ):
         """
         Initialize trend calculator
@@ -229,9 +230,11 @@ class TrendCalculator:
             lookback_minutes: How many minutes of history to track (legacy, kept for compatibility)
             bot_start_time: Unix timestamp of bot startup (for warm-up mode detection)
             base_connector: Base connector for price fetching in paper trading mode (optional)
+            data_freshness_callback: Optional callback to mark data as fresh (Task 2.1.1)
         """
         self.connector = connector
         self.base_connector = base_connector  # Base connector for price fetching in paper trading
+        self.data_freshness_callback = data_freshness_callback  # Task 2.1.1: Stale detection hook
 
         # CRITICAL FIX: FORCE CORRECT VALUE - This runs EVERY time __init__ is called!
         # Even if old bytecode is cached, this will execute during object creation
@@ -426,6 +429,9 @@ class TrendCalculator:
                         price = float(price_decimal) if price_decimal else None
                         if price:
                             logger.debug(f"✅ Using get_mid_price for {symbol}: {price}")
+                            # Task 2.1.1: Mark data as fresh
+                            if self.data_freshness_callback:
+                                self.data_freshness_callback(symbol, "price")
                     except Exception as e:
                         logger.debug(f"Failed to get mid price for {symbol}: {e}")
                         price = None
