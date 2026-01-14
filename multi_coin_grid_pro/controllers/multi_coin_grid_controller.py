@@ -1401,14 +1401,21 @@ class MultiCoinGridController(ControllerBase):
 
                 # 3. Clean up trend_calculator.trends (keep only monitored + hard cap)
                 if hasattr(self, 'trend_calculator') and self.trend_calculator and hasattr(self.trend_calculator, 'trends'):
-                    # Remove coins not in monitored set
-                    stale_trends = [
-                        coin for coin in list(self.trend_calculator.trends.keys())
-                        if coin not in monitored_set
-                    ]
+                    # CRITICAL FIX: Only clean if we actually have monitored coins
+                    # Without this check, cleanup would delete ALL trends during startup/discovery
+                    # This caused candle_count to reset to 0, breaking SmartEntry validation
+                    if monitored_set:  # Only clean if we have a valid monitored set
+                        # Remove coins not in monitored set
+                        stale_trends = [
+                            coin for coin in list(self.trend_calculator.trends.keys())
+                            if coin not in monitored_set
+                        ]
 
-                    for coin in stale_trends:
-                        del self.trend_calculator.trends[coin]
+                        for coin in stale_trends:
+                            del self.trend_calculator.trends[coin]
+
+                        if stale_trends:
+                            cleanup_stats['trend_data'] = len(stale_trends)
 
                     # Enforce hard cap even for monitored coins (keep most recent)
                     if len(self.trend_calculator.trends) > MAX_TREND_DATA:
@@ -1417,10 +1424,10 @@ class MultiCoinGridController(ControllerBase):
                         oldest_trend_coins = list(self.trend_calculator.trends.keys())[:excess]
                         for coin in oldest_trend_coins:
                             del self.trend_calculator.trends[coin]
-                        stale_trends.extend(oldest_trend_coins)
-
-                    if stale_trends:
-                        cleanup_stats['trend_data'] = len(stale_trends)
+                        if 'trend_data' in cleanup_stats:
+                            cleanup_stats['trend_data'] += len(oldest_trend_coins)
+                        else:
+                            cleanup_stats['trend_data'] = len(oldest_trend_coins)
 
                 # 4. Clean up _realised_executors_tracked with hard cap
                 if len(self._realised_executors_tracked) > MAX_REALISED_TRACKED:
