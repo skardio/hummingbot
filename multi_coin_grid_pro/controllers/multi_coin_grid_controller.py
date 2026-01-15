@@ -1401,21 +1401,14 @@ class MultiCoinGridController(ControllerBase):
 
                 # 3. Clean up trend_calculator.trends (keep only monitored + hard cap)
                 if hasattr(self, 'trend_calculator') and self.trend_calculator and hasattr(self.trend_calculator, 'trends'):
-                    # CRITICAL FIX: Only clean if we actually have monitored coins
-                    # Without this check, cleanup would delete ALL trends during startup/discovery
-                    # This caused candle_count to reset to 0, breaking SmartEntry validation
-                    if monitored_set:  # Only clean if we have a valid monitored set
-                        # Remove coins not in monitored set
-                        stale_trends = [
-                            coin for coin in list(self.trend_calculator.trends.keys())
-                            if coin not in monitored_set
-                        ]
+                    # Remove coins not in monitored set
+                    stale_trends = [
+                        coin for coin in list(self.trend_calculator.trends.keys())
+                        if coin not in monitored_set
+                    ]
 
-                        for coin in stale_trends:
-                            del self.trend_calculator.trends[coin]
-
-                        if stale_trends:
-                            cleanup_stats['trend_data'] = len(stale_trends)
+                    for coin in stale_trends:
+                        del self.trend_calculator.trends[coin]
 
                     # Enforce hard cap even for monitored coins (keep most recent)
                     if len(self.trend_calculator.trends) > MAX_TREND_DATA:
@@ -1424,10 +1417,10 @@ class MultiCoinGridController(ControllerBase):
                         oldest_trend_coins = list(self.trend_calculator.trends.keys())[:excess]
                         for coin in oldest_trend_coins:
                             del self.trend_calculator.trends[coin]
-                        if 'trend_data' in cleanup_stats:
-                            cleanup_stats['trend_data'] += len(oldest_trend_coins)
-                        else:
-                            cleanup_stats['trend_data'] = len(oldest_trend_coins)
+                        stale_trends.extend(oldest_trend_coins)
+
+                    if stale_trends:
+                        cleanup_stats['trend_data'] = len(stale_trends)
 
                 # 4. Clean up _realised_executors_tracked with hard cap
                 if len(self._realised_executors_tracked) > MAX_REALISED_TRACKED:
@@ -2085,6 +2078,101 @@ class MultiCoinGridController(ControllerBase):
                             import traceback
                             self.logger().error(traceback.format_exc())
                             self.logger().warning("⚠️  Continuing with warm-up mode...")
+
+        # CRITICAL HOT-RELOAD FIX: Load historical data even if discovery was skipped
+        # This handles the case where bot reloads with monitored_coins already set
+        # but _historical_data_loaded flag is reset (not persistent across reloads)
+        if self.monitored_coins and hasattr(self, 'trend_calculator'):
+            if not self.trend_calculator._historical_data_loaded:
+                self.logger().info("=" * 80)
+                self.logger().info("🔄 HOT-RELOAD DETECTED: Loading historical data for existing monitored coins...")
+                self.logger().info("=" * 80)
+                try:
+                    await self.trend_calculator.load_historical_data(self.monitored_coins)
+                    self.logger().info("=" * 80)
+                    self.logger().info("✅ Historical data loaded after hot-reload!")
+                    self.logger().info("=" * 80)
+
+                    # Verify loaded data
+                    for symbol in self.monitored_coins[:3]:
+                        if symbol in self.trend_calculator.trends:
+                            trend = self.trend_calculator.trends[symbol]
+                            if len(trend.price_history) > 1:
+                                first = float(trend.price_history[0]['price'])
+                                last = float(trend.price_history[-1]['price'])
+                                change = ((last - first) / first) * 100 if first > 0 else 0
+                                self.logger().info(
+                                    f"  🔍 {symbol}: {len(trend.price_history)} points, "
+                                    f"first=€{first:.4f}, last=€{last:.4f}, Δ{change:+.2f}%"
+                                )
+
+                    # Add real-time prices
+                    self.logger().info("🔄 Adding real-time prices to complete dataset...")
+                    try:
+                        orderbook_config = self._build_orderbook_config()
+                        await self.trend_calculator.update_all_trends_v2(
+                            self.monitored_coins,
+                            orderbook_config=orderbook_config
+                        )
+                        self.logger().info("✅ Real-time prices added!")
+                    except Exception as update_error:
+                        self.logger().warning(f"⚠️  Failed to add real-time prices: {update_error}")
+
+                    # Force trend calculation
+                    self.logger().info("=" * 80)
+                    self.logger().info("🔧 Calculating trends from historical data...")
+                    self.logger().info("=" * 80)
+                    for symbol in self.monitored_coins:
+                        if symbol in self.trend_calculator.trends:
+                            trend = self.trend_calculator.trends[symbol]
+                            if len(trend.price_history) >= 2:
+                                current_price = float(trend.current_price) if trend.current_price else float(
+                                    trend.price_history[-1]['price'])
+                                oldest_price = float(trend.price_history[0]['price'])
+                                manual_24h = (
+                                    (current_price - oldest_price) / oldest_price * 100) if oldest_price > 0 else 0.0
+
+                                now_ts = time.time()
+                                prices_4h = [p for p in trend.price_history if (now_ts - p['timestamp']) <= (4 * 3600)]
+                                if len(prices_4h) >= 2:
+                                    manual_4h = (
+                                        (float(prices_4h[-1]['price']) - float(prices_4h[0]['price'])) / float(prices_4h[0]['price']) * 100)
+                                else:
+                                    manual_4h = 0.0
+
+                                prices_1h = [p for p in trend.price_history if (now_ts - p['timestamp']) <= 3600]
+                                if len(prices_1h) >= 2:
+                                    manual_1h = (
+                                        (float(prices_1h[-1]['price']) - float(prices_1h[0]['price'])) / float(prices_1h[0]['price']) * 100)
+                                else:
+                                    manual_1h = 0.0
+
+                                trend.trend_1440m = manual_24h
+                                trend.trend_240m = manual_4h
+                                trend.trend_60m = manual_1h
+                                trend.trend_score = 0.2 * manual_1h + 0.4 * manual_4h + 0.4 * manual_24h
+                                trend.trend_pct = trend.trend_score
+                                trend.consensus_trend_pct = trend.trend_score
+
+                                self.logger().info(
+                                    f"✅ {symbol}: trends = "
+                                    f"1h:{manual_1h:+.2f}%, 4h:{manual_4h:+.2f}%, 24h:{manual_24h:+.2f}%, score:{trend.trend_score:+.2f}%"
+                                )
+                    self.logger().info("=" * 80)
+
+                    # Initialize Market Regime Filter if available
+                    if self.market_regime_filter:
+                        try:
+                            self.logger().info("🌍 Initializing Market Regime Filter...")
+                            await self.market_regime_filter.initialize()
+                        except Exception as regime_error:
+                            self.logger().warning(f"⚠️  Failed to initialize Market Regime Filter: {regime_error}")
+
+                except Exception as e:
+                    self.logger().error(f"❌ Failed to load historical data after hot-reload: {e}")
+                    import traceback
+                    self.logger().error(traceback.format_exc())
+                    self.logger().warning("⚠️  Continuing with warm-up mode...")
 
         # Rotate underperforming coins if we have a pool to rotate from
         # BUT: Skip rotation if manual trading pairs are configured (user wants specific coins)
