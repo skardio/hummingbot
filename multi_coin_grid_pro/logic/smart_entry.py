@@ -48,6 +48,11 @@ class SmartEntryBaseConfig:
     # Phase 2: Order Book Depth
     depth_check_enabled: bool = True
     min_depth_multiplier: float = 3.0
+    # US-001: Fail-closed market data gate
+    # When True, entries are BLOCKED if price/orderbook data is unavailable
+    # This prevents blind trading without proper market data validation
+    require_orderbook: bool = True  # Block entry if orderbook unavailable
+    require_price: bool = True      # Block entry if price data unavailable
     # EPIC v3.4: Momentum Guards (optional fields with defaults)
     vwap_slope_guard_enabled: bool = False
     vwap_slope_guard_shadow_mode: bool = True
@@ -112,7 +117,7 @@ class SmartEntryFilter:
             event_logger: Optional EventLogger for structured event tracking (EPIC v3.4)
         """
         self.base_cfg = base_cfg
-        self.coin_profiles = coin_profiles
+        self.coin_profiles = coin_profiles or {}  # Handle None from YAML
         self.logger = logger or logging.getLogger(__name__)
         self.exchange_connector = exchange_connector
         self.connector_name = connector_name
@@ -122,7 +127,7 @@ class SmartEntryFilter:
         self.logger.info("🧠 SmartEntryFilter v2.0 initialized")
         self.logger.info(f"   Base RSI range: [{base_cfg.rsi_extreme_low}, {base_cfg.rsi_buy_max}]")
         self.logger.info(f"   ATR range: [{base_cfg.min_atr_pct_for_grid}, {base_cfg.max_atr_pct_for_grid}]%")
-        self.logger.info(f"   Coin profiles loaded: {len(coin_profiles)} coins")
+        self.logger.info(f"   Coin profiles loaded: {len(self.coin_profiles)} coins")
         self.logger.info("=" * 80)
 
     def _get_best_bid_ask(self, symbol: str) -> Tuple[Optional[float], Optional[float]]:
@@ -134,17 +139,38 @@ class SmartEntryFilter:
             return None, None
 
         try:
+            # MarketDataProvider.get_order_book() returns an OrderBook object
             order_book = self.exchange_connector.get_order_book(self.connector_name, symbol)
-            if not order_book or 'bids' not in order_book or 'asks' not in order_book:
+            if order_book is None:
                 return None, None
 
-            bids = order_book.get('bids', [])
-            asks = order_book.get('asks', [])
-            if not bids or not asks:
+            # OrderBook has a .snapshot property that returns (bids, asks)
+            # where each is a DataFrame or list of (price, amount) tuples
+            if not hasattr(order_book, 'snapshot') or order_book.snapshot is None:
                 return None, None
 
-            best_bid = float(bids[0][0])
-            best_ask = float(asks[0][0])
+            bids, asks = order_book.snapshot
+
+            # Handle empty orderbook
+            if bids is None or asks is None:
+                return None, None
+
+            # Handle DataFrame vs list formats
+            if hasattr(bids, 'empty'):
+                # DataFrame format
+                if bids.empty or asks.empty:
+                    return None, None
+                best_bid = float(bids.iloc[0, 0])  # First row, first column (price)
+                best_ask = float(asks.iloc[0, 0])
+            elif hasattr(bids, '__len__'):
+                # List/array format
+                if len(bids) == 0 or len(asks) == 0:
+                    return None, None
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+            else:
+                return None, None
+
             return best_bid, best_ask
         except Exception as e:
             self.logger.warning(f"[SPREAD] {symbol} - Error fetching bid/ask: {e}")
@@ -166,7 +192,7 @@ class SmartEntryFilter:
 
         if bid_price is None or ask_price is None:
             self.logger.debug(f"[SPREAD] {symbol} - Unable to fetch prices, skipping check")
-            # Emit event voor tracking
+            # US-001: Emit event for tracking
             if self.event_logger:
                 try:
                     self.event_logger.emit_gate_denied(
@@ -175,14 +201,25 @@ class SmartEntryFilter:
                         stage=Stage.SMART_ENTRY,
                         reason_code=ReasonCode.NO_PRICE_DATA,
                         reason_msg="Prices unavailable for spread check",
-                        metadata={"check_type": "spread"}
+                        metadata={"check_type": "spread"},
+                        connector=self.connector_name
                     )
                 except Exception as e:
                     self.logger.debug(f"Failed to emit gate_denied event: {e}")
+            # US-001: Fail-closed - reject entry when price data unavailable
+            # Check require_price config flag (default True for safety)
+            require_price = getattr(self.base_cfg, 'require_price', True)
+            if require_price:
+                self.logger.warning(f"[SPREAD] {symbol} - Price data unavailable, BLOCKING entry (fail-closed)")
+                return False, "Price data unavailable (fail-closed)", None
             return True, "Prices unavailable (skipping spread check)", None
 
         if bid_price <= 0 or ask_price <= 0:
             self.logger.warning(f"[SPREAD] {symbol} - Invalid prices: bid={bid_price}, ask={ask_price}")
+            # US-001: Fail-closed - also reject when prices are zero/negative
+            require_price = getattr(self.base_cfg, 'require_price', True)
+            if require_price:
+                return False, "Invalid prices (fail-closed)", None
             return True, "Invalid prices (skipping spread check)", None
 
         mid_price = (bid_price + ask_price) / 2
@@ -248,7 +285,8 @@ class SmartEntryFilter:
                             stage=Stage.SMART_ENTRY,
                             reason_code=ReasonCode.NO_ORDERBOOK_DATA,
                             reason_msg="No orderbook data available for depth check",
-                            metadata={"check_type": "depth", "order_size_eur": order_size_eur}
+                            metadata={"check_type": "depth", "order_size_eur": order_size_eur},
+                            connector=self.connector_name
                         )
                     except Exception as e:
                         self.logger.debug(f"Failed to emit gate_denied event: {e}")
@@ -425,15 +463,21 @@ class SmartEntryFilter:
                 passed=depth_ok,
                 operator=">="
             )
-            # Only reject if depth check explicitly failed (not if data unavailable)
+            # US-001: Fail-closed gate - REJECT if orderbook data is unavailable
+            # This prevents blind trading without proper market data validation
             if not depth_ok and depth_available > 0:
                 trace.finalize(accepted=False, rejected_by="depth", final_reason="insufficient depth")
                 trace.reason_code = ReasonCode.DEPTH_INSUFFICIENT.value
                 trace.stage = Stage.SMART_ENTRY.value
                 return False, f"🧠 {symbol}: NO BUY – {depth_reason}", trace
             elif not depth_ok:
-                # Depth data unavailable - log warning but allow entry
-                self.logger.debug(f"[DEPTH] {symbol} - Orderbook unavailable, skipping depth check")
+                # US-001: Depth data unavailable - REJECT entry (fail-closed)
+                # Previously this was allowed, but blind entries cause losses
+                trace.finalize(accepted=False, rejected_by="depth", final_reason="no orderbook data")
+                trace.reason_code = ReasonCode.NO_ORDERBOOK_DATA.value
+                trace.stage = Stage.SMART_ENTRY.value
+                self.logger.warning(f"[DEPTH] {symbol} - Orderbook unavailable, BLOCKING entry (fail-closed)")
+                return False, f"🧠 {symbol}: NO BUY – orderbook data unavailable (fail-closed)", trace
 
         # 1) RSI Regime Checks
         # Use rsi_block_min (max overbought threshold) - allows coin profiles to override

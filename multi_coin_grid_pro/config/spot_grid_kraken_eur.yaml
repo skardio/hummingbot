@@ -5,6 +5,9 @@
 # Critical fixes: Kraken fee bug (÷100), Smart Entry enabled, 3 new features
 # ==============================================================================
 
+# INSTANCE IDENTIFIER - Used for DB path separation (EUR/USD isolation)
+instance_id: "eur"                  # 🔑 Separates state from USD bot
+
 log_level: INFO       #WARNING
 connector_name: kraken
 quote_asset: EUR
@@ -15,7 +18,7 @@ paper_trading: false
 # ==============================================================================
 
 use_dynamic_pair_discovery: true
-max_coins_to_monitor: 12            # 🚀 TASK 1.0: Universe throttling (was 50)
+max_coins_to_monitor: 25            # 🚀 TASK 1.0: Universe throttling (was 50)
 min_24h_volume_eur: 150000          # 🚀 Higher volume = more liquid (was 100k)
 exclude_expensive_coins: false
 
@@ -86,7 +89,7 @@ adaptive_filters:
   # Baseline filters (OPTIMIZED for Kraken EUR bull market)
   baseline:
     rsi_buy_min: 25.0
-    rsi_buy_max: 85.0               # 🚀 80→85 (more entries in uptrends)
+    rsi_buy_max: 68.0               # 🛡️ Baseline: 68 (voorkom late pumps)
     rsi_extreme_min: 18.0           # 🚀 20→18 (catch oversold)
     vwap_max_deviation_pct: 30.0    # 🚀 18→30 (RENDER 24.96% was blocked!)
     max_up_accel_pct: 4.0           # 🚀 2.5→4 (strong momentum)
@@ -101,7 +104,7 @@ adaptive_filters:
 
   # BULL regime: relaxed filters
   BULL:
-    rsi_buy_max: 85.0
+    rsi_buy_max: 72.0               # 🛡️ Bull: 72 (iets ruimer voor momentum)
     vwap_max_deviation_pct: 20.0    # 🔧 FIX: 7.0→20.0 (allow entries in strong uptrends)
     max_up_accel_pct: 3.0
     max_down_accel_pct: -4.0
@@ -113,7 +116,7 @@ adaptive_filters:
 
   # CHOP regime: strict filters
   CHOP:
-    rsi_buy_max: 78.0               # 🔧 FIX: 71→78 (allow trading in choppy markets)
+    rsi_buy_max: 68.0               # 🛡️ Chop: 68 (gelijk aan baseline)
     vwap_max_deviation_pct: 10.0    # 🔧 FIX: 4.5→10.0 (allow altcoin pumps in chop)
     max_up_accel_pct: 1.8           # 🔧 FIX: 1.2→1.8 (allow some momentum)
     max_down_accel_pct: -2.5        # 🔧 FIX: -2.0→-2.5 (allow pullbacks)
@@ -125,7 +128,7 @@ adaptive_filters:
 
   # BEAR regime: STOP TRADING (inventory protection)
   BEAR:
-    rsi_buy_max: 70.0
+    rsi_buy_max: 62.0               # 🛡️ Bear: 62 (strengst)
     vwap_max_deviation_pct: 8.0
     max_up_accel_pct: 1.5
     max_down_accel_pct: -2.0
@@ -353,7 +356,7 @@ use_smart_entry_filter: true       # BELANGRIJK: AAN
 smart_entry_filter:
   # RSI - Use adaptive regime filters instead of static values
   # These are fallback values when adaptive regime detection is disabled
-  rsi_buy_max: 85.0                # 🚀 80→85 (match relaxed baseline)
+  rsi_buy_max: 68.0                # 🛡️ Fallback: 68 (voorkom late pumps)
   rsi_extreme_low: 18.0            # 🚀 25→18 (catch deeper oversold)
   rsi_block_min: 85.0              # 🚀 80→85 (higher ceiling)
 
@@ -629,6 +632,10 @@ trend_min_entry_strength: 0.007    # OPTION B TEST: 1.0% (was 1.5%) - lower thre
 coin_rotation_threshold: 180        # 🚀 FIX: 180→120 (2 min - faster rotation)
 price_update_interval: 30
 
+# STALENESS GUARD (US-008) - Prevent trading on stale data
+max_price_age_ms: 35000             # 35 sec (trend refresh=30s + buffer)
+max_orderbook_age_ms: 60000         # 60 sec orderbook freshness
+
 # MAX MONITORING TIME: Als geen coin voldoet, roteer na X seconden
 max_coin_monitoring_seconds: 180   # 🚀 FIX: 300→120 (2 min - faster timeout)
 session_blacklist_duration_seconds: 7200  # 2 uur blacklist, dan weer proberen
@@ -665,14 +672,15 @@ switch_grace_period_seconds: 180   # 🚀 TASK 1.1: 7min→3min (faster rotation
 
 use_professional_risk_mgmt: true
 
-# ATR-Based Stops (CLAMPED: never too tight, never too wide)
-stop_loss_pct: 0.08                # Legacy backup
+# STOP-LOSS UITGESCHAKELD - Grid krijgt ruimte voor DCA/mean-reversion
+# Bescherming via: trend exit, emergency exit, time-based exit
+stop_loss_pct: null
 atr_stop_multiplier: 2.0           # 2×ATR dynamic stop
 min_stop_pct: 0.02                 # Min -2% (never too tight for BTC)
 max_stop_pct: 0.05                 # Max -5% (conservative cap for grid trading)
 # Examples: BTC 1.2% ATR → -2.4%, RENDER 3.5% ATR → -7%, 10% ATR → capped to -8%
 
-take_profit_pct: 0.07              # 🚀 4→7% TP (inventory +45, higher TP!)
+take_profit_pct: 0.05              # 5% TP (realistisch voor huidige markt)
 
 # Context-Aware Time Exits (stall + no fills check)
 time_based_stop_minutes: 360       # 6 hours (grids need time!)
@@ -694,9 +702,9 @@ resume_min_pnl_pct: 0.0            # Resume only if last 10 trades >= 0%
 
 min_grid_profit_pct: 2.0           # 1.5 → 2.0 voor fee overhead (€0.04/trade)
 
-# 🛡️ CRASH PROTECTION (Legacy - kept for compatibility)
-emergency_exit_pct: -2.5          # 🛡️ 2.5% emergency (faster reaction)
-hard_stop_pct: -4.0                # 🛡️ 4% hard stop (tighter protection)
+# 🛡️ CRASH PROTECTION - Alleen bij flash crash / exchange fuck-up / news-nuke
+emergency_exit_pct: -12.0         # 🛡️ Was -4%, nu -12% - alleen bij echte crash
+hard_stop_pct: -15.0               # 🛡️ Was -5%, nu -15% - ultiem vangnet
 
 # ==============================================================================
 # DRAWDOWN / KILL SWITCH - CRASH PROTECTION (Grid-Aware)
@@ -737,7 +745,9 @@ max_hold_time_seconds: 14400      # ✅ NEW: 4 hours max hold → force rotation
 # ==============================================================================
 
 no_fill_timeout_sec: 1200         # ⏰ 20 min - no fills → cancel + close (no inventory)
-no_progress_timeout_sec: 3600     # ⏰ 1 hour - no new fills → start unwind
+no_progress_timeout_sec: 5400     # ⏰ 1.5 uur - meer ruimte voor herstel
+no_progress_min_loss_pct: 2.5     # 🎯 PRO: Only trigger timeout if unrealized loss > 2.5%
+no_progress_atr_multiplier: 1.5   # 🎯 PRO: Require adverse move > 1.5×ATR (0=disabled, 1.5=test, 2.0=conservative)
 close_grace_sec: 120              # ⏰ 2 min - graceful close window (maker → market fallback)
 
 min_startup_wait_seconds: 60       # 🚀 FIX: 90→60 (1 min startup delay)

@@ -235,6 +235,9 @@ class MultiCoinGridController(ControllerBase):
 
         # Task 3.1: Dynamic Slot Manager
         dynamic_slots_cfg = getattr(config, 'dynamic_slots', {})
+        # Add quote_asset for correct currency symbol in logging
+        if isinstance(dynamic_slots_cfg, dict):
+            dynamic_slots_cfg['quote_asset'] = getattr(config, 'quote_asset', 'EUR')
         self.dynamic_slot_manager = DynamicSlotManager(
             config=dynamic_slots_cfg,
             logger=self.logger()
@@ -291,7 +294,13 @@ class MultiCoinGridController(ControllerBase):
                     from pathlib import Path
 
                     from multi_coin_grid_pro.observability.console_reporter import ConsoleReporter
-                    bot_name = f"{self.config.connector_name}_multi_coin_grid"
+
+                    # Include instance_id in bot_name for isolation
+                    instance_id = getattr(self.config, 'instance_id', None)
+                    if instance_id:
+                        bot_name = f"{self.config.connector_name}_multi_coin_grid_{instance_id}"
+                    else:
+                        bot_name = f"{self.config.connector_name}_multi_coin_grid"
                     self._console_reporter = ConsoleReporter(
                         Path(events_output_dir),
                         logger=self.logger(),
@@ -398,11 +407,17 @@ class MultiCoinGridController(ControllerBase):
         self._cooldown_cleanup_interval: int = 300  # Cleanup expired cooldowns every 5 minutes
 
         # Initialize CooldownStore if parabolic persistence enabled
+        # Use instance_id for DB path isolation (EUR/USD separation)
         smart_cfg = getattr(config, 'smart_entry_filter', {})
         if smart_cfg.get('parabolic_cooldown_persist', False):
             try:
-                self.cooldown_store = CooldownStore("data/cooldowns.db")
-                self.logger().info("✅ Story 10: CooldownStore initialized (data/cooldowns.db)")
+                instance_id = getattr(config, 'instance_id', None)
+                if instance_id:
+                    db_path = f"data/cooldowns_{instance_id}.db"
+                else:
+                    db_path = "data/cooldowns.db"
+                self.cooldown_store = CooldownStore(db_path)
+                self.logger().info(f"✅ Story 10: CooldownStore initialized ({db_path})")
             except Exception as e:
                 self.logger().error(f"❌ Story 10: CooldownStore init failed: {e}")
                 self.cooldown_store = None
@@ -437,7 +452,8 @@ class MultiCoinGridController(ControllerBase):
             pnl_tracker=self.pnl_tracker_v2,
             alerter=self.telegram_alerter,
             logger=self.logger(),
-            event_logger=self.event_logger  # Pass EventLogger for Phase 2 observability
+            event_logger=self.event_logger,  # Pass EventLogger for Phase 2 observability
+            connector_name=config.connector_name  # Pass connector name for event filtering
         )
 
         # SmartEntry Filter v2.0 (with coin profiles)
@@ -446,12 +462,13 @@ class MultiCoinGridController(ControllerBase):
             smart_filter_cfg = getattr(config, 'smart_entry_filter', {})
             if smart_filter_cfg:
                 base_cfg = SmartEntryBaseConfig(**smart_filter_cfg)
-                coin_profiles = getattr(config, 'coin_profiles', {})
+                coin_profiles = getattr(config, 'coin_profiles', None) or {}  # Handle None from YAML
                 self.smart_entry_v2 = SmartEntryFilterV2(
                     base_cfg,
                     coin_profiles,
                     self.logger(),
                     exchange_connector=self.market_data_provider,
+                    connector_name=config.connector_name,  # FIX: Pass connector name for bid/ask lookup
                     event_logger=self.event_logger
                 )
                 self.logger().info("🧠 SmartEntry v2.0: ENABLED (with coin profiles)")
@@ -540,6 +557,53 @@ class MultiCoinGridController(ControllerBase):
         if self.debug_trace_enabled:
             self.logger().info(f"🔍 Decision Trace: ENABLED (format={self.debug_trace_format})")
 
+        # ===== US-008: STALENESS GUARD =====
+        from multi_coin_grid_pro.utils.staleness_guard import StalenessGuard
+        self.staleness_guard: Optional[StalenessGuard] = None
+        staleness_enabled = getattr(config, 'staleness_guard_enabled', True)
+        if staleness_enabled:
+            self.staleness_guard = StalenessGuard(
+                max_price_age_ms=getattr(config, 'max_price_age_ms', 2000),
+                max_orderbook_age_ms=getattr(config, 'max_orderbook_age_ms', 5000),
+                enabled=True,
+                logger=self.logger()
+            )
+            self.logger().info("🕐 US-008: StalenessGuard ENABLED")
+        else:
+            self.logger().info("ℹ️  US-008: StalenessGuard DISABLED")
+
+        # ===== US-009: CONFIG SANITY CHECK =====
+        from multi_coin_grid_pro.utils.config_validator import ConfigValidator
+        try:
+            validator = ConfigValidator(config, self.logger())
+            # Block on critical in production (paper_trading=False)
+            paper_trading = getattr(config, 'paper_trading', True)
+            validation_result = validator.validate_and_log(
+                block_on_critical=not paper_trading
+            )
+            if validation_result.has_critical and paper_trading:
+                self.logger().warning(
+                    "⚠️  US-009: Critical config issues found - continuing in paper trading mode"
+                )
+        except Exception as e:
+            self.logger().error(f"❌ US-009: Config validation failed: {e}")
+
+        # ===== US-002: PAIR HEALTH MONITOR (AUTO-QUARANTINE) =====
+        from multi_coin_grid_pro.utils.pair_health_monitor import PairHealthMonitor
+        quarantine_cfg = getattr(config, 'auto_quarantine', {})
+        self.pair_health_monitor: Optional[PairHealthMonitor] = None
+        if quarantine_cfg.get('enabled', True):  # Enabled by default
+            self.pair_health_monitor = PairHealthMonitor(
+                quarantine_threshold=quarantine_cfg.get('threshold', 10),
+                quarantine_window_sec=quarantine_cfg.get('window_sec', 120),
+                quarantine_duration_sec=quarantine_cfg.get('duration_sec', 900),
+                enabled=True,
+                logger=self.logger(),
+                event_logger=self.event_logger
+            )
+        else:
+            self.logger().info("ℹ️  US-002: PairHealthMonitor DISABLED")
+
         # ===== ADAPTIVE REGIME DETECTION (Phase 1: Logging Only) =====
         self.regime_detector = None
 
@@ -585,7 +649,10 @@ class MultiCoinGridController(ControllerBase):
         self.logger().info(f"Min Trend: {config.trend_min_change_pct}%")
         self.logger().info(f"Switch Cooldown: {config.min_switch_interval_seconds / 60:.0f} min")
         self.logger().info(f"Grid Capital: €{config.total_amount_quote}")
-        self.logger().info(f"Stop Loss: -{config.stop_loss_pct * 100}%")
+        if config.stop_loss_pct is not None:
+            self.logger().info(f"Stop Loss: -{config.stop_loss_pct * 100}%")
+        else:
+            self.logger().info("Stop Loss: DISABLED (relying on trend/emergency exits)")
         if self.smart_entry_filter:
             self.logger().info("🧠 SmartEntry (legacy): ENABLED")
         if self.smart_entry_v2:
@@ -998,7 +1065,8 @@ class MultiCoinGridController(ControllerBase):
 
         This method attempts to use the connector's ticker data method if available.
         For Kraken specifically, this provides volume and spread data needed for
-        coin selection. Falls back to empty dict if method doesn't exist.
+        coin selection. For Bitget, we use their public tickers API.
+        Falls back to empty dict if method doesn't exist.
 
         IMPORTANT: This method makes a single API call to get ALL tickers (rate limit: 1 call/second).
         Only call this method when necessary (e.g., during coin discovery at startup).
@@ -1010,8 +1078,7 @@ class MultiCoinGridController(ControllerBase):
             self.logger().warning("⚠️  Connector not initialized, cannot fetch ticker data")
             return {}
 
-        # Rate limiting: Ensure we don't call this too frequently (Kraken: 1 call/second)
-        # This method should only be called during coin discovery (once at startup)
+        # Rate limiting: Ensure we don't call this too frequently
         current_time = time.time()
         if hasattr(self, '_last_ticker_call_time'):
             time_since_last_call = current_time - self._last_ticker_call_time
@@ -1020,7 +1087,16 @@ class MultiCoinGridController(ControllerBase):
                 self.logger().debug(f"⏳ Rate limiting ticker call - waiting {wait_time:.2f}s...")
                 await asyncio.sleep(wait_time)
 
-        # Check if connector has the ticker data method (Kraken-specific)
+        # Check connector type and use appropriate method
+        connector_name = self.config.connector_name.lower()
+
+        # Bitget-specific ticker fetcher
+        if 'bitget' in connector_name:
+            ticker_data = await self._get_bitget_ticker_data()
+            self._last_ticker_call_time = time.time()
+            return ticker_data
+
+        # Kraken and others with _get_ticker_data method
         if hasattr(self.connector, '_get_ticker_data'):
             # Phase 1.3: Use error handling wrapper
             if asyncio.iscoroutinefunction(self.connector._get_ticker_data):
@@ -1047,6 +1123,87 @@ class MultiCoinGridController(ControllerBase):
                 f"⚠️  Connector {type(self.connector).__name__} doesn't support ticker data. "
                 "Volume-based selection will be limited."
             )
+            return {}
+
+    async def _get_bitget_ticker_data(self) -> Dict[str, Any]:
+        """
+        Fetch ticker data from Bitget's public API.
+
+        Bitget API: GET /api/v2/spot/market/tickers
+        Returns 24h volume, bid/ask prices, last price for all trading pairs.
+
+        Returns:
+            Dict keyed by symbol (e.g., "BTCUSDT") with volume/spread data
+            Format compatible with Kraken ticker format for consistency
+        """
+        try:
+            import aiohttp
+
+            url = "https://api.bitget.com/api/v2/spot/market/tickers"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status != 200:
+                        self.logger().warning(f"⚠️  Bitget ticker API returned status {response.status}")
+                        return {}
+
+                    data = await response.json()
+
+                    if data.get('code') != '00000':
+                        self.logger().warning(f"⚠️  Bitget ticker API error: {data.get('msg')}")
+                        return {}
+
+                    tickers = data.get('data', [])
+
+                    # Convert to Kraken-compatible format
+                    # Kraken format: {symbol: {"v": [vol_today, vol_24h], "c": [last_price], "a": [ask], "b": [bid]}}
+                    result = {}
+                    for ticker in tickers:
+                        symbol = ticker.get('symbol', '')  # e.g., "BTCUSDT"
+
+                        # Convert to Hummingbot format (with dash)
+                        # BTCUSDT -> BTC-USDT
+                        if 'USDT' in symbol:
+                            hb_symbol = symbol.replace('USDT', '-USDT')
+                        elif 'USDC' in symbol:
+                            hb_symbol = symbol.replace('USDC', '-USDC')
+                        elif 'BTC' in symbol and symbol != 'BTC':
+                            hb_symbol = symbol.replace('BTC', '-BTC')
+                        else:
+                            hb_symbol = symbol
+
+                        # Extract data - Bitget format:
+                        # quoteVolume = 24h volume in quote currency (USDT)
+                        # baseVolume = 24h volume in base currency
+                        # askPr = best ask price
+                        # bidPr = best bid price
+                        # lastPr = last traded price
+                        quote_vol = float(ticker.get('quoteVolume', 0) or 0)
+                        last_price = float(ticker.get('lastPr', 0) or 0)
+                        ask_price = float(ticker.get('askPr', 0) or 0)
+                        bid_price = float(ticker.get('bidPr', 0) or 0)
+
+                        # Store in Kraken-compatible format
+                        result[hb_symbol] = {
+                            'v': [0, quote_vol / last_price if last_price > 0 else 0],  # base volume
+                            'c': [str(last_price)],
+                            'a': [str(ask_price)],
+                            'b': [str(bid_price)],
+                            # Also store raw Bitget data for convenience
+                            'quoteVolume': quote_vol,
+                            'baseVolume': float(ticker.get('baseVolume', 0) or 0),
+                        }
+
+                    self.logger().info(f"✅ Bitget ticker data: {len(result)} pairs with volume data")
+                    self.consecutive_api_errors = 0
+                    self.last_successful_api_call = time.time()
+                    return result
+
+        except asyncio.TimeoutError:
+            self.logger().warning("⚠️  Bitget ticker API timeout")
+            return {}
+        except Exception as e:
+            self.logger().warning(f"⚠️  Bitget ticker API error: {e}")
             return {}
 
     def _initialize_components(self):
@@ -1843,25 +2000,45 @@ class MultiCoinGridController(ControllerBase):
                     # Build volume map: {hb_symbol: volume_24h_in_quote}
                     pair_volumes = {}
                     pair_spreads = {}
-                    for kraken_symbol, hb_symbol in trading_pair_map.items():
-                        if hb_symbol in eur_pairs and kraken_symbol in ticker_data:
-                            ticker = ticker_data[kraken_symbol]
-                            # Volume data: ticker["v"] = [volume_today, volume_24h]
-                            volume_24h = float(ticker["v"][1]) if "v" in ticker else 0
-                            # Get last price to calculate EUR volume
-                            last_price = float(ticker["c"][0]) if "c" in ticker else 0
-                            volume_eur = volume_24h * last_price
-                            pair_volumes[hb_symbol] = volume_eur
 
-                            # Calculate spread
-                            try:
-                                best_ask = float(ticker["a"][0]) if "a" in ticker and ticker["a"] else None
-                                best_bid = float(ticker["b"][0]) if "b" in ticker and ticker["b"] else None
-                                if best_bid and best_ask and best_ask > 0:
-                                    spread = (best_ask - best_bid) / best_ask
-                                    pair_spreads[hb_symbol] = spread
-                            except Exception:
-                                pass
+                    # Determine if this is Bitget (ticker_data keyed by hb_symbol) or Kraken (keyed by exchange_symbol)
+                    is_bitget = 'bitget' in self.config.connector_name.lower()
+
+                    for exchange_symbol, hb_symbol in trading_pair_map.items():
+                        if hb_symbol not in eur_pairs:
+                            continue
+
+                        # For Bitget: ticker_data is keyed by hb_symbol (BTC-USDT)
+                        # For Kraken: ticker_data is keyed by exchange_symbol (XBTEUR)
+                        ticker_key = hb_symbol if is_bitget else exchange_symbol
+
+                        if ticker_key not in ticker_data:
+                            continue
+
+                        ticker = ticker_data[ticker_key]
+
+                        # Volume data: ticker["v"] = [volume_today, volume_24h]
+                        # For Bitget, we also stored quoteVolume directly
+                        if is_bitget and 'quoteVolume' in ticker:
+                            volume_quote = float(ticker['quoteVolume'])
+                        elif "v" in ticker:
+                            volume_24h = float(ticker["v"][1]) if ticker["v"] else 0
+                            last_price = float(ticker["c"][0]) if "c" in ticker and ticker["c"] else 0
+                            volume_quote = volume_24h * last_price
+                        else:
+                            volume_quote = 0
+
+                        pair_volumes[hb_symbol] = volume_quote
+
+                        # Calculate spread
+                        try:
+                            best_ask = float(ticker["a"][0]) if "a" in ticker and ticker["a"] else None
+                            best_bid = float(ticker["b"][0]) if "b" in ticker and ticker["b"] else None
+                            if best_bid and best_ask and best_ask > 0:
+                                spread = (best_ask - best_bid) / best_ask
+                                pair_spreads[hb_symbol] = spread
+                        except Exception:
+                            pass
 
                     # Store volume and spread data for rotation
                     self.pair_volumes = pair_volumes
@@ -1893,15 +2070,19 @@ class MultiCoinGridController(ControllerBase):
                             spread_checked_pairs.append((pair, vol, 0.0))  # spread=0 indicates no data
                     else:
                         for pair, vol in filtered_pairs[:100]:
-                            # Find kraken_symbol for this pair
-                            kraken_symbol = None
-                            for k, v in trading_pair_map.items():
-                                if v == pair:
-                                    kraken_symbol = k
-                                    break
-                            if kraken_symbol and kraken_symbol in ticker_data:
-                                ticker = ticker_data[kraken_symbol]
-                                # Kraken ticker: 'a' = ask [price, whole lot volume, lot volume], 'b' = bid [...]
+                            # For Bitget: use hb_symbol directly, for Kraken: find exchange_symbol
+                            if is_bitget:
+                                ticker_key = pair  # hb_symbol like "BTC-USDT"
+                            else:
+                                # Find exchange_symbol for this pair
+                                ticker_key = None
+                                for k, v in trading_pair_map.items():
+                                    if v == pair:
+                                        ticker_key = k
+                                        break
+
+                            if ticker_key and ticker_key in ticker_data:
+                                ticker = ticker_data[ticker_key]
                                 try:
                                     best_ask = float(ticker["a"][0]) if "a" in ticker and ticker["a"] else None
                                     best_bid = float(ticker["b"][0]) if "b" in ticker and ticker["b"] else None
@@ -1944,6 +2125,18 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().info(f"✅ Discovery complete: Monitoring {len(self.monitored_coins)} coins")
                     self.logger().info(f"✅ Top 20: {', '.join(self.monitored_coins[:20])}")
                     self.logger().info("=" * 80)
+
+                    # US-005: Subscribe to orderbooks for all discovered coins
+                    # This ensures orderbook data is available for depth/spread checks
+                    self.logger().info("📚 Subscribing to orderbooks for discovered coins...")
+                    subscribed_count = 0
+                    for symbol in self.monitored_coins:
+                        try:
+                            self._subscribe_to_orderbook(symbol)
+                            subscribed_count += 1
+                        except Exception as sub_e:
+                            self.logger().warning(f"⚠️  Failed to subscribe to {symbol}: {sub_e}")
+                    self.logger().info(f"✅ Subscribed to {subscribed_count}/{len(self.monitored_coins)} orderbooks")
 
                     # Mark initial discovery timestamp for periodic refresh
                     self._last_coin_discovery = time.time()
@@ -2079,101 +2272,6 @@ class MultiCoinGridController(ControllerBase):
                             self.logger().error(traceback.format_exc())
                             self.logger().warning("⚠️  Continuing with warm-up mode...")
 
-        # CRITICAL HOT-RELOAD FIX: Load historical data even if discovery was skipped
-        # This handles the case where bot reloads with monitored_coins already set
-        # but _historical_data_loaded flag is reset (not persistent across reloads)
-        if self.monitored_coins and hasattr(self, 'trend_calculator'):
-            if not self.trend_calculator._historical_data_loaded:
-                self.logger().info("=" * 80)
-                self.logger().info("🔄 HOT-RELOAD DETECTED: Loading historical data for existing monitored coins...")
-                self.logger().info("=" * 80)
-                try:
-                    await self.trend_calculator.load_historical_data(self.monitored_coins)
-                    self.logger().info("=" * 80)
-                    self.logger().info("✅ Historical data loaded after hot-reload!")
-                    self.logger().info("=" * 80)
-
-                    # Verify loaded data
-                    for symbol in self.monitored_coins[:3]:
-                        if symbol in self.trend_calculator.trends:
-                            trend = self.trend_calculator.trends[symbol]
-                            if len(trend.price_history) > 1:
-                                first = float(trend.price_history[0]['price'])
-                                last = float(trend.price_history[-1]['price'])
-                                change = ((last - first) / first) * 100 if first > 0 else 0
-                                self.logger().info(
-                                    f"  🔍 {symbol}: {len(trend.price_history)} points, "
-                                    f"first=€{first:.4f}, last=€{last:.4f}, Δ{change:+.2f}%"
-                                )
-
-                    # Add real-time prices
-                    self.logger().info("🔄 Adding real-time prices to complete dataset...")
-                    try:
-                        orderbook_config = self._build_orderbook_config()
-                        await self.trend_calculator.update_all_trends_v2(
-                            self.monitored_coins,
-                            orderbook_config=orderbook_config
-                        )
-                        self.logger().info("✅ Real-time prices added!")
-                    except Exception as update_error:
-                        self.logger().warning(f"⚠️  Failed to add real-time prices: {update_error}")
-
-                    # Force trend calculation
-                    self.logger().info("=" * 80)
-                    self.logger().info("🔧 Calculating trends from historical data...")
-                    self.logger().info("=" * 80)
-                    for symbol in self.monitored_coins:
-                        if symbol in self.trend_calculator.trends:
-                            trend = self.trend_calculator.trends[symbol]
-                            if len(trend.price_history) >= 2:
-                                current_price = float(trend.current_price) if trend.current_price else float(
-                                    trend.price_history[-1]['price'])
-                                oldest_price = float(trend.price_history[0]['price'])
-                                manual_24h = (
-                                    (current_price - oldest_price) / oldest_price * 100) if oldest_price > 0 else 0.0
-
-                                now_ts = time.time()
-                                prices_4h = [p for p in trend.price_history if (now_ts - p['timestamp']) <= (4 * 3600)]
-                                if len(prices_4h) >= 2:
-                                    manual_4h = (
-                                        (float(prices_4h[-1]['price']) - float(prices_4h[0]['price'])) / float(prices_4h[0]['price']) * 100)
-                                else:
-                                    manual_4h = 0.0
-
-                                prices_1h = [p for p in trend.price_history if (now_ts - p['timestamp']) <= 3600]
-                                if len(prices_1h) >= 2:
-                                    manual_1h = (
-                                        (float(prices_1h[-1]['price']) - float(prices_1h[0]['price'])) / float(prices_1h[0]['price']) * 100)
-                                else:
-                                    manual_1h = 0.0
-
-                                trend.trend_1440m = manual_24h
-                                trend.trend_240m = manual_4h
-                                trend.trend_60m = manual_1h
-                                trend.trend_score = 0.2 * manual_1h + 0.4 * manual_4h + 0.4 * manual_24h
-                                trend.trend_pct = trend.trend_score
-                                trend.consensus_trend_pct = trend.trend_score
-
-                                self.logger().info(
-                                    f"✅ {symbol}: trends = "
-                                    f"1h:{manual_1h:+.2f}%, 4h:{manual_4h:+.2f}%, 24h:{manual_24h:+.2f}%, score:{trend.trend_score:+.2f}%"
-                                )
-                    self.logger().info("=" * 80)
-
-                    # Initialize Market Regime Filter if available
-                    if self.market_regime_filter:
-                        try:
-                            self.logger().info("🌍 Initializing Market Regime Filter...")
-                            await self.market_regime_filter.initialize()
-                        except Exception as regime_error:
-                            self.logger().warning(f"⚠️  Failed to initialize Market Regime Filter: {regime_error}")
-
-                except Exception as e:
-                    self.logger().error(f"❌ Failed to load historical data after hot-reload: {e}")
-                    import traceback
-                    self.logger().error(traceback.format_exc())
-                    self.logger().warning("⚠️  Continuing with warm-up mode...")
-
         # Rotate underperforming coins if we have a pool to rotate from
         # BUT: Skip rotation if manual trading pairs are configured (user wants specific coins)
         manual_pairs = getattr(self.config, 'manual_trading_pairs', None)
@@ -2222,12 +2320,111 @@ class MultiCoinGridController(ControllerBase):
                     orderbook_config=orderbook_config
                 )
                 self._last_trend_update = time.time()
+
+                # US-008: Update staleness timestamps for all coins that have fresh data
+                if self.staleness_guard:
+                    for symbol in self.monitored_coins:
+                        trend = self.trend_calculator.get_trend(symbol)
+                        if trend and trend.current_price and trend.current_price > 0:
+                            # Update price timestamp
+                            self.staleness_guard.update_price(symbol, float(trend.current_price))
+                        # Update orderbook timestamp if orderbook is available
+                        if self.connector and hasattr(self.connector, 'get_order_book'):
+                            try:
+                                ob = self.connector.get_order_book(trading_pair=symbol)
+                                if ob and hasattr(ob, 'snapshot') and ob.snapshot:
+                                    bids, asks = ob.snapshot
+                                    if bids is not None and asks is not None:
+                                        # Check if orderbook has data
+                                        has_bids = (hasattr(bids, '__len__') and len(bids) > 0) or (hasattr(bids, 'empty') and not bids.empty)
+                                        has_asks = (hasattr(asks, '__len__') and len(asks) > 0) or (hasattr(asks, 'empty') and not asks.empty)
+                                        if has_bids and has_asks:
+                                            self.staleness_guard.update_orderbook(symbol)
+                            except Exception as e:
+                                self.logger().debug(f"Staleness guard orderbook check failed for {symbol}: {e}")
             except Exception as e:
                 self.logger().error(f"❌ Error updating trends: {e}")
                 import traceback
                 self.logger().error(traceback.format_exc())
                 # Don't update _last_trend_update on error, so we retry sooner
                 # This ensures we don't skip updates when API is having issues
+
+        # 🔧 CRITICAL FIX: Auto-load historical data if candle count is insufficient
+        # This runs AFTER the trend update and REGARDLESS of coin discovery state.
+        # Fixes the bug where historical data was only loaded during discovery,
+        # causing SmartEntry v2 to reject ALL trades with "Insufficient candle data".
+        await self._ensure_historical_data_loaded()
+
+    async def _ensure_historical_data_loaded(self) -> None:
+        """
+        Ensure all monitored coins have sufficient historical candle data.
+
+        This method runs every cycle and checks if any coin has fewer candles
+        than required for SmartEntry v2 (minimum 14 candles). If so, it triggers
+        a historical data load for coins that need it.
+
+        This fixes the critical bug where bots that ran for extended periods
+        without a full restart would never load historical data, causing
+        SmartEntry v2 to reject ALL entries with "Insufficient candle data".
+        """
+        if not self.monitored_coins or not hasattr(self, 'trend_calculator'):
+            return
+
+        # Only check once per minute to avoid spamming the exchange API
+        check_interval = 60.0  # seconds
+        last_check = getattr(self, '_last_historical_check', 0.0)
+        if time.time() - last_check < check_interval:
+            return
+
+        self._last_historical_check = time.time()
+
+        # Check how many coins have insufficient candle data
+        min_candles = 14  # SmartEntry v2 minimum requirement
+        coins_needing_data = []
+
+        for symbol in self.monitored_coins:
+            trend = self.trend_calculator.get_trend(symbol)
+            if not trend or not trend.candles or len(trend.candles) < min_candles:
+                candle_count = len(trend.candles) if trend and trend.candles else 0
+                coins_needing_data.append((symbol, candle_count))
+
+        if not coins_needing_data:
+            return  # All coins have sufficient data
+
+        # Log the situation
+        self.logger().warning(
+            f"🔧 AUTO-FIX: {len(coins_needing_data)}/{len(self.monitored_coins)} coins have "
+            f"insufficient candle data for SmartEntry v2 (< {min_candles} candles)"
+        )
+        for symbol, count in coins_needing_data[:5]:  # Log first 5
+            self.logger().warning(f"   - {symbol}: only {count} candles")
+
+        # Trigger historical data load
+        try:
+            self.logger().info("=" * 80)
+            self.logger().info("📥 AUTO-LOADING HISTORICAL DATA (candle count fix)...")
+            self.logger().info("=" * 80)
+
+            await self.trend_calculator.load_historical_data(self.monitored_coins)
+
+            # Verify the fix worked
+            fixed_count = 0
+            for symbol in self.monitored_coins:
+                trend = self.trend_calculator.get_trend(symbol)
+                if trend and trend.candles and len(trend.candles) >= min_candles:
+                    fixed_count += 1
+
+            self.logger().info("=" * 80)
+            self.logger().info(
+                f"✅ Historical data loaded: {fixed_count}/{len(self.monitored_coins)} coins "
+                f"now have >= {min_candles} candles"
+            )
+            self.logger().info("=" * 80)
+
+        except Exception as e:
+            self.logger().error(f"❌ Failed to auto-load historical data: {e}")
+            import traceback
+            self.logger().error(traceback.format_exc())
 
     async def _refresh_coin_pool(self):
         """
@@ -2291,8 +2488,104 @@ class MultiCoinGridController(ControllerBase):
                 f"{len(pair_volumes)} with volume data"
             )
 
+            # === NEW: Update monitored_coins based on fresh volume/spread data ===
+            await self._update_monitored_coins_from_pool(pair_volumes, pair_spreads)
+
         except Exception as e:
             self.logger().error(f"❌ Error refreshing coin pool: {e}")
+            import traceback
+            self.logger().error(traceback.format_exc())
+
+    async def _update_monitored_coins_from_pool(self, pair_volumes: dict, pair_spreads: dict):
+        """
+        Update monitored_coins list based on fresh volume/spread data.
+        Preserves coins that currently have active positions (grids).
+        Called during periodic coin pool refresh.
+
+        NOTE: If no volume data available (e.g., Bitget), keeps existing monitored_coins.
+        """
+        try:
+            # If no volume data, skip update (keep existing coins)
+            if not pair_volumes:
+                self.logger().info("📊 No volume data available - keeping existing monitored coins")
+                return
+
+            max_coins = self.config.max_coins_to_monitor
+            min_volume = float(getattr(self.config, 'min_24h_volume_usdt', self.config.min_24h_volume_eur))
+            spread_limit = 0.005  # 0.5%
+            blacklist = set(getattr(self.config, 'blacklist', []) or [])
+
+            # Get coins with active positions (must keep these!)
+            active_coins = set()
+            if hasattr(self, 'executors_info') and self.executors_info:
+                for executor in self.executors_info:
+                    if hasattr(executor, 'trading_pair'):
+                        active_coins.add(executor.trading_pair)
+
+            # Build list of candidate coins sorted by volume
+            candidates = []
+            for pair, volume in pair_volumes.items():
+                if pair in blacklist:
+                    continue
+                if pair in getattr(self, 'auto_blacklisted_coins', set()):
+                    continue
+                if volume < min_volume:
+                    continue
+                spread = pair_spreads.get(pair, 1.0)
+                if spread > spread_limit:
+                    continue
+                candidates.append((pair, volume, spread))
+
+            # Sort by volume (highest first)
+            candidates.sort(key=lambda x: x[1], reverse=True)
+
+            # Build new monitored list: active coins first, then top volume coins
+            new_monitored = list(active_coins)  # Always keep active coins
+
+            for pair, volume, spread in candidates:
+                if pair not in new_monitored and len(new_monitored) < max_coins:
+                    new_monitored.append(pair)
+
+            # Check if list changed
+            old_set = set(self.monitored_coins)
+            new_set = set(new_monitored)
+
+            added = new_set - old_set
+            removed = old_set - new_set
+
+            if added or removed:
+                self.logger().info("=" * 80)
+                self.logger().info("🔄 MONITORED COINS LIST UPDATED")
+                self.logger().info("=" * 80)
+                if removed:
+                    self.logger().info(f"➖ Removed: {sorted(removed)}")
+                if added:
+                    self.logger().info(f"➕ Added: {sorted(added)}")
+
+                # Update the list
+                self.monitored_coins = new_monitored
+
+                # Log new list with volumes
+                self.logger().info(f"📊 NEW MONITORED COINS ({len(new_monitored)}):")
+                for i, pair in enumerate(new_monitored[:12], 1):
+                    vol = pair_volumes.get(pair, 0)
+                    spread = pair_spreads.get(pair, 0)
+                    active = "🔒" if pair in active_coins else "  "
+                    self.logger().info(
+                        f"  {active} {i:2}. {pair:15} | Vol: €{vol:>12,.0f} | Spread: {spread * 100:.3f}%"
+                    )
+                self.logger().info("=" * 80)
+
+                # Load historical data for newly added coins
+                if added and hasattr(self, 'trend_calculator'):
+                    self.logger().info(f"📥 Loading historical data for {len(added)} new coins...")
+                    await self.trend_calculator.load_historical_data(list(added))
+                    self.logger().info("✅ Historical data loaded for new coins")
+            else:
+                self.logger().info("📊 Monitored coins unchanged (same top coins by volume)")
+
+        except Exception as e:
+            self.logger().error(f"❌ Error updating monitored coins: {e}")
             import traceback
             self.logger().error(traceback.format_exc())
 
@@ -3903,7 +4196,7 @@ class MultiCoinGridController(ControllerBase):
 
             # Phase 1.1: Check stop-loss status
             entry_price = self.entry_prices.get(self.active_coin)
-            if entry_price:
+            if entry_price and self.config.stop_loss_pct is not None:
                 # Calculate current loss percentage
                 loss_pct = float((current_price - entry_price) / entry_price * 100)
                 stop_loss_price = entry_price * (Decimal('1') - self.config.stop_loss_pct)
@@ -5263,9 +5556,70 @@ class MultiCoinGridController(ControllerBase):
         """
         Check if SmartEntry filter allows entry for this symbol.
 
+        Includes:
+        - US-002 auto-quarantine check
+        - US-008 staleness guard to reject entries on stale data
+
         Returns:
             True if entry allowed (or filter disabled), False if blocked
         """
+        # US-002: Check if pair is quarantined FIRST
+        if self.pair_health_monitor and self.pair_health_monitor.is_quarantined(symbol):
+            info = self.pair_health_monitor.get_quarantine_info(symbol)
+            remaining = (info.release_at - time.time()) / 60 if info else 0
+            self.logger().debug(
+                f"🚧 US-002 QUARANTINED: {symbol} - skipping ({remaining:.1f}min remaining)"
+            )
+            return False
+
+        # US-008: Check staleness - reject stale data before other checks
+        if self.staleness_guard:
+            freshness = self.staleness_guard.is_data_fresh(
+                symbol,
+                require_price=True,
+                require_orderbook=True
+            )
+            if not freshness.is_fresh:
+                # US-002: Record failure for health monitoring
+                if self.pair_health_monitor:
+                    self.pair_health_monitor.record_failure(symbol, freshness.reason.value)
+
+                # Emit event if observability enabled
+                if self.event_logger:
+                    try:
+                        from multi_coin_grid_pro.core.reason_codes import ReasonCode, Stage
+                        reason_code = (
+                            ReasonCode.STALE_PRICE if freshness.reason.value == "STALE_PRICE"
+                            else ReasonCode.STALE_ORDERBOOK if freshness.reason.value == "STALE_ORDERBOOK"
+                            else ReasonCode.NO_PRICE_DATA if freshness.reason.value == "NO_PRICE_DATA"
+                            else ReasonCode.NO_ORDERBOOK_DATA
+                        )
+                        self.event_logger.emit_gate_denied(
+                            correlation_id=f"staleness_{symbol}_{time.time()}",
+                            symbol=symbol,
+                            stage=Stage.SMART_ENTRY,
+                            reason_code=reason_code,
+                            reason_msg=freshness.details,
+                            metadata={
+                                "price_age_ms": freshness.price_age_ms,
+                                "orderbook_age_ms": freshness.orderbook_age_ms,
+                                "max_price_age_ms": self.staleness_guard.max_price_age_ms,
+                                "max_orderbook_age_ms": self.staleness_guard.max_orderbook_age_ms,
+                            },
+                            connector=self.config.connector_name
+                        )
+                    except Exception as e:
+                        self.logger().debug(f"Failed to emit staleness event: {e}")
+
+                self.logger().warning(
+                    f"🕐 US-008 STALE DATA: {symbol} - {freshness.details}"
+                )
+                return False
+
+        # US-002: Record success if we got here (data is fresh)
+        if self.pair_health_monitor:
+            self.pair_health_monitor.record_success(symbol)
+
         # HYBRID GRID v2.0: Use SmartEntry v2 if available, fallback to legacy
         if self.smart_entry_v2:
             return self._check_smart_entry_v2(symbol)
@@ -5712,26 +6066,33 @@ class MultiCoinGridController(ControllerBase):
                 self.logger().warning(f"[ORDERBOOK] Cannot subscribe to {symbol}: connector not available")
                 return
 
-            # Check if connector has order book tracker
-            if not hasattr(self.connector, '_order_book_tracker'):
+            # Check if connector has order book tracker (use public property, not private attr)
+            tracker = getattr(self.connector, 'order_book_tracker', None)
+            if tracker is None:
                 self.logger().debug(f"[ORDERBOOK] Connector has no order book tracker for {symbol}")
                 return
 
-            tracker = self.connector._order_book_tracker
-
             # Check if already subscribed (already in trading_pairs)
-            if symbol in tracker._trading_pairs:
+            if hasattr(tracker, '_trading_pairs') and symbol in tracker._trading_pairs:
                 self.logger().debug(f"[ORDERBOOK] Already subscribed to {symbol}")
                 return
 
             # Add to trading pairs list
-            tracker._trading_pairs.append(symbol)
-            self.logger().info(f"[ORDERBOOK] ✅ Subscribed to {symbol} orderbook")
+            if hasattr(tracker, '_trading_pairs'):
+                tracker._trading_pairs.append(symbol)
+                self.logger().info(f"[ORDERBOOK] ✅ Subscribed to {symbol} orderbook")
 
-            # Trigger immediate snapshot fetch (don't wait for next cycle)
-            if hasattr(tracker, '_order_books') and symbol not in tracker._order_books:
-                # Initialize order book for this pair
-                safe_ensure_future(self._initialize_orderbook(symbol, tracker))
+                # Also add to data source if available
+                if hasattr(tracker, '_data_source') and hasattr(tracker._data_source, '_trading_pairs'):
+                    if symbol not in tracker._data_source._trading_pairs:
+                        tracker._data_source._trading_pairs.append(symbol)
+
+                # Trigger immediate snapshot fetch (don't wait for next cycle)
+                if hasattr(tracker, '_order_books') and symbol not in tracker._order_books:
+                    # Initialize order book for this pair
+                    safe_ensure_future(self._initialize_orderbook(symbol, tracker))
+            else:
+                self.logger().debug(f"[ORDERBOOK] Tracker has no _trading_pairs for {symbol}")
 
         except Exception as e:
             self.logger().error(f"[ORDERBOOK] Failed to subscribe to {symbol}: {e}")
@@ -6555,12 +6916,18 @@ class MultiCoinGridController(ControllerBase):
                         f"✅ Dynamic stop for {symbol}: -{dynamic_stop_loss_pct * 100:.2f}%{atr_info}"
                     )
                 else:
-                    self.logger().warning(
-                        f"⚠️  No volatility data for {symbol} - using fixed stop {self.config.stop_loss_pct * 100:.0f}%"
-                    )
+                    if self.config.stop_loss_pct is not None:
+                        self.logger().warning(
+                            f"⚠️  No volatility data for {symbol} - using fixed stop {self.config.stop_loss_pct * 100:.0f}%"
+                        )
+                    else:
+                        self.logger().warning(
+                            f"⚠️  No volatility data for {symbol} - stop-loss disabled"
+                        )
             except Exception as e:
+                stop_info = f"{self.config.stop_loss_pct * 100:.0f}%" if self.config.stop_loss_pct else "disabled"
                 self.logger().error(
-                    f"❌ Failed to calculate dynamic stop for {symbol}: {e} - using fixed stop {self.config.stop_loss_pct * 100:.0f}%"
+                    f"❌ Failed to calculate dynamic stop for {symbol}: {e} - stop-loss {stop_info}"
                 )
                 import traceback
                 self.logger().error(traceback.format_exc())
@@ -6738,10 +7105,15 @@ class MultiCoinGridController(ControllerBase):
             self.last_grid_creation_time = self.market_data_provider.time()
             self.last_grid_price[symbol] = current_price
 
-            self.logger().info(
-                f"📌 Entry price tracked for {symbol}: €{current_price:.4f} "
-                f"(Stop-loss will trigger at €{current_price * (Decimal('1') - self.config.stop_loss_pct):.4f})"
-            )
+            if self.config.stop_loss_pct is not None:
+                self.logger().info(
+                    f"📌 Entry price tracked for {symbol}: €{current_price:.4f} "
+                    f"(Stop-loss will trigger at €{current_price * (Decimal('1') - self.config.stop_loss_pct):.4f})"
+                )
+            else:
+                self.logger().info(
+                    f"📌 Entry price tracked for {symbol}: €{current_price:.4f} (Stop-loss DISABLED)"
+                )
 
             return action
         except Exception as e:
@@ -6952,10 +7324,14 @@ class MultiCoinGridController(ControllerBase):
                 entry_price = self.entry_prices.get(self.active_coin)
                 if entry_price:
                     loss_pct = float((Decimal(str(trend.current_price)) - entry_price) / entry_price * 100)
-                    stop_loss_pct = float(self.config.stop_loss_pct * 100)
-                    stop_loss_price = entry_price * (Decimal('1') - self.config.stop_loss_pct)
-                    status.append(
-                        f"║ Entry: €{entry_price:.4f} | Stop-Loss: €{stop_loss_price:.4f} (-{stop_loss_pct:.2f}%) ║")
+                    if self.config.stop_loss_pct is not None:
+                        stop_loss_pct = float(self.config.stop_loss_pct * 100)
+                        stop_loss_price = entry_price * (Decimal('1') - self.config.stop_loss_pct)
+                        status.append(
+                            f"║ Entry: €{entry_price:.4f} | Stop-Loss: €{stop_loss_price:.4f} (-{stop_loss_pct:.2f}%) ║")
+                    else:
+                        status.append(
+                            f"║ Entry: €{entry_price:.4f} | Stop-Loss: DISABLED                 ║")
                     status.append(
                         f"║ Current P&L: {loss_pct:+.2f}% from entry                              ║")
 

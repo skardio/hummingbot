@@ -43,6 +43,9 @@ class TestSmartEntryFilter(unittest.TestCase):
             # Phase 2: Order Book Depth
             depth_check_enabled=True,
             min_depth_multiplier=3.0,
+            # Disable fail-closed for indicator tests (tested separately)
+            require_price=False,
+            require_orderbook=False,
         )
 
         # Coin profiles with overrides
@@ -269,13 +272,18 @@ class TestSmartEntryFilter(unittest.TestCase):
 
     def test_spread_check_with_mock_exchange(self):
         """Test spread check with mock exchange connector"""
-        # Create mock exchange with order book
+        from unittest.mock import Mock
+
+        # Create mock exchange with order book that has snapshot property
+        mock_orderbook = Mock()
+        mock_orderbook.snapshot = (
+            [[10.0, 100.0]],  # bids: [price, volume]
+            [[10.10, 100.0]]  # asks: 1% spread
+        )
+
         class MockExchange:
             def get_order_book(self, connector_name, trading_pair):
-                return {
-                    'bids': [[10.0, 100.0]],  # [price, volume]
-                    'asks': [[10.10, 100.0]]  # 1% spread
-                }
+                return mock_orderbook
 
         # Create filter with mock exchange
         filter_with_exchange = SmartEntryFilter(
@@ -306,12 +314,18 @@ class TestSmartEntryFilter(unittest.TestCase):
 
     def test_spread_check_passed(self):
         """Test spread check passes with acceptable spread"""
+        from unittest.mock import Mock
+
+        # Create mock exchange with order book that has snapshot property
+        mock_orderbook = Mock()
+        mock_orderbook.snapshot = (
+            [[10.0, 100.0]],  # bids
+            [[10.02, 100.0]]  # asks: 0.2% spread - OK
+        )
+
         class MockExchange:
             def get_order_book(self, connector_name, trading_pair):
-                return {
-                    'bids': [[10.0, 100.0]],
-                    'asks': [[10.02, 100.0]]  # 0.2% spread - OK
-                }
+                return mock_orderbook
 
         filter_with_exchange = SmartEntryFilter(
             self.base_cfg,

@@ -41,7 +41,8 @@ class RiskGuardV2:
         pnl_tracker: RealtimePnLTracker,
         alerter,
         logger: Optional[logging.Logger] = None,
-        event_logger=None  # EventLogger instance (optional)
+        event_logger=None,  # EventLogger instance (optional)
+        connector_name: Optional[str] = None  # Exchange name for event filtering
     ):
         """
         Initialize Risk Guard
@@ -52,12 +53,14 @@ class RiskGuardV2:
             alerter: Telegram alerter for critical notifications
             logger: Optional logger instance
             event_logger: Optional EventLogger for structured events
+            connector_name: Optional exchange name (e.g., 'kraken', 'bitget')
         """
         self.cfg = cfg
         self.pnl = pnl_tracker
         self.alerter = alerter
         self.logger = logger or logging.getLogger(__name__)
         self.event_logger = event_logger  # Can be None if observability disabled
+        self.connector_name = connector_name or cfg.get("connector_name")  # Fallback to cfg
 
         # Risk limits
         self.max_daily_loss_pct = cfg.get("max_daily_loss_pct", 3.0)
@@ -236,11 +239,17 @@ class RiskGuardV2:
         if not self.event_logger or not self.event_logger.enabled:
             return
 
+        # Merge connector into metadata for filtering support
+        final_metadata = {**(metadata or {})}
+        if self.connector_name:
+            final_metadata["connector"] = self.connector_name
+
         self.event_logger.emit_gate_denied(
             correlation_id=correlation_id,
             symbol=symbol,
             stage=Stage.RISK,
             reason_code=reason_code,
             reason_msg=reason_msg,
-            metadata=metadata or {}
+            metadata=final_metadata,
+            connector=self.connector_name
         )

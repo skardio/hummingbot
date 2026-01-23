@@ -5,6 +5,45 @@ from typing import Optional
 from hummingbot.core.data_type.in_flight_order import InFlightOrder
 
 
+# US-006: Early Stop Reason Codes
+# Explains WHY an executor was stopped early (beyond just CloseType.EARLY_STOP)
+class EarlyStopReason(Enum):
+    """
+    Detailed reason codes for why an executor stopped early.
+    Used with CloseType.EARLY_STOP to provide granular debugging info.
+    """
+    # Unknown / default
+    UNKNOWN = 0                    # No specific reason provided
+
+    # Market data issues
+    DATA_MISSING = 1               # Price or orderbook data unavailable
+    STALE_DATA = 2                 # Price or orderbook data too old
+
+    # Order creation issues
+    ORDER_CREATE_SKIPPED = 10      # Order skipped before submission (validation failed)
+    ORDER_REJECTED = 11            # Order rejected by exchange after submission
+    MIN_NOTIONAL = 12              # Order below minimum notional value
+    QTY_TOO_SMALL = 13             # Quantity rounds to zero or below min
+
+    # Balance/budget issues
+    INSUFFICIENT_BALANCE = 20      # Not enough balance to place order
+    INSUFFICIENT_BUDGET = 21       # Budget allocator denied allocation
+
+    # Timeout issues
+    NO_FILL_TIMEOUT = 30           # Waiting too long for first fill
+    NO_PROGRESS_TIMEOUT = 31       # Waiting too long for progress
+
+    # Risk management
+    RISK_GUARD = 40                # Risk guard blocked entry
+    SLOT_FULL = 41                 # All execution slots occupied
+    PAIR_QUARANTINED = 42          # Pair is in quarantine
+
+    # Strategy decisions
+    MANUAL_STOP = 50               # Operator requested stop
+    STRATEGY_SWITCH = 51           # Switching to different coin/strategy
+    CONTROLLER_SHUTDOWN = 52       # Controller is shutting down
+
+
 class CloseType(Enum):
     TIME_LIMIT = 1
     STOP_LOSS = 2

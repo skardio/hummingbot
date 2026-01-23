@@ -52,7 +52,8 @@ class TestPhase2RiskEvents(unittest.TestCase):
             },
             pnl_tracker=self.pnl_tracker,
             alerter=self.alerter,
-            event_logger=self.event_logger
+            event_logger=self.event_logger,
+            connector_name="kraken"  # Test connector
         )
 
     def tearDown(self):

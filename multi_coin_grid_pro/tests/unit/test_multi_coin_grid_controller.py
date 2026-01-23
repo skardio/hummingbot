@@ -480,6 +480,8 @@ class TestMultiCoinGridController:
 
         # No active coin - should be allowed after delay
         controller.active_coin = None
+        controller.active_coins = {}  # Multi-coin: no active coins
+        controller.max_simultaneous_coins = 4
 
         # Task 2.1.1: Initialize stale detection state
         controller._last_price_update = {"XRP-EUR": time.time()}
@@ -494,9 +496,15 @@ class TestMultiCoinGridController:
         controller.trend_calculator.get_trend = Mock(return_value=mock_trend)
         controller.trend_calculator.get_best_coin = Mock(return_value="XRP-EUR")
 
-        # Should create grid because startup delay has passed
-        should_create = controller._should_create_new_grid("XRP-EUR")
-        assert should_create is True, "Startup delay should allow trade after wait time"
+        # Mock SmartEntry filter to return True (allows entry)
+        with patch.object(controller, '_check_smart_entry_filter', return_value=True):
+            # Mock risk manager to allow the trade
+            controller.risk_manager = MagicMock()
+            controller.risk_manager.can_open_trade = MagicMock(return_value=Decimal("50"))
+
+            # Should create grid because startup delay has passed
+            should_create = controller._should_create_new_grid("XRP-EUR")
+            assert should_create is True, "Startup delay should allow trade after wait time"
 
     async def test_startup_delay_not_applied_to_switches(self, controller, mock_connector):
         """Test that startup delay only applies to first trade, not to switches"""

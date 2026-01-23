@@ -478,7 +478,10 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
             mode_str = "📝 PAPER TRADING" if paper_trading else "💰 LIVE TRADING"
             self.logger().info(f"✅ Controller initialized: {controller_config.connector_name} ({mode_str})")
             self.logger().info(f"💰 Capital: €{controller_config.total_amount_quote}")
-            self.logger().info(f"⚠️  Stop Loss: {controller_config.stop_loss_pct * 100}%")
+            if controller_config.stop_loss_pct is not None:
+                self.logger().info(f"⚠️  Stop Loss: {controller_config.stop_loss_pct * 100}%")
+            else:
+                self.logger().info("⚠️  Stop Loss: DISABLED")
         except Exception as e:
             self.logger().error(f"❌ Failed to initialize controller: {e}")
             import traceback

@@ -22,6 +22,7 @@ class Stage(str, Enum):
     RISK = "RISK"
     EXECUTION = "EXECUTION"
     REGIME = "REGIME"
+    EXECUTOR_CREATE = "EXECUTOR_CREATE"  # US-004: Budget allocation stage
 
 
 class ReasonCode(str, Enum):
@@ -58,6 +59,8 @@ class ReasonCode(str, Enum):
     ORDERBOOK_UNAVAILABLE = "ORDERBOOK_UNAVAILABLE"
     NO_PRICE_DATA = "NO_PRICE_DATA"  # Unable to fetch bid/ask prices
     NO_ORDERBOOK_DATA = "NO_ORDERBOOK_DATA"  # Orderbook snapshot unavailable
+    STALE_PRICE = "STALE_PRICE"  # US-008: Price data too old
+    STALE_ORDERBOOK = "STALE_ORDERBOOK"  # US-008: Orderbook data too old
 
     # ===== MTF (2 codes) =====
     MTF_INSUFFICIENT = "MTF_INSUFFICIENT"
@@ -71,13 +74,14 @@ class ReasonCode(str, Enum):
     COOLDOWN_LOSS_STREAK = "COOLDOWN_LOSS_STREAK"
     POSITION_LIMIT = "POSITION_LIMIT"
 
-    # ===== EXECUTION (6 codes) =====
+    # ===== EXECUTION (7 codes) =====
     BLACKLIST = "BLACKLIST"
     SLOT_FULL = "SLOT_FULL"
     ALREADY_TRADING = "ALREADY_TRADING"
     STARTUP_DELAY = "STARTUP_DELAY"
     NOT_TRADEABLE = "NOT_TRADEABLE"
     ORDERBOOK_ERROR = "ORDERBOOK_ERROR"
+    INSUFFICIENT_BUDGET = "INSUFFICIENT_BUDGET"  # US-004: Not enough free capital
 
     # ===== REGIME (2 codes) =====
     REGIME_BTC_DUMP = "REGIME_BTC_DUMP"
@@ -102,6 +106,7 @@ def get_stage_for_reason(reason: ReasonCode) -> Stage:
         ReasonCode.TREND_24H_OUT_OF_RANGE, ReasonCode.SPREAD_TOO_WIDE,
         ReasonCode.DEPTH_INSUFFICIENT, ReasonCode.ORDERBOOK_UNAVAILABLE,
         ReasonCode.NO_PRICE_DATA, ReasonCode.NO_ORDERBOOK_DATA,
+        ReasonCode.STALE_PRICE, ReasonCode.STALE_ORDERBOOK,  # US-008
     }
     mtf_codes = {ReasonCode.MTF_INSUFFICIENT, ReasonCode.MTF_CRASH_DETECTED}
     risk_codes = {

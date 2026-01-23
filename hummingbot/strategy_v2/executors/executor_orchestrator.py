@@ -419,7 +419,9 @@ class ExecutorOrchestrator:
         # 🔧 CRITICAL FIX: Wrap early_stop in try-except to ensure it completes
         # If early_stop fails, position may be left hanging without close orders
         try:
-            executor.early_stop(action.keep_position)
+            # US-006: Pass early_stop_reason if provided in action
+            early_stop_reason = getattr(action, 'early_stop_reason', None)
+            executor.early_stop(action.keep_position, reason=early_stop_reason)
         except Exception as e:
             self.logger().error(
                 f"❌ CRITICAL: early_stop failed for {executor_id[:8]}... with error: {e}. "

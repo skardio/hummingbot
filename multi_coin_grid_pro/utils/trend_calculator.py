@@ -257,16 +257,29 @@ class TrendCalculator:
         Args:
             symbols: List of trading pairs to load historical data for (e.g., ["XRP-EUR", "SOL-EUR"])
         """
-        if self._historical_data_loaded:
-            logger.info("📊 Historical data already loaded, skipping...")
+        # 🔧 FIX: Check per-coin CANDLES (not price_history)!
+        # SmartEntry v2 requires trend.candles >= 14, so we check candles count
+        min_candles_required = 14  # SmartEntry v2 minimum
+        symbols_to_load = [
+            s for s in symbols
+            if s not in self.trends
+            or not self.trends[s].candles
+            or len(self.trends[s].candles) < min_candles_required
+        ]
+
+        if not symbols_to_load:
+            logger.info(f"📊 All {len(symbols)} coins already have historical data, skipping...")
             return
+
+        if len(symbols_to_load) < len(symbols):
+            logger.info(f"📊 Partial load: {len(symbols_to_load)}/{len(symbols)} coins need data (others already loaded)")
 
         try:
             import ccxt
 
             # Detect exchange from connector
             exchange_name = self.connector.name.replace("_paper_trade", "")
-            logger.info(f"📥 Loading historical data for {len(symbols)} coins from {exchange_name}...")
+            logger.info(f"📥 Loading historical data for {len(symbols_to_load)} coins from {exchange_name}...")
 
             # Create ccxt exchange instance dynamically
             exchange_class = getattr(ccxt, exchange_name, None)
@@ -282,7 +295,7 @@ class TrendCalculator:
             successful_loads = 0
             failed_loads = []
 
-            for symbol in symbols:
+            for symbol in symbols_to_load:  # 🔧 FIX: Use filtered list
                 try:
                     # Convert XRP-EUR to XRP/EUR format for ccxt
                     ccxt_symbol = symbol.replace("-", "/")
@@ -374,9 +387,10 @@ class TrendCalculator:
                         first_price = float(trend.price_history[0]['price'])
                         last_price = float(trend.price_history[-1]['price'])
                         change = ((last_price - first_price) / first_price) * 100 if first_price > 0 else 0
+                        currency = self._get_currency_symbol(symbol)
                         logger.info(
                             f"  🔍 {symbol}: {len(trend.price_history)} points, "
-                            f"first=€{first_price:.4f}, last=€{last_price:.4f}, change={change:+.2f}%"
+                            f"first={currency}{first_price:.4f}, last={currency}{last_price:.4f}, change={change:+.2f}%"
                         )
 
             # Log summary
@@ -558,16 +572,28 @@ class TrendCalculator:
             logger.error(traceback.format_exc())
             return None
 
+    def _get_currency_symbol(self, symbol: str) -> str:
+        """Get currency symbol based on quote asset in trading pair"""
+        if symbol.endswith("-USD") or symbol.endswith("/USD"):
+            return "$"
+        elif symbol.endswith("-USDT") or symbol.endswith("/USDT"):
+            return "$"
+        elif symbol.endswith("-USDC") or symbol.endswith("/USDC"):
+            return "$"
+        else:
+            return "€"  # EUR or other
+
     def _log_trend_update(self, trend: CoinTrend) -> None:
         """Helper method to log trend update"""
         trend_emoji = "📈" if trend.trend_pct >= 0 else "📉"
         data_status = f"{len(trend.price_history)}/{int(self.lookback_seconds / 30)} points"
+        currency = self._get_currency_symbol(trend.symbol)
 
         # Phase 2: Show enhanced trend metrics
         if trend.consensus_trend_pct != 0.0:
             logger.info(
                 f"{trend_emoji} {trend.symbol:12} | "
-                f"€{trend.current_price:8.4f} | "
+                f"{currency}{trend.current_price:8.4f} | "
                 f"Raw: {trend.trend_pct:+6.2f}% | "
                 f"Consensus: {trend.consensus_trend_pct:+6.2f}% | "
                 f"Vol: {trend.volatility:.3f}% | "
@@ -576,7 +602,7 @@ class TrendCalculator:
         else:
             logger.info(
                 f"{trend_emoji} {trend.symbol:12} | "
-                f"€{trend.current_price:8.4f} | "
+                f"{currency}{trend.current_price:8.4f} | "
                 f"Trend: {trend.trend_pct:+6.2f}% | "
                 f"Data: {data_status}"
             )

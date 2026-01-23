@@ -23,6 +23,9 @@ class MultiCoinGridConfig(ControllerConfigBase):
     This strategy monitors multiple coins and automatically switches to trade
     the coin with the best trend using grid trading.
     """
+    # Allow using aliases like min_24h_volume_quote instead of min_24h_volume_eur
+    model_config = {"populate_by_name": True, "extra": "forbid"}
+
     # Blacklist for coins to exclude (from YAML)
     blacklist: Optional[List[str]] = Field(
         default_factory=list,
@@ -54,6 +57,17 @@ class MultiCoinGridConfig(ControllerConfigBase):
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
+    )
+
+    # Instance Identifier (for multi-instance isolation)
+    # Used to separate DBs, logs, and state between EUR/USD bots
+    instance_id: Optional[str] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Instance ID for state isolation (e.g., eur, usd): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False}  # Can't change at runtime
     )
 
     # Exchange Configuration
@@ -116,10 +130,12 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # Volume threshold - works for any quote currency (EUR, USD, USDT, etc.)
     min_24h_volume_eur: Decimal = Field(
         default=Decimal("50000"),
+        alias="min_24h_volume_quote",  # Alias for currency-agnostic naming
         client_data=ClientFieldData(
-            prompt=lambda mi: "Minimum 24h volume in EUR: ",
+            prompt=lambda mi: "Minimum 24h volume in quote currency: ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
@@ -173,6 +189,61 @@ class MultiCoinGridConfig(ControllerConfigBase):
     grace_bypass_on_stale_data: bool = Field(
         default=True,
         description="Bypass grace period if market data for the pair is stale/unavailable"
+    )
+
+    # ==========================================================================
+    # US-008: Staleness Guard - "Trade Only When Data Fresh"
+    # ==========================================================================
+    staleness_guard_enabled: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable staleness guard (reject trades on stale data)? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Block entries when market data is stale/outdated"
+    )
+
+    max_price_age_ms: int = Field(
+        default=2000,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum price data age in milliseconds (default 2000): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        ge=100,
+        le=60000,
+        description="Maximum allowed age for price data before considered stale"
+    )
+
+    max_orderbook_age_ms: int = Field(
+        default=5000,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum orderbook data age in milliseconds (default 5000): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        ge=100,
+        le=60000,
+        description="Maximum allowed age for orderbook data before considered stale"
+    )
+
+    # ==========================================================================
+    # US-002: Auto-Quarantine - Temporary disable unhealthy pairs
+    # ==========================================================================
+    auto_quarantine: Optional[dict] = Field(
+        default_factory=lambda: {
+            "enabled": True,
+            "threshold": 10,      # Max failures before quarantine
+            "window_sec": 120,    # Rolling window (2 minutes)
+            "duration_sec": 900,  # Quarantine duration (15 minutes)
+        },
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Auto-quarantine config (dict with enabled, threshold, window_sec, duration_sec): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Auto-quarantine pairs with persistent data issues"
     )
 
     exclude_expensive_coins: bool = Field(
@@ -403,6 +474,25 @@ class MultiCoinGridConfig(ControllerConfigBase):
         default=3600,  # 1 hour - no new progress → start unwind
         client_data=ClientFieldData(
             prompt=lambda mi: "No-progress timeout (seconds, 0=disabled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # PRO TIMEOUT: PnL-aware and ATR-aware timeout protection
+    no_progress_min_loss_pct: float = Field(
+        default=1.5,  # Only trigger timeout if unrealized loss > 1.5%
+        client_data=ClientFieldData(
+            prompt=lambda mi: "No-progress min loss % (only trigger if losing more than this): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    no_progress_atr_multiplier: float = Field(
+        default=0.0,  # 0 = disabled, 1.5 = test, 2.0 = conservative
+        client_data=ClientFieldData(
+            prompt=lambda mi: "No-progress ATR multiplier (0=disabled, 1.5=test, 2.0=conservative): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
@@ -654,10 +744,11 @@ class MultiCoinGridConfig(ControllerConfigBase):
     )
 
     # Risk Management
-    stop_loss_pct: Decimal = Field(
-        default=Decimal("0.08"),  # Backup minimum (ATR-based logic uses 2×ATR, this is floor)
+    # stop_loss_pct: None = disabled (rely on trend exit, emergency exit, time-based exit)
+    stop_loss_pct: Optional[Decimal] = Field(
+        default=None,  # None = disabled, grid relies on other exit mechanisms
         client_data=ClientFieldData(
-            prompt=lambda mi: "Stop loss percentage backup (e.g., 0.08 for -8%, actual stop = max(2×ATR, this)): ",
+            prompt=lambda mi: "Stop loss percentage (null to disable, 0.08 for -8%): ",
             prompt_on_new=True,
         ),
         json_schema_extra={"is_updatable": True}
@@ -843,10 +934,12 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": True}
     )
+    # Daily loss limit in quote currency - works for EUR, USD, USDT, etc.
     max_daily_loss_eur: Optional[float] = Field(
         default=None,
+        alias="max_daily_loss_quote",  # Alias for currency-agnostic naming
         client_data=ClientFieldData(
-            prompt=lambda mi: "Max daily loss in EUR/quote (optional, press enter to skip): ",
+            prompt=lambda mi: "Max daily loss in quote currency (optional, press enter to skip): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
@@ -1275,7 +1368,7 @@ class MultiCoinGridConfig(ControllerConfigBase):
         order_type = OrderType.LIMIT if is_futures else OrderType.LIMIT_MAKER
 
         return TripleBarrierConfig(
-            stop_loss=self.stop_loss_pct,
+            stop_loss=self.stop_loss_pct,  # None = no stop-loss (disabled)
             take_profit=self.take_profit_pct,
             time_limit=None,  # No time limit for now
             trailing_stop=None,  # No trailing stop for now (can add later)
@@ -1328,10 +1421,12 @@ class MultiCoinGridConfig(ControllerConfigBase):
 
     @field_validator('stop_loss_pct')
     @classmethod
-    def validate_stop_loss(cls, v: Decimal) -> Decimal:
-        """Validate stop loss percentage"""
+    def validate_stop_loss(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        """Validate stop loss percentage - None = disabled"""
+        if v is None:
+            return None  # Disabled - rely on other exit mechanisms
         if v <= 0:
-            raise ValueError("Stop loss must be positive")
+            raise ValueError("Stop loss must be positive (or null to disable)")
         if v > Decimal("0.5"):
             raise ValueError("Stop loss should not exceed 50%")
         return v

@@ -49,6 +49,7 @@ class DynamicSlotManager:
                 - min_slots (int): Minimum slots (default 1)
                 - max_slots (int): Maximum slots (default 12)
                 - regime_multipliers (dict): Custom regime multipliers
+                - quote_asset (str): Quote asset for logging (default EUR)
             logger: Optional logger instance
         """
         self.config = config
@@ -57,6 +58,10 @@ class DynamicSlotManager:
         self.enabled = config.get("enabled", True)
         self.min_slots = config.get("min_slots", 1)
         self.max_slots = config.get("max_slots", 12)
+        self.quote_asset = config.get("quote_asset", "EUR")
+
+        # Currency symbol for logging
+        self.currency_symbol = "$" if self.quote_asset in ("USD", "USDT", "USDC") else "€"
 
         # Allow config to override regime multipliers
         custom_multipliers = config.get("regime_multipliers", {})
@@ -108,7 +113,7 @@ class DynamicSlotManager:
         final_slots = max(self.min_slots, min(self.max_slots, int(adjusted_slots)))
 
         self.logger().debug(
-            f"Dynamic slots: balance=€{account_balance_eur:.0f}, "
+            f"Dynamic slots: balance={self.currency_symbol}{account_balance_eur:.0f}, "
             f"regime={current_regime}, base={base_slots}, "
             f"multiplier={regime_multiplier}, final={final_slots}"
         )

@@ -222,7 +222,8 @@ class EventLogger:
         stage: 'Stage',
         reason_code: 'ReasonCode',
         reason_msg: str,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        connector: Optional[str] = None
     ) -> None:
         """
         Emit gate_denied event (rejection).
@@ -234,6 +235,7 @@ class EventLogger:
             reason_code: Structured reason code
             reason_msg: Human-readable reason
             metadata: Optional additional context
+            connector: Exchange connector name (kraken, bitget, etc.)
         """
         self._emit("gate_denied", {
             "correlation_id": correlation_id,
@@ -241,7 +243,8 @@ class EventLogger:
             "stage": stage,
             "reason_code": reason_code,
             "reason_msg": reason_msg,
-            "metadata": metadata or {}
+            "metadata": metadata or {},
+            "connector": connector
         })
 
     def emit_gate_passed(
@@ -249,7 +252,8 @@ class EventLogger:
         correlation_id: str,
         symbol: str,
         stage: 'Stage',
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        connector: Optional[str] = None
     ) -> None:
         """
         Emit gate_passed event (approval at stage).
@@ -259,12 +263,14 @@ class EventLogger:
             symbol: Trading pair
             stage: Pipeline stage that passed
             metadata: Optional additional context
+            connector: Exchange connector name (kraken, bitget, etc.)
         """
         self._emit("gate_passed", {
             "correlation_id": correlation_id,
             "symbol": symbol,
             "stage": stage,
-            "metadata": metadata or {}
+            "metadata": metadata or {},
+            "connector": connector
         })
 
     def emit_order_submitted(

@@ -109,6 +109,13 @@ class MockExecutor:
         # position_size_base is already set in __init__, just pass
         pass
 
+    def get_net_pnl_pct(self):
+        """Mock get_net_pnl_pct for PRO timeout feature"""
+        # Return a mock PnL percentage for timeout checks
+        # Default to -2% (adverse) to allow timeout tests to proceed
+        from decimal import Decimal
+        return Decimal("-0.02")
+
     def start_forced_close(self, close_reason: CloseType):
         """Mock start_forced_close for B1 two-phase unwind integration"""
         self.close_type = close_reason

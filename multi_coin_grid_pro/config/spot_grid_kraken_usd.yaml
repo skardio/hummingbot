@@ -1,0 +1,566 @@
+# ==============================================================================
+# HYBRID GRID CONFIG v3.3 - USD VARIANT
+# Kraken USD Multi-Coin Grid Bot (separate from EUR instance)
+# Created: 2026-01-17
+# ==============================================================================
+# ⚠️ INSTANCE ISOLATION: This config runs INDEPENDENTLY from EUR bot
+#    - Separate cooldowns DB: data/cooldowns_usd.db
+#    - Separate logs: logs/logs_multi_coin_grid_usd_*.log
+#    - Separate orders/state: no shared executors
+# ==============================================================================
+
+# INSTANCE IDENTIFIER - Used for DB path separation
+instance_id: "usd"                  # 🔑 CRITICAL: Separates state from EUR bot
+
+
+log_level: INFO
+connector_name: kraken
+quote_asset: USD                    # 🔄 CHANGED: EUR → USD
+paper_trading: false                # 💰 LIVE TRADING MODE
+
+# ==============================================================================
+# DYNAMIC PAIR DISCOVERY (USD pairs)
+# ==============================================================================
+
+use_dynamic_pair_discovery: true
+max_coins_to_monitor: 25
+min_24h_volume_quote: 500000          # Minimum 24h volume in quote currency (USD)
+exclude_expensive_coins: false
+
+blacklist:
+  # Stablecoins (no volatility)
+  - USDT-USD
+  - USDC-USD
+  - DAI-USD
+  - TUSD-USD
+  - USDP-USD
+  - GUSD-USD
+  - PYUSD-USD
+  # Wrapped/pegged assets
+  - WBTC-USD
+  - WETH-USD
+  # Known problematic coins
+  - MON-USD
+  - CCD-USD
+  - FARTCOIN-USD
+  - GIGA-USD
+  - XPL-USD
+  - NIGHT-USD
+  - AB-USD
+  - XT-USD
+  - EURC-USD
+  - TRX-USD
+  - PAXG-USD
+  - SPX-USD
+  - CH-USD
+  - SAPIEN-USD
+  - USELESS-USD
+  - PUMP-USD
+  - WLFI-USD
+  # NL-restricted coins (if applicable)
+  - Q-USD
+  - STBL-USD
+  # Non-existent Kraken USD pairs (cause WebSocket errors)
+  - AUT-USD
+  - AUD-USD
+  - ACU-USD
+  - XNY-USD
+  - CC-USD
+  - ZRO-USD
+  - XCN-USD
+  - AXS-USD
+
+# ==============================================================================
+# ADAPTIVE REGIME DETECTION & FILTERS
+# ==============================================================================
+
+adaptive_regime_detection:
+  enabled: true
+  logging_only: false
+
+  bull_score_min: 5.0
+  chop_score_min: -3.0
+  bear_score_max: -3.0
+  min_confidence: 0.65
+
+  bull_min_duration_sec: 1800
+  chop_min_duration_sec: 900
+  bear_min_duration_sec: 1800
+  hysteresis_buffer: 1.0
+
+  log_regime_changes: true
+  log_filter_updates: true
+
+adaptive_filters:
+  baseline:
+    rsi_buy_min: 25.0
+    rsi_buy_max: 68.0       # 🛡️ Baseline: 68 (voorkom late pumps)
+    rsi_extreme_min: 18.0
+    vwap_max_deviation_pct: 30.0
+    max_up_accel_pct: 4.0
+    max_down_accel_pct: -8.0
+    atr_min_pct: 0.08
+    atr_max_pct: 7.0
+    spike_5m_max_pct: 4.0
+    wick_ratio_min: 0.0
+    grid_spacing_mult: 1.0
+    max_active_grids: 4
+    entry_confidence_min: 0.65
+
+  BULL:
+    rsi_buy_max: 72.0       # 🛡️ Bull: 72 (iets ruimer voor momentum)
+    vwap_max_deviation_pct: 20.0
+    max_up_accel_pct: 3.0
+    max_down_accel_pct: -4.0
+    atr_min_pct: 0.08
+    spike_5m_max_pct: 3.5
+    grid_spacing_mult: 1.2
+    max_active_grids: 6
+    entry_confidence_min: 0.60
+
+  CHOP:
+    rsi_buy_max: 68.0       # 🛡️ Chop: 68 (gelijk aan baseline)
+    vwap_max_deviation_pct: 10.0
+    max_up_accel_pct: 1.8
+    max_down_accel_pct: -2.5
+    atr_min_pct: 0.10
+    spike_5m_max_pct: 2.5
+    grid_spacing_mult: 0.8
+    max_active_grids: 3
+    entry_confidence_min: 0.75
+
+  BEAR:
+    rsi_buy_max: 62.0       # 🛡️ Bear: 62 (strengst)
+    vwap_max_deviation_pct: 8.0
+    max_up_accel_pct: 1.5
+    max_down_accel_pct: -2.0
+    atr_min_pct: 0.15
+    spike_5m_max_pct: 2.0
+    grid_spacing_mult: 1.5
+    max_active_grids: 0
+    entry_confidence_min: 0.90
+    bear_allow_meanrev: false
+
+# ==============================================================================
+# COIN PROFILES & SMART ENTRY (USD pairs)
+# ==============================================================================
+
+manual_trading_pairs: []  # Dynamic discovery mode
+
+# ==============================================================================
+# MULTI-TIMEFRAME BUY PROTECTION
+# ==============================================================================
+
+use_multi_timeframe_buy: true
+mtf_1h_min_pct: 0.0
+mtf_4h_min_pct: 0.0
+mtf_24h_min_pct: -2.5
+mtf_declining_1h_max: -4.0
+mtf_declining_4h_max: -2.0
+
+# ==============================================================================
+# WARMUP TREND OVERRIDE
+# ==============================================================================
+
+warmup_override_enabled: true
+warmup_4h_strong_min: 0.5
+warmup_1h_min_if_4h_strong: -1.5
+
+# ==============================================================================
+# FEATURE 1.1: MARKET REGIME FILTER - BTC Trend Following
+# ==============================================================================
+
+market_regime:
+  enabled: false
+  btc_symbol: "BTC-USD"             # 🔄 CHANGED: BTC-EUR → BTC-USD
+
+  btc_trend_1h_min_pct: -2.0
+  btc_trend_4h_min_pct: 0.0
+  btc_trend_24h_min_pct: -5.0
+
+  dump_threshold_pct: -5.0
+  dump_pause_minutes: 60
+
+  altcoin_breadth_min_pct: 30.0
+  altcoin_breadth_sample_pairs:     # 🔄 CHANGED: USD pairs
+    - ETH-USD
+    - SOL-USD
+    - BNB-USD
+    - AVAX-USD
+    - LINK-USD
+
+  recovery_threshold_pct: 2.0
+
+# ==============================================================================
+# FEATURE 1.2: TIME-BASED TRADING RULES
+# ==============================================================================
+
+time_based_rules:
+  enabled: false
+
+  low_liquidity_hours: [0, 1, 2]
+  low_liquidity_action: "monitor_only"
+
+  high_liquidity_hours: [13, 14, 15, 16, 17, 18]
+  high_liquidity_bonus_pct: 10.0
+
+  max_total_size_multiplier: 1.2
+
+  weekend_trading_enabled: true
+  weekend_risk_multiplier: 0.5
+
+  low_liquidity_overrides_weekend: true
+
+  holidays: ["2025-12-25", "2026-01-01"]
+  holiday_action: "reduce_size"
+  holiday_risk_multiplier: 0.5
+
+# ==============================================================================
+# FEATURE 1.2b: LIQUIDITY-AWARE SMART SIZING
+# ==============================================================================
+
+liquidity_aware_sizing:
+  enabled: true
+
+  sizing_priority: ["low_liquidity", "holiday", "weekend", "time_bonus", "regime_bonus", "volatility_bonus"]
+  base_size_calculation: "capital_pct_daily"
+
+  cumulative_check_enabled: true
+  cumulative_log_level: "WARNING"
+
+  time_bonus_scalar:
+    high_liquidity: 1.10
+    normal_hours: 1.00
+    low_liquidity: 0.70
+
+  regime_bonus_scalar:
+    strong_bull: 1.15
+    neutral: 1.00
+    weak_bear: 0.60
+
+  volatility_bonus_scalar:
+    high_vol: 0.85
+    normal_vol: 1.00
+    low_vol: 1.10
+
+  max_cumulative_multiplier: 1.20
+
+  log_sizing_calc: true
+  log_format: "JSON"
+
+# ==============================================================================
+# FEATURE 1.3: PERFORMANCE TRACKING
+# ==============================================================================
+
+performance_tracking:
+  enabled: true
+
+  min_win_rate_pct: 45.0
+  min_profit_factor: 1.2
+  min_sharpe_ratio: 0.5
+  max_drawdown_pct: 5.0
+
+  lookback_trades: 20
+  lookback_days: 7
+
+  report_interval_hours: 4
+  save_to_database: true
+
+  track_per_symbol: true
+  min_trades_per_symbol: 3
+
+# ==============================================================================
+# ORDERBOOK DEPTH-BASED LIQUIDITY PROXY
+# ==============================================================================
+
+orderbook_liquidity:
+  enabled: true
+  mode: live
+  regime_aware: false
+  depth_pct_range: 0.5
+  depth_levels: 10
+  min_depth_multiplier: 5.0
+  use_for_ranking: false
+  use_for_entry: true
+  log_depth_metrics: true
+
+# ==============================================================================
+# ORDERBOOK PREFETCH
+# ==============================================================================
+
+orderbook_prefetch:
+  enabled: true
+  mode: live
+  top_n: 15
+  max_subscriptions_per_minute: 20
+
+# ==============================================================================
+# SMART ENTRY FILTER v2
+# ==============================================================================
+
+use_smart_entry_filter: true
+
+smart_entry_filter:
+  rsi_buy_max: 68.0              # 🛡️ Fallback: 68 (voorkom late pumps)
+  rsi_extreme_low: 18.0
+  rsi_block_min: 85.0
+
+  vwap_max_deviation_pct: 18.0
+  min_wick_ratio: 0.0
+
+  max_atr_pct_for_grid: 7.0
+  min_atr_pct_for_grid: 0.08
+
+  max_5m_spike_pct: 4.0
+  max_down_accel_pct: -8.0
+  max_up_accel_pct: 4.0
+
+  max_trend_24h_pct: 35.0
+  min_trend_24h_pct: -10.0
+
+  max_entry_spread_pct: 0.3
+  slippage_check_enabled: true
+
+  min_depth_multiplier: 3.0
+  depth_check_enabled: true
+
+  # EPIC v3.4: MOMENTUM HEALTH GUARDS
+  vwap_slope_guard_enabled: true
+  vwap_slope_guard_shadow_mode: false
+  vwap_slope_dual_confirmation: true
+
+  parabolic_detector_enabled: true
+  parabolic_detector_shadow_mode: false
+  parabolic_cooldown_minutes: 60
+  parabolic_cooldown_persist: true
+
+  market_exhaustion_enabled: true
+  market_exhaustion_threshold_pct: 0.70
+  market_exhaustion_sample_size: 10
+  market_exhaustion_cooldown_min: 30
+  market_exhaustion_telegram: true
+
+  momentum_thresholds:
+    baseline:
+      slope_min_pct_5m: 0.05
+      slope_min_pct_15m: 0.02
+      slope_max_pct_15m: 0.30
+      dev_max_pct: 5.0
+      accel_5m_min_pct: 1.0
+      accel_5m_max_pct: 5.0
+      accel_15m_max_pct: 8.0
+
+    regimes:
+      BULL:
+        slope_min_pct_5m: 0.00
+        slope_min_pct_15m: 0.02
+        slope_max_pct_15m: 0.40
+        dev_max_pct: 8.0
+        accel_5m_max_pct: 7.0
+        accel_15m_max_pct: 12.0
+
+      CHOP:
+        slope_min_pct_5m: 0.05
+        slope_min_pct_15m: 0.03
+        slope_max_pct_15m: 0.25
+        dev_max_pct: 4.0
+        accel_5m_max_pct: 4.0
+        accel_15m_max_pct: 6.0
+
+      BEAR:
+        slope_min_pct_5m: 0.10
+        slope_min_pct_15m: 0.05
+        slope_max_pct_15m: 0.20
+        dev_max_pct: 3.0
+        accel_5m_max_pct: 3.0
+        accel_15m_max_pct: 5.0
+
+# ==============================================================================
+# COIN PROFILES (USD pairs - will be populated as needed)
+# ==============================================================================
+
+coin_profiles:
+  # USD pairs use same thresholds as EUR initially
+  # Add per-coin overrides here as needed:
+  # SOL-USD:
+  #   max_atr_pct_for_grid: 5
+  #   vwap_max_deviation_pct: 12.0
+
+# ==============================================================================
+# GRID CONFIGURATION
+# ==============================================================================
+
+grid_range_pct_down: 4.0
+grid_range_pct_up: 12.0
+
+num_grids: 7
+
+use_dynamic_grid_sizer: true
+
+dynamic_grid_sizer:
+  min_grids: 7
+  max_grids: 15
+  low_vol_atr_pct: 0.7
+  mid_vol_atr_pct: 2.0
+  high_vol_atr_pct: 4.0
+
+use_atr_grid_ranges: false
+atr_multiplier_down: 1.5
+atr_multiplier_up: 2.0
+
+use_asymmetric_grids: true
+smart_refill_threshold_pct: 3.0
+
+# ==============================================================================
+# TREND ENGINE
+# ==============================================================================
+
+use_multi_timeframe: true
+trend_lookback_short_minutes: 60
+trend_lookback_mid_minutes: 240
+trend_lookback_long_minutes: 1440
+
+switch_threshold_percent: 3.0
+exit_short_threshold: -4.0
+exit_mid_threshold: -3.0
+
+trend_min_change_pct: 0.007
+trend_min_entry_strength: 0.007
+
+# ==============================================================================
+# COIN ROTATION & MONITORING
+# ==============================================================================
+
+coin_rotation_threshold: 180
+price_update_interval: 30
+
+max_price_age_ms: 35000
+max_orderbook_age_ms: 60000
+
+max_coin_monitoring_seconds: 180
+session_blacklist_duration_seconds: 7200
+
+coin_discovery_refresh_interval_seconds: 3600
+
+# ==============================================================================
+# CAPITAL & RISK MANAGEMENT (USD - scaled appropriately)
+# ==============================================================================
+# 💡 TIP: Adjust these based on your USD balance
+#    Example: $300 account → 3 slots × $100/coin
+# ==============================================================================
+
+max_simultaneous_coins: 3
+
+total_amount_quote: 300             # 🔄 CHANGED: $300 USD budget
+min_order_amount_quote: 15          # $15 minimum order
+
+risk_reference_balance_quote: 400   # 🔄 CHANGED: $400 reference
+risk_max_balance_per_trade_pct: 60
+risk_max_total_open_risk_pct: 75
+
+max_exposure_per_coin_pct: 80
+max_total_exposure_pct: 80
+
+switch_grace_period_seconds: 180
+
+# ==============================================================================
+# PROFESSIONAL RISK MANAGEMENT
+# ==============================================================================
+
+use_professional_risk_mgmt: true
+
+# STOP-LOSS UITGESCHAKELD - Grid krijgt ruimte voor DCA/mean-reversion
+# Bescherming via: trend exit, emergency exit, time-based exit
+stop_loss_pct: null
+atr_stop_multiplier: 2.0
+min_stop_pct: 0.02
+max_stop_pct: 0.05
+
+take_profit_pct: 0.05
+
+time_based_stop_minutes: 360
+time_stop_requires_stall: true
+price_stall_threshold_atr: 0.3
+min_minutes_since_last_fill: 45
+
+min_rolling_pnl_pct: -0.02
+min_win_rate_threshold: 0.35
+pause_cooldown_minutes: 120
+resume_min_pnl_pct: 0.0
+
+min_grid_profit_pct: 2.0
+
+emergency_exit_pct: -12.0    # Alleen bij flash crash / exchange fuck-up / news-nuke
+hard_stop_pct: -15.0          # Absolute laatste vangnet - niet bij normale volatiliteit
+
+# ==============================================================================
+# DRAWDOWN / KILL SWITCH
+# ==============================================================================
+
+max_daily_loss_pct: 2.5
+max_daily_loss_quote: 12.0          # Max daily loss in quote currency ($12 USD)
+max_weekly_loss_pct: 7.0
+max_monthly_loss_pct: 10.0
+
+# ==============================================================================
+# TELEGRAM ALERTS
+# ==============================================================================
+
+telegram:
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+
+# ==============================================================================
+# ORDER MANAGEMENT
+# ==============================================================================
+
+max_open_orders: 30
+order_frequency: 3
+
+min_switch_interval_seconds: 600
+min_hold_time_seconds: 1800
+max_hold_time_seconds: 14400
+
+no_fill_timeout_sec: 1200
+no_progress_timeout_sec: 5400    # 1.5 uur - meer ruimte voor herstel
+no_progress_min_loss_pct: 2.5    # Niet bij mini verlies, alleen bij echte stagnatie
+no_progress_atr_multiplier: 1.5
+close_grace_sec: 120
+
+min_startup_wait_seconds: 60
+
+smart_switch_k: 2.0
+switch_cost_multiplier: 2.5
+
+# ==============================================================================
+# DEBUG TRACE SYSTEM
+# ==============================================================================
+
+debug_trace_enabled: true
+debug_trace_format: compact
+debug_trace_log_accepted: false
+debug_trace_log_rejected: true
+
+# ==============================================================================
+# OBSERVABILITY
+# ==============================================================================
+
+observability:
+  structured_events_enabled: true
+  events_output_dir: "logs/events_usd"  # 🔄 CHANGED: Separate events dir
+  buffer_size: 100
+  why_no_trade_report_enabled: false
+  report_interval_seconds: 3600
+
+# ==============================================================================
+# DYNAMIC SLOT MANAGER
+# ==============================================================================
+
+dynamic_slots:
+  enabled: true
+  min_slots: 1
+  max_slots: 12
+  regime_multipliers:
+    BULL: 1.5
+    CHOP: 0.75
+    BEAR: 0.25

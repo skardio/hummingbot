@@ -108,7 +108,15 @@ class EventAggregator:
 
                         # Filter by connector if specified
                         if self.connector_filter:
-                            event_connector = event.get('connector')
+                            # Check top-level connector, metadata.connector, and metadata.exchange
+                            metadata = event.get('metadata', {}) if isinstance(event.get('metadata'), dict) else {}
+                            event_connector = (
+                                event.get('connector') or
+                                metadata.get('connector') or
+                                metadata.get('exchange') or
+                                # Also check config_keys.connector for config_loaded events
+                                (event.get('config_keys', {}).get('connector') if isinstance(event.get('config_keys'), dict) else None)
+                            )
                             if event_connector != self.connector_filter:
                                 continue
 

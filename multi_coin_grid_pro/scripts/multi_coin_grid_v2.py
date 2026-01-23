@@ -238,7 +238,10 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
             f"{controller_config.connector_name} ({mode_str})"
         )
         self.logger().info(f"💰 Capital: €{controller_config.total_amount_quote}")
-        self.logger().info(f"⚠️  Stop Loss: {controller_config.stop_loss_pct * 100}%")
+        if controller_config.stop_loss_pct is not None:
+            self.logger().info(f"⚠️  Stop Loss: {controller_config.stop_loss_pct * 100}%")
+        else:
+            self.logger().info("⚠️  Stop Loss: DISABLED")
 
     @classmethod
     def init_markets(cls, config: MultiCoinGridConfig = None):

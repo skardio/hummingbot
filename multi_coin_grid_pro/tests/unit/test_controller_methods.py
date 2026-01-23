@@ -193,17 +193,25 @@ class TestGridCreation:
         """Test _should_create_new_grid when no active executor"""
         controller.active_executor_id = None
         controller.active_coin = None
+        controller.active_coins = {}  # Multi-coin: no active coins
         controller.trend_calculator = MagicMock()
         controller.bot_start_time = 0
         controller.config.min_startup_wait_seconds = 0  # Skip startup delay
+        controller.max_simultaneous_coins = 4
 
         # Task 2.1.1: Initialize stale detection state to simulate fresh data
         controller._last_price_update = {"XRP-EUR": time.time()}
         controller._last_ob_update = {"XRP-EUR": time.time()}
 
-        result = controller._should_create_new_grid("XRP-EUR")
-        # Should return True when startup delay is passed
-        assert result is True
+        # Mock SmartEntry filter to return True (allows entry)
+        with patch.object(controller, '_check_smart_entry_filter', return_value=True):
+            # Mock risk manager to allow the trade
+            controller.risk_manager = MagicMock()
+            controller.risk_manager.can_open_trade = MagicMock(return_value=Decimal("50"))
+
+            result = controller._should_create_new_grid("XRP-EUR")
+            # Should return True when startup delay is passed
+            assert result is True
 
     def test_should_create_new_grid_different_coin(self, controller):
         """Test _should_create_new_grid when different coin is best"""

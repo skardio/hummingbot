@@ -21,7 +21,7 @@ from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 from hummingbot.strategy_v2.executors.executor_base import ExecutorBase
 from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig, GridLevel, GridLevelStates
 from hummingbot.strategy_v2.models.base import RunnableStatus
-from hummingbot.strategy_v2.models.executors import CloseType, TrackedOrder
+from hummingbot.strategy_v2.models.executors import CloseType, EarlyStopReason, TrackedOrder
 from hummingbot.strategy_v2.utils.distributions import Distributions
 
 # Story C1: Log Throttling - prevent executor spam
@@ -30,6 +30,13 @@ try:
     HAS_LOG_THROTTLE = True
 except ImportError:
     HAS_LOG_THROTTLE = False
+
+# US-003: Order validation before exchange submission
+try:
+    from multi_coin_grid_pro.utils.order_validator import validate_order_before_submit
+    HAS_ORDER_VALIDATOR = True
+except ImportError:
+    HAS_ORDER_VALIDATOR = False
 
 
 class GridExecutor(ExecutorBase):
@@ -138,6 +145,12 @@ class GridExecutor(ExecutorBase):
         self._aggressive_close_orders = set()  # Track aggressive close order IDs
         # ==============================================================================
 
+        # ==============================================================================
+        # US-006: Early Stop Reason Tracking
+        # ==============================================================================
+        self._early_stop_reason: Optional[EarlyStopReason] = None  # Detailed reason for EARLY_STOP
+        # ==============================================================================
+
     @property
     def is_perpetual(self) -> bool:
         """
@@ -146,6 +159,129 @@ class GridExecutor(ExecutorBase):
         :return: True if the exchange connector is perpetual, False otherwise.
         """
         return self.is_perpetual_connector(self.config.connector_name)
+
+    # ==========================================================================
+    # US-003: Validated Order Placement
+    # ==========================================================================
+    def _validated_place_order(
+        self,
+        connector_name: str,
+        trading_pair: str,
+        order_type: OrderType,
+        side: TradeType,
+        amount: Decimal,
+        price: Decimal,
+        position_action: PositionAction = PositionAction.NIL,
+        skip_validation: bool = False,
+    ) -> Optional[str]:
+        """
+        Places an order after validating against trading rules and balance.
+
+        US-003: Pre-validates orders to prevent HTTP 400 errors like:
+        - "notional 0.06 < min 1" (min notional violations)
+        - "Insufficient balance" (balance issues)
+        - Quantity rounds to zero
+
+        :param connector_name: The name of the connector
+        :param trading_pair: The trading pair for the order
+        :param order_type: The type of the order (LIMIT, MARKET)
+        :param side: The side of the order (BUY or SELL)
+        :param amount: The amount for the order
+        :param price: The price for the order (used for notional calculation)
+        :param position_action: The position action for the order
+        :param skip_validation: If True, skips validation (for emergency closes)
+        :return: Order ID if successful, None if validation fails
+        """
+        # Fall back to regular place_order if validator not available
+        if not HAS_ORDER_VALIDATOR or skip_validation:
+            return self.place_order(
+                connector_name=connector_name,
+                trading_pair=trading_pair,
+                order_type=order_type,
+                side=side,
+                amount=amount,
+                position_action=position_action,
+                price=price,
+            )
+
+        # Get connector and trading rules
+        connector = self.connectors.get(connector_name)
+        if not connector:
+            self.logger().error(f"❌ US-003: Connector {connector_name} not found")
+            return None
+
+        # Get trading rules
+        try:
+            trading_rules = self.get_trading_rules(connector_name, trading_pair)
+        except Exception as e:
+            self.logger().warning(f"⚠️  US-003: Could not get trading rules for {trading_pair}: {e} - proceeding without validation")
+            return self.place_order(
+                connector_name=connector_name,
+                trading_pair=trading_pair,
+                order_type=order_type,
+                side=side,
+                amount=amount,
+                position_action=position_action,
+                price=price,
+            )
+
+        # Get available balance
+        try:
+            if side == TradeType.BUY:
+                # For BUY: need quote asset
+                quote_asset = trading_pair.split("-")[1] if "-" in trading_pair else "USDT"
+                available_balance = connector.get_available_balance(quote_asset)
+            else:
+                # For SELL: need base asset
+                base_asset = trading_pair.split("-")[0] if "-" in trading_pair else trading_pair
+                available_balance = connector.get_available_balance(base_asset)
+        except Exception as e:
+            self.logger().warning(f"⚠️  US-003: Could not get balance for {trading_pair}: {e} - proceeding without validation")
+            available_balance = Decimal("999999")  # Skip balance check
+
+        # Validate order
+        result = validate_order_before_submit(
+            trading_pair=trading_pair,
+            side=side,
+            price=price,
+            quantity=amount,
+            trading_rules=trading_rules,
+            available_balance=available_balance,
+        )
+
+        if not result.is_valid:
+            # Log skip reason with context
+            skip_reason = result.skip_reason.name if result.skip_reason else "UNKNOWN"
+            self.logger().warning(
+                f"⚠️  US-003: Order skipped | pair={trading_pair} side={side.name} "
+                f"qty={float(amount):.6f} price={float(price):.6f} "
+                f"reason={skip_reason} msg={result.message}"
+            )
+            return None
+
+        # Use quantized values from validation result
+        final_amount = result.quantized_quantity if result.quantized_quantity else amount
+        final_price = result.quantized_price if result.quantized_price else price
+
+        # Log if values were adjusted
+        if final_amount != amount or final_price != price:
+            self.logger().debug(
+                f"📐 US-003: Order quantized | pair={trading_pair} "
+                f"qty: {float(amount):.6f} → {float(final_amount):.6f}, "
+                f"price: {float(price):.6f} → {float(final_price):.6f}"
+            )
+
+        # Place validated order
+        return self.place_order(
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            order_type=order_type,
+            side=side,
+            amount=final_amount,
+            position_action=position_action,
+            price=final_price,
+        )
+    # ==========================================================================
 
     async def validate_sufficient_balance(self):
         # Try to get current price, with fallback for paper trading when order book doesn't exist
@@ -255,6 +391,8 @@ class GridExecutor(ExecutorBase):
                     if len(trading_pair_parts) < 2:
                         self.logger().error(f"❌ Invalid trading_pair format: {self.config.trading_pair}")
                         self.close_type = CloseType.INSUFFICIENT_BALANCE
+                        # US-006: Set early stop reason
+                        self._early_stop_reason = EarlyStopReason.INSUFFICIENT_BALANCE
                         self.logger().error("Not enough budget to open position.")
                         self.stop()
                         return None
@@ -272,6 +410,8 @@ class GridExecutor(ExecutorBase):
                     except Exception as e:
                         self.logger().error(f"Could not get balance info for error log: {e}")
             self.close_type = CloseType.INSUFFICIENT_BALANCE
+            # US-006: Set early stop reason
+            self._early_stop_reason = EarlyStopReason.INSUFFICIENT_BALANCE
             self.logger().error("Not enough budget to open position.")
             self.stop()
 
@@ -484,6 +624,8 @@ class GridExecutor(ExecutorBase):
             self._timeout_close_triggered = True
             self._timeout_close_type = CloseType.NO_FILL_TIMEOUT
             self.close_type = CloseType.NO_FILL_TIMEOUT
+            # US-006: Set early stop reason
+            self._early_stop_reason = EarlyStopReason.NO_FILL_TIMEOUT
 
             # 🔧 CRITICAL FIX: Check if there's inventory before skipping unwind
             # Even with no last_fill_timestamp, partial fills might exist (e.g., from inflight orders)
@@ -505,18 +647,79 @@ class GridExecutor(ExecutorBase):
                 self._status = RunnableStatus.SHUTTING_DOWN
             return True
 
-        # Check 2: No-progress timeout (stalled - have fills but no completed levels)
+        # Check 2: No-progress timeout (PRO VERSION: PnL + ATR aware)
+        # Only trigger if:
+        #   1. Time elapsed AND
+        #   2. Unrealized loss > threshold (avoid stopping break-even/winning positions)
         if no_progress_timeout > 0 and since_last_progress >= no_progress_timeout:
-            self.logger().warning(
-                f"⏰ NO_PROGRESS_TIMEOUT triggered: {self.config.trading_pair} | "
-                f"since_progress={since_last_progress / 60:.1f}m >= {no_progress_timeout / 60:.1f}m | "
-                f"Grid stalled - starting unwind"
-            )
-            self._timeout_close_triggered = True
-            self._timeout_close_type = CloseType.NO_PROGRESS_TIMEOUT
-            # Story B1: Start two-phase unwind protocol (graceful → aggressive)
-            self.start_forced_close(CloseType.NO_PROGRESS_TIMEOUT)
-            return True
+            # Get PnL-aware thresholds from config
+            timeout_min_loss_pct = custom_info.get('no_progress_min_loss_pct', 1.5)  # Default -1.5%
+            timeout_atr_multiplier = custom_info.get('no_progress_atr_multiplier', 0.0)  # Default 0 = disabled
+
+            # Calculate current unrealized PnL %
+            self.update_position_metrics()
+            unrealized_pnl_pct = self.get_net_pnl_pct() * Decimal("100")  # Convert to %
+
+            # Check if we have adverse PnL (losing position)
+            has_adverse_pnl = unrealized_pnl_pct < -Decimal(str(timeout_min_loss_pct))
+
+            # Optional: Check ATR-based adverse move (if enabled)
+            has_adverse_move = True  # Default: always pass if ATR check disabled
+            atr_check_status = "disabled"
+            if timeout_atr_multiplier > 0:
+                try:
+                    # Get ATR from connector/strategy (if available)
+                    atr_pct = custom_info.get('atr_pct', 0.0)  # Should be set by controller
+                    if atr_pct > 0:
+                        # Check if price moved adversely > k × ATR from avg entry
+                        avg_entry = self.average_entry
+                        current_price = self.mid_price
+                        if avg_entry and current_price:
+                            move_pct = abs((current_price - avg_entry) / avg_entry) * Decimal("100")
+                            threshold_move = Decimal(str(atr_pct * timeout_atr_multiplier))
+                            has_adverse_move = move_pct > threshold_move
+                            atr_check_status = f"move={float(move_pct):.2f}% vs threshold={float(threshold_move):.2f}% (ATR={atr_pct:.2f}% × {timeout_atr_multiplier}) → {'FAIL' if has_adverse_move else 'PASS'}"
+                            self.logger().info(
+                                f"🎯 ATR adverse move check: {self.config.trading_pair} | {atr_check_status}"
+                            )
+                        else:
+                            atr_check_status = "no avg_entry or price"
+                    else:
+                        atr_check_status = "ATR not available, passing by default"
+                        self.logger().debug(f"⚠️  ATR check enabled but atr_pct=0 for {self.config.trading_pair}")
+                except Exception as e:
+                    atr_check_status = f"error: {e}"
+                    self.logger().warning(f"ATR check failed: {e}")
+
+            # PRO LOGIC: Only trigger if BOTH time elapsed AND adverse conditions
+            if has_adverse_pnl and has_adverse_move:
+                self.logger().warning(
+                    f"⏰ NO_PROGRESS_TIMEOUT triggered (PRO): {self.config.trading_pair} | "
+                    f"since_progress={since_last_progress / 60:.1f}m >= {no_progress_timeout / 60:.1f}m | "
+                    f"unrealized_pnl={float(unrealized_pnl_pct):.2f}% (threshold: -{timeout_min_loss_pct}%) ✓ | "
+                    f"ATR check: {atr_check_status} | "
+                    f"Grid stalled with adverse PnL - starting unwind"
+                )
+                self._timeout_close_triggered = True
+                self._timeout_close_type = CloseType.NO_PROGRESS_TIMEOUT
+                # Story B1: Start two-phase unwind protocol (graceful → aggressive)
+                self.start_forced_close(CloseType.NO_PROGRESS_TIMEOUT)
+                return True
+            else:
+                # Time elapsed but NOT adverse - just log and continue
+                if now - self._last_timeout_summary_log >= 60:  # Rate limit: once per minute
+                    reason = []
+                    if not has_adverse_pnl:
+                        reason.append(f"PnL OK ({float(unrealized_pnl_pct):.2f}% > -{timeout_min_loss_pct}%)")
+                    if not has_adverse_move:
+                        reason.append(f"ATR OK ({atr_check_status})")
+
+                    self.logger().info(
+                        f"⏳ NO_PROGRESS_TIMEOUT time elapsed but position OK: {self.config.trading_pair} | "
+                        f"since_progress={since_last_progress / 60:.1f}m >= {no_progress_timeout / 60:.1f}m | "
+                        f"Reasons: {' AND '.join(reason)} | "
+                        f"Allowing more time for grid to work 💎"
+                    )
 
         # Check 3: Hard cap (max hold time)
         if max_hold_time > 0 and age_sec >= max_hold_time:
@@ -1063,15 +1266,25 @@ class GridExecutor(ExecutorBase):
 
         self.evaluate_max_retries()
 
-    def early_stop(self, keep_position: bool = False):
+    def early_stop(self, keep_position: bool = False, reason: Optional[EarlyStopReason] = None):
         """
         This method allows strategy to stop the executor early.
 
+        :param keep_position: If True, keep the position open (POSITION_HOLD). If False, close it (EARLY_STOP).
+        :param reason: Optional EarlyStopReason to explain WHY the executor stopped early (US-006).
         :return: None
         """
         self.cancel_open_orders()
         self._status = RunnableStatus.SHUTTING_DOWN
         self.close_type = CloseType.POSITION_HOLD if keep_position else CloseType.EARLY_STOP
+
+        # US-006: Store detailed early stop reason
+        if reason is not None:
+            self._early_stop_reason = reason
+            self.logger().info(f"🛑 US-006: Early stop reason: {reason.name} ({reason.value})")
+        elif self._early_stop_reason is None:
+            # Set default reason if none provided
+            self._early_stop_reason = EarlyStopReason.UNKNOWN
 
         # If keep_position=False, close any open position immediately
         if not keep_position:
@@ -1231,6 +1444,9 @@ class GridExecutor(ExecutorBase):
                     level.reset_level()
                 if len(self._held_position_orders) == 0:
                     self.close_type = CloseType.EARLY_STOP
+                    # US-006: Set reason if not already set
+                    if self._early_stop_reason is None:
+                        self._early_stop_reason = EarlyStopReason.UNKNOWN
                 self.levels_by_state = {}
                 self.stop()
             else:
@@ -1343,7 +1559,8 @@ class GridExecutor(ExecutorBase):
         order_candidate = self._get_open_order_candidate(level)
         self.adjust_order_candidates(self.config.connector_name, [order_candidate])
         if order_candidate.amount > 0:
-            order_id = self.place_order(
+            # US-003: Use validated placement to prevent min notional/balance errors
+            order_id = self._validated_place_order(
                 connector_name=self.config.connector_name,
                 trading_pair=self.config.trading_pair,
                 order_type=self.config.triple_barrier_config.open_order_type,
@@ -1352,9 +1569,14 @@ class GridExecutor(ExecutorBase):
                 side=order_candidate.order_side,
                 position_action=PositionAction.OPEN,
             )
-            level.active_open_order = TrackedOrder(order_id=order_id)
-            self.max_open_creation_timestamp = self._strategy.current_timestamp
-            self.logger().debug(f"Executor ID: {self.config.id} - Placing open order {order_id}")
+            if order_id:
+                level.active_open_order = TrackedOrder(order_id=order_id)
+                self.max_open_creation_timestamp = self._strategy.current_timestamp
+                self.logger().debug(f"Executor ID: {self.config.id} - Placing open order {order_id}")
+            else:
+                # US-003: Order failed validation, reset level to allow retry later
+                self.logger().debug(f"Executor ID: {self.config.id} - Open order failed validation, will retry")
+                level.reset_open_order()
 
     def adjust_and_place_close_order(self, level: GridLevel):
         order_candidate = self._get_close_order_candidate(level)
@@ -1410,7 +1632,8 @@ class GridExecutor(ExecutorBase):
                     f"Proceeding with order placement (may fail)..."
                 )
 
-            order_id = self.place_order(
+            # US-003: Use validated placement to prevent min notional/balance errors
+            order_id = self._validated_place_order(
                 connector_name=self.config.connector_name,
                 trading_pair=self.config.trading_pair,
                 order_type=self.config.triple_barrier_config.take_profit_order_type,
@@ -1419,16 +1642,17 @@ class GridExecutor(ExecutorBase):
                 side=order_candidate.order_side,
                 position_action=PositionAction.CLOSE,
             )
-            level.active_close_order = TrackedOrder(order_id=order_id)
-            self.logger().debug(f"Executor ID: {self.config.id} - Placing close order {order_id}")
+            if order_id:
+                level.active_close_order = TrackedOrder(order_id=order_id)
+                self.logger().debug(f"Executor ID: {self.config.id} - Placing close order {order_id}")
 
-            # Reset insufficient funds counter on successful order placement
-            if self._insufficient_funds_retries > 0:
-                self.logger().debug(
-                    f"✅ Close order placed successfully, resetting insufficient funds counter "
-                    f"(was: {self._insufficient_funds_retries})"
-                )
-                self._insufficient_funds_retries = 0
+                # Reset insufficient funds counter on successful order placement
+                if self._insufficient_funds_retries > 0:
+                    self.logger().debug(
+                        f"✅ Close order placed successfully, resetting insufficient funds counter "
+                        f"(was: {self._insufficient_funds_retries})"
+                    )
+                    self._insufficient_funds_retries = 0
 
     def get_take_profit_price(self, level: GridLevel):
         return level.price * (1 + level.take_profit) if self.config.side == TradeType.BUY else level.price * (1 - level.take_profit)
@@ -2425,6 +2649,9 @@ class GridExecutor(ExecutorBase):
             "position_pnl_quote": self.position_pnl_quote,
             "open_liquidity_placed": self.open_liquidity_placed,
             "close_liquidity_placed": self.close_liquidity_placed,
+            # US-006: Early stop reason tracking
+            "early_stop_reason": self._early_stop_reason.name if self._early_stop_reason else None,
+            "early_stop_reason_code": self._early_stop_reason.value if self._early_stop_reason else None,
         }
 
     async def on_start(self):
@@ -2539,6 +2766,8 @@ class GridExecutor(ExecutorBase):
         """
         if self._current_retries > self._max_retries:
             self.close_type = CloseType.FAILED
+            # US-006: Set early stop reason for max retries
+            self._early_stop_reason = EarlyStopReason.ORDER_REJECTED
             self.stop()
 
     def update_tracked_orders_with_order_id(self, order_id: str):
@@ -2701,6 +2930,8 @@ class GridExecutor(ExecutorBase):
                         )
                         self._status = RunnableStatus.TERMINATED
                         self.close_type = CloseType.FAILED
+                        # US-006: Set early stop reason
+                        self._early_stop_reason = EarlyStopReason.INSUFFICIENT_BALANCE
                         return
 
                     # Phase 3+: Reset guard to allow retry with fresh balance check
@@ -2728,6 +2959,8 @@ class GridExecutor(ExecutorBase):
                     )
                     self._status = RunnableStatus.TERMINATED
                     self.close_type = CloseType.FAILED
+                    # US-006: Set early stop reason
+                    self._early_stop_reason = EarlyStopReason.INSUFFICIENT_BALANCE
 
     def update_position_metrics(self):
         """

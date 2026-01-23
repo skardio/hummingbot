@@ -94,7 +94,7 @@ adaptive_filters:
   # Baseline filters (RELAXED for bull market - versoepl voor meer trades)
   baseline:
     rsi_buy_min: 25.0
-    rsi_buy_max: 85.0               # 🚀 80→85 (allow more entries in uptrends)
+    rsi_buy_max: 68.0               # 🛡️ Baseline: 68 (voorkom late pumps)
     rsi_extreme_min: 15.0           # 🚀 20→15 (catch oversold bounces)
     vwap_max_deviation_pct: 35.0    # 🚀 25→35 (allow extreme bull moves)
     max_up_accel_pct: 5.0           # 🚀 3.5→5 (strong momentum)
@@ -109,7 +109,7 @@ adaptive_filters:
 
   # BULL regime: very relaxed filters for bull market
   BULL:
-    rsi_buy_max: 90.0               # 🚀 85→90 (extreme bull trading)
+    rsi_buy_max: 72.0               # 🛡️ Bull: 72 (iets ruimer voor momentum)
     vwap_max_deviation_pct: 40.0    # 🚀 30→40 (extreme memecoin pumps)
     max_up_accel_pct: 7.0           # 🚀 5→7 (very strong momentum)
     max_down_accel_pct: -15.0       # 🚀 -6→-15 (deep dips OK in bull)
@@ -121,7 +121,7 @@ adaptive_filters:
 
   # CHOP regime: moderate filters (not too strict)
   CHOP:
-    rsi_buy_max: 82.0               # 🚀 78→82 (more trading in chop)
+    rsi_buy_max: 68.0               # 🛡️ Chop: 68 (gelijk aan baseline)
     vwap_max_deviation_pct: 18.0    # 🚀 10→18 (allow altcoin rotations)
     max_up_accel_pct: 2.5           # 🚀 1.8→2.5 (momentum OK)
     max_down_accel_pct: -4.0        # 🚀 -2.5→-4 (deeper dips OK)
@@ -133,7 +133,7 @@ adaptive_filters:
 
   # BEAR regime: relaxed to allow counter-trend altcoin pumps
   BEAR:
-    rsi_buy_max: 70.0               # 🔧 FIX: 50→70 (allow counter-trend altcoin pumps)
+    rsi_buy_max: 62.0               # 🛡️ Bear: 62 (strengst)
     vwap_max_deviation_pct: 8.0     # 🔧 FIX: 3.5→8.0 (allow counter-trend pumps)
     max_up_accel_pct: 1.5           # 🔧 FIX: 0.5→1.5 (allow counter-trend momentum)
     max_down_accel_pct: -2.0        # 🔧 FIX: -1.0→-2.0 (allow pullbacks)
@@ -157,7 +157,7 @@ quote_asset: USDT                 # Quote currency
 # ==============================================================================
 
 use_dynamic_pair_discovery: true   # ❌ Disable dynamic discovery (volume = 0 issue)
-max_coins_to_monitor: 15            # 🚀 TASK 1.0: Universe throttling (was 60)
+max_coins_to_monitor: 25            # 🚀 TASK 1.0: Universe throttling (was 60)
 exclude_expensive_coins: false
 min_24h_volume_usdt: 500000         # 🚀 Higher volume = more liquid (was 0, but broken API)
 
@@ -183,23 +183,14 @@ blacklist:
   - FIS-USDT
   - NFP-USDT
 
-manual_trading_pairs: []  # Empty list = dynamic discovery mode (auto-select from all USDT pairs)
-
-# # --- Tier 1 (Ultra liquid) ---
-#   - BTC-USDT
-#   - ETH-USDT
-
-#   # --- Tier 2 (Very liquid majors) ---
-#   - SOL-USDT
-#   - BNB-USDT
-#   - XRP-USDT
-#   - DOGE-USDT
-
-#   # --- Tier 3 (Liquid large caps) ---
-#   - ADA-USDT
-#   - AVAX-USDT
-#   - LINK-USDT
-#   - DOT-USDT
+# ==============================================================================
+# DYNAMIC COIN DISCOVERY - Now works for Bitget!
+# ==============================================================================
+# Custom Bitget ticker fetcher implemented in _get_bitget_ticker_data()
+# Uses Bitget's /api/v2/spot/market/tickers endpoint for volume data
+# Empty list = dynamic discovery mode (auto-select top volume USDT pairs)
+# ==============================================================================
+manual_trading_pairs: []
 
 #   # --- Tier 4 (Optional, still liquid) ---
 #   - LTC-USDT
@@ -394,7 +385,7 @@ use_smart_entry_filter: true
 smart_entry_filter:
   # RSI - Use adaptive regime filters instead of static values
   # These are fallback values when adaptive regime detection is disabled
-  rsi_buy_max: 85.0                # 🚀 80→85 (match relaxed baseline)
+  rsi_buy_max: 68.0                # 🛡️ Fallback: 68 (voorkom late pumps)
   rsi_extreme_low: 15.0            # 🚀 25→15 (catch oversold)
   rsi_block_min: 85.0              # 🚀 80→85 (higher ceiling)
 
@@ -601,14 +592,15 @@ switch_grace_period_seconds: 180   # 🚀 TASK 1.1: 7min→3min (faster rotation
 
 use_professional_risk_mgmt: true
 
-# ATR-Based Stops (CLAMPED: never too tight, never too wide)
-stop_loss_pct: 0.08               # Legacy backup
+# STOP-LOSS UITGESCHAKELD - Grid krijgt ruimte voor DCA/mean-reversion
+# Bescherming via: trend exit, emergency exit, time-based exit
+stop_loss_pct: null
 atr_stop_multiplier: 2.0          # 2×ATR dynamic stop
 min_stop_pct: 0.02                # Min -2% (never too tight for BTC)
 max_stop_pct: 0.05                # Max -5% (conservative cap for grid trading)
 # Examples: BTC 1.2% ATR → -2.4%, RENDER 3.5% ATR → -7%, 10% ATR → capped to -8%
 
-take_profit_pct: 0.035            # 3.5% TP (let winners run in bull)
+take_profit_pct: 0.05             # 5% TP (realistisch voor huidige markt)
 
 # Context-Aware Time Exits (stall + no fills check)
 time_based_stop_minutes: 360      # 6 hours (grids need time!)
@@ -630,9 +622,9 @@ resume_min_pnl_pct: 0.0           # Resume only if last 10 trades >= 0%
 
 min_grid_profit_pct: 0.6          # 0.6% min profit (0.2% fees + 0.2% spread + 0.2% buffer)
 
-# 🛡️ CRASH PROTECTION (Legacy - kept for compatibility)
-emergency_exit_pct: -2.5         # 🛡️ 2.5% emergency (faster reaction than -3%)
-hard_stop_pct: -4.0               # 🛡️ 4% hard stop (tighter than -5%)
+# 🛡️ CRASH PROTECTION - Alleen bij flash crash / exchange fuck-up / news-nuke
+emergency_exit_pct: -12.0        # 🛡️ Was -4%, nu -12% - alleen bij echte crash
+hard_stop_pct: -15.0              # 🛡️ Was -5%, nu -15% - ultiem vangnet
 
 # ==============================================================================
 # DRAWDOWN / KILL SWITCH - CRASH PROTECTION (Grid-Aware)
@@ -661,6 +653,14 @@ order_frequency: 3
 min_switch_interval_seconds: 600    # 🚀 FIX: 1800→600 (10 min - faster switching)
 min_hold_time_seconds: 1800         # 🔧 FIX: 300→1800 (30 min - allow grid sells time to execute!)
 max_hold_time_seconds: 14400      # ✅ NEW: 4 hours max hold → force rotation to better opportunities
+
+# TIMEOUT LIFECYCLE - prevents stuck positions
+no_fill_timeout_sec: 1200         # ⏰ 20 min - no fills → cancel + close (no inventory)
+no_progress_timeout_sec: 5400     # ⏰ 1.5 uur - meer ruimte voor herstel
+no_progress_min_loss_pct: 2.5     # 🎯 PRO: Only trigger timeout if unrealized loss > 2.5%
+no_progress_atr_multiplier: 1.5   # 🎯 PRO: Require adverse move > 1.5×ATR
+close_grace_sec: 120              # ⏰ 2 min - graceful close window
+
 min_startup_wait_seconds: 60       # 🚀 FIX: 90→60 (1 min startup delay)
 
 smart_switch_k: 2.0

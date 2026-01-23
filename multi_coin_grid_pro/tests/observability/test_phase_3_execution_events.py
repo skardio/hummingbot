@@ -32,6 +32,9 @@ class TestPhase3ExecutionEvents(unittest.TestCase):
         # Create mock controller with event_logger
         self.mock_controller = Mock()
         self.mock_controller.event_logger = self.event_logger
+        # Add config with connector_name for Bug #7 fix
+        self.mock_controller.config = Mock()
+        self.mock_controller.config.connector_name = "kraken"
 
         # Import and bind the helper method
         from multi_coin_grid_pro.controllers.multi_coin_grid_controller import MultiCoinGridController
