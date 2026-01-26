@@ -525,12 +525,13 @@ class TrendCalculator:
                 'low': low,
             })
 
-            # Remove old data points (LEGACY)
+            # Remove old data points (LEGACY) - MEMORY LEAK FIX: Hard cap at 1500 entries
+            MAX_PRICE_HISTORY = 1500  # ~2 hours at 5sec intervals, prevents memory bloat
             cutoff_time = current_time - self.lookback_seconds
             trend.price_history = [
                 p for p in trend.price_history
                 if p['timestamp'] > cutoff_time
-            ]
+            ][-MAX_PRICE_HISTORY:]  # Hard cap to prevent unbounded growth
 
             # Calculate trend if we have enough data
             if len(trend.price_history) >= 2:
@@ -695,12 +696,13 @@ class TrendCalculator:
                 'low': low,
             })
 
-            # Remove old data points (LEGACY)
+            # Remove old data points (LEGACY) - MEMORY LEAK FIX: Hard cap at 1500 entries
+            MAX_PRICE_HISTORY = 1500  # ~2 hours at 5sec intervals, prevents memory bloat
             cutoff_time = current_time - self.lookback_seconds
             trend.price_history = [
                 p for p in trend.price_history
                 if p['timestamp'] > cutoff_time
-            ]
+            ][-MAX_PRICE_HISTORY:]  # Hard cap to prevent unbounded growth
 
             # Calculate trend if we have enough data
             if len(trend.price_history) >= 2:

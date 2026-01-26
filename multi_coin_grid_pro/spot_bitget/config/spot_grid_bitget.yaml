@@ -24,7 +24,7 @@ observability:
   structured_events_enabled: true   # ✅ ENABLED: Track all decisions for analysis
   events_output_dir: "logs/events"
   buffer_size: 100
-  why_no_trade_report_enabled: false  # Phase 1B (future)
+  why_no_trade_report_enabled: true   # ✅ ENABLED: Debug waarom geen trades
   report_interval_seconds: 3600
 
 # ==============================================================================
@@ -223,7 +223,7 @@ warmup_1h_min_if_4h_strong: -3.0  # 🔧 FIX: -2.0→-3.0 (match mtf_1h_min_pct 
 # ==============================================================================
 
 market_regime:
-  enabled: false                   # Disabled - trade in all market conditions
+  enabled: true                    # ✅ ENABLED: BTC trend protection
   btc_symbol: "BTC-USDT"          # USDT pairs for Bitget
 
   # BTC trend thresholds
@@ -347,11 +347,11 @@ performance_tracking:
 orderbook_liquidity:
   enabled: true                    # ✅ ENABLED: Fixed "unknown ≠ illiquid" bug in trend_calculator
   mode: live                       # 🚀 LIVE MODE: Active depth filtering (unknown data doesn't block)
-  regime_aware: false              # Phase 4: adaptive thresholds (BULL=8x, CHOP=5x, BEAR=10x)
+  regime_aware: true              # Phase 4: adaptive thresholds (BULL=8x, CHOP=5x, BEAR=10x)
   depth_pct_range: 0.5            # ±0.5% around mid price for depth calculation
   depth_levels: 10                # Top N orderbook levels per side to analyze
-  min_depth_multiplier: 3.0       # Required depth = order_size × multiplier (3x for Bitget)
-  use_for_ranking: false          # Phase 2: disabled (ranking feature)
+  min_depth_multiplier: 5.0       # 🔧 FIX: 3→5 (consistent met smart_entry_filter)
+  use_for_ranking: true          # Phase 2: disabled (ranking feature)
   use_for_entry: true             # ✅ ENABLED: Only blocks on confirmed insufficient depth (not unknown data)
   log_depth_metrics: true         # Log depth metrics for all evaluated coins
 
@@ -411,7 +411,7 @@ smart_entry_filter:
   slippage_check_enabled: true
 
   # Order Book Depth Protection
-  min_depth_multiplier: 3.0
+  min_depth_multiplier: 5.0       # 🔧 FIX: 3→5 (consistent met orderbook_liquidity)
   depth_check_enabled: true
 
   # ==============================================================================
@@ -527,8 +527,8 @@ dynamic_grid_sizer:
   mid_vol_atr_pct: 2.0
   high_vol_atr_pct: 4.0
 
-# 🚨 DISABLE ATR ranges - use fixed percentages instead
-use_atr_grid_ranges: false        # ❌ DISABLE - ATR makes grid too wide (was true)
+# ✅ ATR-based dynamic grid ranges
+use_atr_grid_ranges: true         # ✅ ENABLED: Dynamic ATR-based grid ranges
 atr_multiplier_down: 1.5
 atr_multiplier_up: 2.0
 
@@ -570,7 +570,7 @@ coin_discovery_refresh_interval_seconds: 3600  # 1 hour (3600s), set to 0 to dis
 # CAPITAL & RISK MANAGEMENT (Grid-Aware)
 # ==============================================================================
 
-max_simultaneous_coins: 4         # 🚀 3→4 (reduce SLOT_FULL, $75 per coin still solid)
+max_simultaneous_coins: 6         # 🔧 FIX: 4→6 (meer slots, reduce SLOT_FULL misses)
 
 total_amount_quote: 300           # 🚀 140→300 (4 coins × $75 each)
 risk_reference_balance_quote: 300  # Total budget: $300 USDT (3 coins × $100 each)

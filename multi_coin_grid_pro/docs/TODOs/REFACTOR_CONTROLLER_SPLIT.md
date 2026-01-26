@@ -1,18 +1,48 @@
 # REFACTOR: Multi-Coin Grid Controller Split
-## Breaking Down 7127-Line Monolith into Maintainable Modules
+## Breaking Down 8100+ Line Monolith into Maintainable Modules
 
 **Status**: 📋 PLANNED (Post v3.4.x)
-**Priority**: MEDIUM - Technical Debt
+**Priority**: HIGH - Technical Debt + Duplicate File Problem
 **Created**: 2026-01-03
+**Updated**: 2026-01-24
 **Owner**: Mo
 **Estimated Effort**: 2-3 weeks
+
+---
+
+## 🚨 CRITICAL: Duplicate Controller Files
+
+**We have TWO identical 8100+ line files that must stay in sync!**
+
+| Location | Size | Purpose |
+|----------|------|---------|
+| `multi_coin_grid_pro/controllers/multi_coin_grid_controller.py` | 8143 lines | Main package version |
+| `hummingbot/multi_coin_grid_controllers/multi_coin_grid_controller.py` | 8152 lines | Legacy hummingbot location |
+
+**Problems:**
+1. **Double maintenance**: Every change must be applied to BOTH files
+2. **Sync errors**: Files drift out of sync, causing mysterious bugs
+3. **Confusion**: Which is the "real" one?
+4. **Wasted disk/git**: 360KB × 2 = 720KB of duplicate code
+
+**Immediate Fix (Before Full Refactor):**
+```bash
+# Option A: Symlink (recommended)
+rm hummingbot/multi_coin_grid_controllers/multi_coin_grid_controller.py
+ln -s ../../multi_coin_grid_pro/controllers/multi_coin_grid_controller.py \
+      hummingbot/multi_coin_grid_controllers/multi_coin_grid_controller.py
+
+# Option B: Import redirect
+# In hummingbot/multi_coin_grid_controllers/multi_coin_grid_controller.py:
+from multi_coin_grid_pro.controllers.multi_coin_grid_controller import *
+```
 
 ---
 
 ## Problem Statement
 
 **Current State:**
-- `multi_coin_grid_controller.py`: **7127 lines, 360KB**
+- `multi_coin_grid_controller.py`: **8100+ lines, 360KB** (× 2 copies!)
 - Single file contains ALL logic: ranking, risk, execution, observability
 - VS Code save conflicts (file watcher overload)
 - Merge conflicts frequent
@@ -36,6 +66,21 @@ Please compare your version with the file contents or overwrite.
 ---
 
 ## Proposed Architecture
+
+### Phase 0: Eliminate Duplicate (Week 0 - FIRST!)
+
+**Before any refactor, fix the duplicate file problem:**
+
+```bash
+# 1. Verify files are identical
+diff multi_coin_grid_pro/controllers/multi_coin_grid_controller.py \
+     hummingbot/multi_coin_grid_controllers/multi_coin_grid_controller.py
+
+# 2. Keep multi_coin_grid_pro as source of truth
+# 3. Replace hummingbot version with symlink or import redirect
+```
+
+**Decision:** Keep `multi_coin_grid_pro/controllers/` as the canonical location.
 
 ### Target Structure
 
@@ -539,7 +584,8 @@ def test_full_selection_flow():
 ## Success Metrics
 
 ### Quantitative
-- ✅ Controller file: 7127 lines → **<600 lines** (90% reduction)
+- ✅ Duplicate files: 2 → **1** (eliminate copy)
+- ✅ Controller file: 8100+ lines → **<600 lines** (93% reduction)
 - ✅ Test coverage: 30% → **>80%** per module
 - ✅ VS Code save conflicts: 5/week → **0/week**
 - ✅ Onboarding time: 2 weeks → **<1 week**

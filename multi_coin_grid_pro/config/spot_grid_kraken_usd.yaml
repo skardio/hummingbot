@@ -137,7 +137,7 @@ adaptive_filters:
     atr_min_pct: 0.15
     spike_5m_max_pct: 2.0
     grid_spacing_mult: 1.5
-    max_active_grids: 0
+    max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid for mean-reversion)
     entry_confidence_min: 0.90
     bear_allow_meanrev: false
 
@@ -171,7 +171,7 @@ warmup_1h_min_if_4h_strong: -1.5
 # ==============================================================================
 
 market_regime:
-  enabled: false
+  enabled: true
   btc_symbol: "BTC-USD"             # 🔄 CHANGED: BTC-EUR → BTC-USD
 
   btc_trend_1h_min_pct: -2.0
@@ -276,11 +276,11 @@ performance_tracking:
 orderbook_liquidity:
   enabled: true
   mode: live
-  regime_aware: false
+  regime_aware: true
   depth_pct_range: 0.5
   depth_levels: 10
   min_depth_multiplier: 5.0
-  use_for_ranking: false
+  use_for_ranking: true
   use_for_entry: true
   log_depth_metrics: true
 
@@ -321,7 +321,7 @@ smart_entry_filter:
   max_entry_spread_pct: 0.3
   slippage_check_enabled: true
 
-  min_depth_multiplier: 3.0
+  min_depth_multiplier: 5.0
   depth_check_enabled: true
 
   # EPIC v3.4: MOMENTUM HEALTH GUARDS
@@ -404,7 +404,7 @@ dynamic_grid_sizer:
   mid_vol_atr_pct: 2.0
   high_vol_atr_pct: 4.0
 
-use_atr_grid_ranges: false
+use_atr_grid_ranges: true
 atr_multiplier_down: 1.5
 atr_multiplier_up: 2.0
 
@@ -449,7 +449,7 @@ coin_discovery_refresh_interval_seconds: 3600
 #    Example: $300 account → 3 slots × $100/coin
 # ==============================================================================
 
-max_simultaneous_coins: 3
+max_simultaneous_coins: 6
 
 total_amount_quote: 300             # 🔄 CHANGED: $300 USD budget
 min_order_amount_quote: 15          # $15 minimum order
@@ -549,7 +549,7 @@ observability:
   structured_events_enabled: true
   events_output_dir: "logs/events_usd"  # 🔄 CHANGED: Separate events dir
   buffer_size: 100
-  why_no_trade_report_enabled: false
+  why_no_trade_report_enabled: true
   report_interval_seconds: 3600
 
 # ==============================================================================

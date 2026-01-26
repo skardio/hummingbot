@@ -1576,6 +1576,16 @@ class MultiCoinGridController(ControllerBase):
                             del self.trend_calculator.trends[coin]
                         stale_trends.extend(oldest_trend_coins)
 
+                    # MEMORY LEAK FIX: Also trim price_history within each remaining trend
+                    MAX_PRICE_HISTORY_PER_COIN = 1500
+                    trimmed_count = 0
+                    for coin, trend in self.trend_calculator.trends.items():
+                        if hasattr(trend, 'price_history') and len(trend.price_history) > MAX_PRICE_HISTORY_PER_COIN:
+                            trend.price_history = trend.price_history[-MAX_PRICE_HISTORY_PER_COIN:]
+                            trimmed_count += 1
+                    if trimmed_count > 0:
+                        cleanup_stats['price_history_trimmed'] = trimmed_count
+
                     if stale_trends:
                         cleanup_stats['trend_data'] = len(stale_trends)
 

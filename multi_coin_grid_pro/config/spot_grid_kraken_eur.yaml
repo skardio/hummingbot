@@ -126,7 +126,7 @@ adaptive_filters:
     max_active_grids: 3             # 🚀 TASK 1.2: 1→3 (was 1)
     entry_confidence_min: 0.75
 
-  # BEAR regime: STOP TRADING (inventory protection)
+  # BEAR regime: Minimal trading (1 grid for mean-reversion opportunities)
   BEAR:
     rsi_buy_max: 62.0               # 🛡️ Bear: 62 (strengst)
     vwap_max_deviation_pct: 8.0
@@ -135,7 +135,7 @@ adaptive_filters:
     atr_min_pct: 0.15
     spike_5m_max_pct: 2.0
     grid_spacing_mult: 1.5
-    max_active_grids: 0             # 🔧 INVENTORY FIX: STOP trading in bear!
+    max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid for mean-reversion)
     entry_confidence_min: 0.90
     bear_allow_meanrev: false       # 🔧 INVENTORY FIX: No trading in bear!
 
@@ -193,7 +193,7 @@ warmup_1h_min_if_4h_strong: -1.5   # 🔧 FIX: -0.3→-1.5 (allow deeper pullbac
 # ==============================================================================
 
 market_regime:
-  enabled: false
+  enabled: true
   btc_symbol: "BTC-EUR"
 
   # BTC trend thresholds (blokkeer entries als BTC trends te zwak zijn)
@@ -329,11 +329,11 @@ performance_tracking:
 orderbook_liquidity:
   enabled: true                    # ✅ RE-ENABLED: Fixed "unknown ≠ illiquid" bug in trend_calculator
   mode: live                       # 🚀 LIVE MODE: Active depth filtering (unknown data doesn't block)
-  regime_aware: false              # Phase 4: adaptive thresholds (BULL=8x, CHOP=5x, BEAR=10x)
+  regime_aware: true              # Phase 4: adaptive thresholds (BULL=8x, CHOP=5x, BEAR=10x)
   depth_pct_range: 0.5            # ±0.5% around mid price for depth calculation
   depth_levels: 10                # Top N orderbook levels per side to analyze
   min_depth_multiplier: 5.0       # Required depth = order_size × multiplier (5x = conservatief)
-  use_for_ranking: false          # Phase 2: disabled (ranking feature)
+  use_for_ranking: true          # Phase 2: disabled (ranking feature)
   use_for_entry: true             # ✅ ENABLED: Only blocks on confirmed insufficient depth
   log_depth_metrics: true         # Log depth metrics for all evaluated coins
 
@@ -382,7 +382,7 @@ smart_entry_filter:
   slippage_check_enabled: true     # Enable spread validation
 
   # Order Book Depth Protection (Phase 2 - NEW)
-  min_depth_multiplier: 3.0        # Require 3x order size on each side
+  min_depth_multiplier: 5.0        # 🔧 FIX: 3→5 (consistent met orderbook_liquidity)
   depth_check_enabled: true        # Enable depth validation
 
   # ==============================================================================
@@ -602,9 +602,9 @@ dynamic_grid_sizer:
   mid_vol_atr_pct: 2.0
   high_vol_atr_pct: 4.0
 
-use_atr_grid_ranges: false         # Disabled: ATR creates too-wide ranges for mean-reversion
-atr_multiplier_down: 1.5          # (unused when use_atr_grid_ranges=false)
-atr_multiplier_up: 2.0            # (unused when use_atr_grid_ranges=false)
+use_atr_grid_ranges: true          # ✅ ENABLED: Dynamic ATR-based grid ranges
+atr_multiplier_down: 1.5
+atr_multiplier_up: 2.0
 
 use_asymmetric_grids: true
 smart_refill_threshold_pct: 3.0
@@ -648,7 +648,7 @@ coin_discovery_refresh_interval_seconds: 3600  # 1 hour (3600s), set to 0 to dis
 # ==============================================================================
 # CAPITAL & RISK MANAGEMENT
 # ==============================================================================
-max_simultaneous_coins: 3          # 🔧 FIX: 2→3 (€93 per coin, reduce SLOT_FULL misses)
+max_simultaneous_coins: 6          # 🔧 FIX: 3→6 (meer slots, reduce SLOT_FULL misses)
 
 total_amount_quote: 280            # 🚀 200→280 (€93 per coin with 3 slots)
 min_order_amount_quote: 15         # 🚀 10→15 (larger orders)
@@ -772,7 +772,7 @@ observability:
   structured_events_enabled: true  # ENABLED for testing Phase 1C
   events_output_dir: "logs/events"
   buffer_size: 100
-  why_no_trade_report_enabled: false  # Phase 1B (future)
+  why_no_trade_report_enabled: true   # ✅ ENABLED: Debug waarom geen trades
   report_interval_seconds: 3600
 
 # ==============================================================================
