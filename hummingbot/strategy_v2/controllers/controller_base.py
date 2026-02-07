@@ -141,7 +141,7 @@ class ControllerBase(RunnableBase):
         self.actions_queue: asyncio.Queue = actions_queue
         self.processed_data = {}
         self.executors_update_event = asyncio.Event()
-        self.executors_info_queue = asyncio.Queue()
+        self.executors_info_queue = asyncio.Queue(maxsize=10000)  # Bounded to prevent memory leak
 
     def start(self):
         """

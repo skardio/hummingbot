@@ -68,6 +68,9 @@ blacklist:
   - CC-USD
   - ZRO-USD
   - XCN-USD
+  - VIRTUAL-USD   # Stuck executor - causes infinite retry loop
+  - AAVE-USD      # No orderbook data
+  - NEAR-USD      # No orderbook data
   - AXS-USD
 
 # ==============================================================================
@@ -99,7 +102,7 @@ adaptive_filters:
     vwap_max_deviation_pct: 30.0
     max_up_accel_pct: 4.0
     max_down_accel_pct: -8.0
-    atr_min_pct: 0.08
+    atr_min_pct: 0.05       # 🔧 FIX: 0.08→0.05 (was blocking low-vol coins)
     atr_max_pct: 7.0
     spike_5m_max_pct: 4.0
     wick_ratio_min: 0.0
@@ -112,7 +115,7 @@ adaptive_filters:
     vwap_max_deviation_pct: 20.0
     max_up_accel_pct: 3.0
     max_down_accel_pct: -4.0
-    atr_min_pct: 0.08
+    atr_min_pct: 0.05       # 🔧 FIX: 0.08→0.05
     spike_5m_max_pct: 3.5
     grid_spacing_mult: 1.2
     max_active_grids: 6
@@ -123,7 +126,7 @@ adaptive_filters:
     vwap_max_deviation_pct: 10.0
     max_up_accel_pct: 1.8
     max_down_accel_pct: -2.5
-    atr_min_pct: 0.10
+    atr_min_pct: 0.06       # 🔧 FIX: 0.10→0.06 (was too restrictive in quiet markets)
     spike_5m_max_pct: 2.5
     grid_spacing_mult: 0.8
     max_active_grids: 3
@@ -134,7 +137,7 @@ adaptive_filters:
     vwap_max_deviation_pct: 8.0
     max_up_accel_pct: 1.5
     max_down_accel_pct: -2.0
-    atr_min_pct: 0.15
+    atr_min_pct: 0.08       # 🔧 FIX: 0.15→0.08 (still allow some trades)
     spike_5m_max_pct: 2.0
     grid_spacing_mult: 1.5
     max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid for mean-reversion)
@@ -518,8 +521,22 @@ max_open_orders: 30
 order_frequency: 3
 
 min_switch_interval_seconds: 600
-min_hold_time_seconds: 1800
+min_hold_time_seconds: 7200       # 🔧 FIX: 1800→7200 (2 hours - give grid time to recover/DCA!)
 max_hold_time_seconds: 14400
+
+# ==============================================================================
+# TREND-AWARE EXIT SYSTEM (Soft/Hard Hold Time)
+# ==============================================================================
+# Prevents "dom verkopen" after fixed time when trend is still bullish
+# After soft_hold: only exit if trend bearish OR pnl too negative
+# After hard_hold: always exit (bag-holder prevention)
+# ==============================================================================
+
+soft_hold_time_seconds: 7200       # ⏰ 2 uur - trend-aware exit kicks in
+hard_hold_time_seconds: 21600      # ⏰ 6 uur - always exit (bag-holder prevention)
+soft_exit_min_trend_pct: 0.3       # 📈 Trend must be > 0.3% to extend hold
+soft_exit_max_loss_pct: -1.5       # 📉 Exit even with good trend if loss > 1.5%
+soft_exit_extend_seconds: 1800     # ⏳ Extend by 30 min if trend bullish
 
 no_fill_timeout_sec: 1200
 no_progress_timeout_sec: 5400    # 1.5 uur - meer ruimte voor herstel

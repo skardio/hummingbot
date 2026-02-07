@@ -131,16 +131,32 @@ class FuturesGridRiskGuard(RiskGuard):
 
     def _sell_starvation(self, coin: str) -> bool:
         """
-        Check 4: Sell starvation - geen sells = geen profit.
+        Check 4: Trade starvation - geen profit-taking trades.
         Gebruikt: risk_guard_sell_starvation_seconds (default 900s = 15min)
 
-        Als we 15+ minuten geen sell hebben = grid maakt geen profit.
+        Set to 0 to DISABLE this check (recommended for grid trading where
+        sells are tracked internally by the grid executor).
+
+        LONG: geen sells = geen profit (we verkopen om winst te nemen)
+        SHORT: geen buys = geen profit (we kopen terug om winst te nemen)
+
+        Voor nu: disabled voor SHORT mode omdat we geen buy tracking hebben.
         """
+        # Disable voor SHORT mode - zou buy starvation moeten zijn
+        trade_direction = getattr(self.c.config, 'trade_direction', 'long').lower()
+        if trade_direction == 'short':
+            return False  # TODO: implement buy starvation tracking for shorts
+
+        max_starvation = self.c.config.risk_guard_sell_starvation_seconds
+
+        # 0 = disabled
+        if max_starvation <= 0:
+            return False
+
         last = self.last_sell_ts.get(coin)
         if not last:
             return False
 
-        max_starvation = self.c.config.risk_guard_sell_starvation_seconds
         time_since_sell = self.c.market_data_provider.time() - last
 
         if time_since_sell > max_starvation:
@@ -152,10 +168,12 @@ class FuturesGridRiskGuard(RiskGuard):
 
     def _trend_break(self, coin: str) -> bool:
         """
-        Check 5: Trend break - 1h trend breekt negatief.
-        Gebruikt: risk_guard_trend_break_pct (default -1.5%)
+        Check 5: Trend break - trend keert om tegen je positie.
 
-        Als 1h trend < -1.5% = markt keert om naar beneden.
+        Voor LONG: 1h trend < -1.5% = markt daalt = slecht
+        Voor SHORT: 1h trend > +1.5% = markt stijgt = slecht
+
+        Gebruikt: risk_guard_trend_break_pct (default -1.5% for LONG)
         """
         if not hasattr(self.c, 'trend_calculator'):
             return False
@@ -164,13 +182,23 @@ class FuturesGridRiskGuard(RiskGuard):
         if not trend or not hasattr(trend, 'trend_60m'):
             return False
 
-        min_trend = self.c.config.risk_guard_trend_break_pct
+        threshold = abs(self.c.config.risk_guard_trend_break_pct)
+        trade_direction = getattr(self.c.config, 'trade_direction', 'long').lower()
 
-        if trend.trend_60m < min_trend:
-            self.c.logger().warning(
-                f"📉 {coin} trend break: 1h {trend.trend_60m:+.2f}% < {min_trend:+.2f}%"
-            )
-            return True
+        if trade_direction == 'short':
+            # SHORT: trend break als markt STIJGT (positieve trend)
+            if trend.trend_60m > threshold:
+                self.c.logger().warning(
+                    f"📈 {coin} trend break (SHORT): 1h {trend.trend_60m:+.2f}% > +{threshold:.2f}%"
+                )
+                return True
+        else:
+            # LONG: trend break als markt DAALT (negatieve trend)
+            if trend.trend_60m < -threshold:
+                self.c.logger().warning(
+                    f"📉 {coin} trend break (LONG): 1h {trend.trend_60m:+.2f}% < -{threshold:.2f}%"
+                )
+                return True
         return False
 
     def _atr_explosion(self, coin: str) -> bool:

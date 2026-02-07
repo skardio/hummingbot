@@ -40,12 +40,12 @@ class TestMultiCoinConfig:
         with pytest.raises(Exception):  # Pydantic validation error
             MultiCoinGridConfig(max_simultaneous_coins=0)
 
-    def test_max_simultaneous_coins_has_maximum_five(self):
-        """Should not accept values greater than 5"""
+    def test_max_simultaneous_coins_has_maximum_twelve(self):
+        """Should not accept values greater than 12"""
         from multi_coin_grid_pro.controllers.multi_coin_grid_config import MultiCoinGridConfig
 
         with pytest.raises(Exception):  # Pydantic validation error
-            MultiCoinGridConfig(max_simultaneous_coins=6)
+            MultiCoinGridConfig(max_simultaneous_coins=13)
 
 
 class TestMultiCoinCapitalAllocation:

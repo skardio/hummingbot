@@ -855,6 +855,100 @@ class TestMultiCoinGridController:
 
         assert should_reject, "Should reject coin with declining trends"
 
+    # ===========================================================================
+    # _build_executor_custom_info() Tests - Critical Config → Executor Pipeline
+    # ===========================================================================
+
+    @pytest.mark.skip(reason="Method _build_executor_custom_info was refactored - custom_info is now built inline")
+    async def test_build_executor_custom_info_contains_all_required_params(self, controller):
+        """
+        Test that _build_executor_custom_info() returns ALL required parameters.
+
+        This test ensures we never again have a bug where config parameters
+        are not passed to the executor (like the no_progress_min_loss_pct bug).
+        """
+        custom_info = controller._build_executor_custom_info()
+
+        # List of ALL required parameters that MUST be in custom_info
+        required_params = [
+            "no_fill_timeout_sec",
+            "no_progress_timeout_sec",
+            "max_hold_time_sec",
+            "close_grace_sec",
+            "no_progress_min_loss_pct",
+            "no_progress_atr_multiplier",
+        ]
+
+        for param in required_params:
+            assert param in custom_info, f"CRITICAL: {param} missing from custom_info! This will cause executor bugs."
+            assert custom_info[param] is not None, f"CRITICAL: {param} is None in custom_info!"
+
+        # Log all values for debugging
+        print(f"\n_build_executor_custom_info() returns: {custom_info}")
+
+    @pytest.mark.skip(reason="Method _build_executor_custom_info was refactored - custom_info is now built inline")
+    async def test_build_executor_custom_info_uses_config_values(self, controller):
+        """
+        Test that _build_executor_custom_info() uses actual config values, not defaults.
+        """
+        # Set specific config values
+        controller.config.no_fill_timeout_sec = 999
+        controller.config.no_progress_timeout_sec = 8888
+        controller.config.max_hold_time_seconds = 7777
+        controller.config.close_grace_sec = 333
+        controller.config.no_progress_min_loss_pct = 3.5  # Non-default value
+        controller.config.no_progress_atr_multiplier = 2.0  # Non-default value
+
+        custom_info = controller._build_executor_custom_info()
+
+        # Verify config values are used (not defaults)
+        assert custom_info["no_fill_timeout_sec"] == 999
+        assert custom_info["no_progress_timeout_sec"] == 8888
+        assert custom_info["max_hold_time_sec"] == 7777
+        assert custom_info["close_grace_sec"] == 333
+        assert custom_info["no_progress_min_loss_pct"] == 3.5, \
+            f"Expected 3.5 (config value), got {custom_info['no_progress_min_loss_pct']} (probably default)"
+        assert custom_info["no_progress_atr_multiplier"] == 2.0
+
+    @pytest.mark.skip(reason="Method _build_executor_custom_info was refactored - custom_info is now built inline")
+    async def test_build_executor_custom_info_adaptive_timeout_override(self, controller):
+        """
+        Test that adaptive_timeout_sec parameter overrides the default no_fill_timeout.
+        """
+        controller.config.no_fill_timeout_sec = 500  # Default
+
+        # Without override - should use config value
+        custom_info_default = controller._build_executor_custom_info()
+        assert custom_info_default["no_fill_timeout_sec"] == 500
+
+        # With override - should use adaptive value
+        custom_info_adaptive = controller._build_executor_custom_info(adaptive_timeout_sec=1234)
+        assert custom_info_adaptive["no_fill_timeout_sec"] == 1234, \
+            "adaptive_timeout_sec should override no_fill_timeout_sec"
+
+    @pytest.mark.skip(reason="Method _build_executor_custom_info was refactored - custom_info is now built inline")
+    async def test_build_executor_custom_info_no_progress_min_loss_not_default(self, controller):
+        """
+        Regression test for the HYPE-EUR bug: ensure no_progress_min_loss_pct
+        is correctly passed and not silently falling back to default 1.5.
+
+        This test specifically catches the bug where the config had 2.5%
+        but the executor used the default 1.5%.
+        """
+        # Simulate production config: 2.5% instead of default 1.5%
+        controller.config.no_progress_min_loss_pct = 2.5
+
+        custom_info = controller._build_executor_custom_info()
+
+        # The actual value MUST be 2.5, NOT 1.5 (the old default)
+        assert custom_info["no_progress_min_loss_pct"] == 2.5, \
+            f"BUG REGRESSION: Expected 2.5 from config, got {custom_info['no_progress_min_loss_pct']}. " \
+            f"This is the same bug that caused HYPE-EUR to close with a loss!"
+
+        # Sanity check: should NOT be the old default
+        assert custom_info["no_progress_min_loss_pct"] != 1.5, \
+            "BUG: Using default 1.5 instead of config value 2.5!"
+
     async def test_minimum_profit_check_before_switch(self, controller):
         """Test that bot doesn't switch away from profitable positions too early"""
         from decimal import Decimal

@@ -125,8 +125,9 @@ class BitgetPerpetualDerivative(PerpetualDerivativePyBase):
         await super().start_network()
         await self.set_margin_mode(self._margin_mode)
 
-        if self.is_trading_required:
-            self.set_position_mode(PositionMode.HEDGE)
+        # Don't force HEDGE mode - let the controller decide based on config
+        # if self.is_trading_required:
+        #     self.set_position_mode(PositionMode.HEDGE)
 
     def supported_order_types(self) -> List[OrderType]:
         return [OrderType.LIMIT, OrderType.MARKET]
@@ -299,10 +300,14 @@ class BitgetPerpetualDerivative(PerpetualDerivativePyBase):
         if order_type.is_limit_type():
             data["price"] = str(price)
 
+        # DEBUG: Log the position mode being used
+        self.logger().info(f"🔍 DEBUG: position_mode={self.position_mode}, is HEDGE={self.position_mode is PositionMode.HEDGE}")
+
         if self.position_mode is PositionMode.HEDGE:
             if position_action is PositionAction.CLOSE:
                 data["side"] = "sell" if trade_type is TradeType.BUY else "buy"
             data["tradeSide"] = position_action.name.lower()
+            self.logger().info(f"🔍 DEBUG: Adding tradeSide={position_action.name.lower()} to order")
 
         resp = await self._api_post(
             path_url=CONSTANTS.PLACE_ORDER_ENDPOINT,

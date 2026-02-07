@@ -196,7 +196,7 @@ class StrategyV2Base(ScriptStrategyBase):
         self.market_data_provider.initialize_candles_feed_list(config.candles_config)
 
         # Initialize the controllers
-        self.actions_queue = asyncio.Queue()
+        self.actions_queue = asyncio.Queue(maxsize=10000)  # Bounded to prevent memory leak
         self.listen_to_executor_actions_task: asyncio.Task = asyncio.create_task(self.listen_to_executor_actions())
         self.initialize_controllers()
         self._is_stop_triggered = False
@@ -292,8 +292,11 @@ class StrategyV2Base(ScriptStrategyBase):
                 self.update_executors_info()
                 controller_id = actions[0].controller_id
                 controller = self.controllers.get(controller_id)
-                controller.executors_info = self.get_executors_by_controller(controller_id)
-                controller.executors_update_event.set()
+                if controller is not None:
+                    controller.executors_info = self.get_executors_by_controller(controller_id)
+                    controller.executors_update_event.set()
+                else:
+                    self.logger().warning(f"Controller '{controller_id}' not found, skipping executor update")
             except asyncio.CancelledError:
                 raise
             except Exception as e:

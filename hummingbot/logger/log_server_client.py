@@ -29,7 +29,7 @@ class LogServerClient(NetworkBase):
 
     def __init__(self, log_server_url: str = "https://api.coinalpha.com/reporting-proxy-v2/"):
         super().__init__()
-        self.queue: asyncio.Queue = asyncio.Queue()
+        self.queue: asyncio.Queue = asyncio.Queue(maxsize=10000)  # Bounded to prevent memory leak
         self.consume_queue_task: Optional[asyncio.Task] = None
         self.log_server_url: str = log_server_url
 

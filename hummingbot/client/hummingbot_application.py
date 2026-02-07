@@ -71,7 +71,7 @@ class HummingbotApplication(*commands):
         # Application-specific properties
         self.init_time: float = time.time()
         self.placeholder_mode = False
-        self._app_warnings: Deque[ApplicationWarning] = deque()
+        self._app_warnings: Deque[ApplicationWarning] = deque(maxlen=1000)  # Bounded to prevent memory leak
 
         # MQTT management
         self._mqtt: Optional[MQTTGateway] = None

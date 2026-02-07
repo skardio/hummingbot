@@ -145,12 +145,12 @@ class MultiCoinGridConfig(ControllerConfigBase):
     max_simultaneous_coins: int = Field(
         default=1,
         client_data=ClientFieldData(
-            prompt=lambda mi: "Maximum simultaneous coins to trade (1-5, capital divided equally): ",
+            prompt=lambda mi: "Maximum simultaneous coins to trade (1-12, capital divided equally): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True},
         ge=1,
-        le=5,
+        le=12,
         description="Number of coins to trade simultaneously. Capital is divided equally among coins."
     )
 
@@ -452,6 +452,58 @@ class MultiCoinGridConfig(ControllerConfigBase):
         default=0,  # 0 = unlimited, else force rotation after X seconds (prevents 21h+ stuck positions)
         client_data=ClientFieldData(
             prompt=lambda mi: "Maximum hold time before force rotation (seconds, 0=unlimited): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ==============================================================================
+    # TREND-AWARE EXIT SYSTEM (Soft/Hard Hold Time)
+    # ==============================================================================
+    # Prevents "dom verkopen" after fixed time when trend is still bullish
+    # After soft_hold: only exit if trend bearish OR pnl too negative
+    # After hard_hold: always exit (bag-holder prevention)
+
+    soft_hold_time_seconds: int = Field(
+        default=7200,  # 2 hours - trend-aware exit kicks in
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Soft hold time before trend-aware exit (seconds, default 7200=2h): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    hard_hold_time_seconds: int = Field(
+        default=21600,  # 6 hours - always exit (bag-holder prevention)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Hard hold time before forced exit (seconds, default 21600=6h): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    soft_exit_min_trend_pct: float = Field(
+        default=0.3,  # Trend must be > 0.3% to extend hold
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum trend % to extend hold time (default 0.3%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    soft_exit_max_loss_pct: float = Field(
+        default=-1.5,  # Exit even with good trend if loss > 1.5%
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Max loss % before forced exit (default -1.5%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    soft_exit_extend_seconds: int = Field(
+        default=1800,  # Extend by 30 min if trend is bullish
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Extend hold by X seconds if trend bullish (default 1800=30min): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}

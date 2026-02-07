@@ -17,7 +17,8 @@ class UserStreamTracker:
         return cls._ust_logger
 
     def __init__(self, data_source: UserStreamTrackerDataSource):
-        self._user_stream: asyncio.Queue = asyncio.Queue()
+        # FIX: Bounded queue to prevent memory leak (was unbounded asyncio.Queue())
+        self._user_stream: asyncio.Queue = asyncio.Queue(maxsize=10000)
         self._data_source = data_source
         self._user_stream_tracking_task: Optional[asyncio.Task] = None
 

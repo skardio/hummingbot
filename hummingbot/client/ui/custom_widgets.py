@@ -182,7 +182,7 @@ class CustomTextArea:
             get_line_prefix=get_line_prefix,
             align=align)
 
-        self.log_lines: Deque[str] = deque()
+        self.log_lines: Deque[str] = deque(maxlen=10000)  # Bounded to prevent memory leak
         self.log(initial_text)
 
     @property

@@ -878,7 +878,11 @@ class MultiCoinGridController(ControllerBase):
         try:
             if self.market_regime_filter:
                 regime_state = self.market_regime_filter.get_market_regime_state()
-                current_regime = regime_state.regime if regime_state else "baseline"
+                # MarketRegimeState has is_favorable (bool), convert to regime string
+                if regime_state:
+                    current_regime = "BULL" if regime_state.is_favorable else "BEAR"
+                else:
+                    current_regime = "baseline"
             else:
                 current_regime = "baseline"
         except Exception as e:
@@ -1576,8 +1580,10 @@ class MultiCoinGridController(ControllerBase):
                             del self.trend_calculator.trends[coin]
                         stale_trends.extend(oldest_trend_coins)
 
-                    # MEMORY LEAK FIX: Also trim price_history within each remaining trend
-                    MAX_PRICE_HISTORY_PER_COIN = 1500
+                    # MEMORY FIX: Only trim price_history here
+                    # NOTE: Candles trimming is handled by trend_calculator itself (720 limit)
+                    # DO NOT trim candles here - it breaks WARMUP which needs 360+ candles
+                    MAX_PRICE_HISTORY_PER_COIN = 500   # ~25 min at 30s intervals
                     trimmed_count = 0
                     for coin, trend in self.trend_calculator.trends.items():
                         if hasattr(trend, 'price_history') and len(trend.price_history) > MAX_PRICE_HISTORY_PER_COIN:
@@ -1589,37 +1595,60 @@ class MultiCoinGridController(ControllerBase):
                     if stale_trends:
                         cleanup_stats['trend_data'] = len(stale_trends)
 
-                # 4. Clean up _realised_executors_tracked with hard cap
+                # 3b. NEW: Clean up auxiliary dicts for non-monitored coins
+                aux_dicts_to_clean = [
+                    ('pair_volumes', self.pair_volumes),
+                    ('pair_spreads', self.pair_spreads),
+                    ('coin_performance', self.coin_performance),
+                    ('entry_prices', self.entry_prices),
+                    ('stop_loss_triggered', self.stop_loss_triggered),
+                    ('last_grid_price', self.last_grid_price),
+                    ('switch_costs', self.switch_costs),
+                    ('last_insufficient_balance_time', self.last_insufficient_balance_time),
+                    ('coin_error_count', self.coin_error_count),
+                    ('current_exposure_per_coin', self.current_exposure_per_coin),
+                ]
+                aux_cleaned = 0
+                for dict_name, aux_dict in aux_dicts_to_clean:
+                    if aux_dict:
+                        stale_keys = [k for k in list(aux_dict.keys()) if k not in important_coins]
+                        for k in stale_keys:
+                            del aux_dict[k]
+                            aux_cleaned += 1
+                if aux_cleaned > 0:
+                    cleanup_stats['aux_dicts'] = aux_cleaned
+
+                # 4. Clean up _realised_executors_tracked - ALWAYS clean stale, not just when > cap
+                # FIX: Previously only cleaned when > 300, causing memory leak with few executors
+                stale_tracked = [
+                    exec_id for exec_id in list(self._realised_executors_tracked.keys())
+                    if exec_id not in current_executor_ids
+                ]
+                # Remove all stale executors (those no longer active)
+                for exec_id in stale_tracked:
+                    del self._realised_executors_tracked[exec_id]
+
+                # Also enforce hard cap if needed
                 if len(self._realised_executors_tracked) > MAX_REALISED_TRACKED:
-                    stale_tracked = [
-                        exec_id for exec_id in list(self._realised_executors_tracked.keys())
-                        if exec_id not in current_executor_ids
-                    ]
-                    # Remove all stale
-                    for exec_id in stale_tracked:
+                    excess = len(self._realised_executors_tracked) - MAX_REALISED_TRACKED
+                    oldest_ids = list(self._realised_executors_tracked.keys())[:excess]
+                    for exec_id in oldest_ids:
                         del self._realised_executors_tracked[exec_id]
+                    stale_tracked.extend(oldest_ids)
 
-                    # If still over cap, remove oldest (FIFO)
-                    if len(self._realised_executors_tracked) > MAX_REALISED_TRACKED:
-                        excess = len(self._realised_executors_tracked) - MAX_REALISED_TRACKED
-                        oldest_ids = list(self._realised_executors_tracked.keys())[:excess]
-                        for exec_id in oldest_ids:
-                            del self._realised_executors_tracked[exec_id]
-                        stale_tracked.extend(oldest_ids)
+                if stale_tracked:
+                    cleanup_stats['realised_tracked'] = len(stale_tracked)
 
-                    if stale_tracked:
-                        cleanup_stats['realised_tracked'] = len(stale_tracked)
+                # 5. Clean up _processed_timeout_executors - ALWAYS clean stale
+                # FIX: Previously only cleaned when > cap, causing memory leak
+                stale_timeout = [
+                    exec_id for exec_id in list(self._processed_timeout_executors)
+                    if exec_id not in current_executor_ids
+                ]
+                for exec_id in stale_timeout:
+                    self._processed_timeout_executors.discard(exec_id)
 
-                # 5. Clean up _processed_timeout_executors with hard cap
-                if len(self._processed_timeout_executors) > MAX_TIMEOUT_TRACKED:
-                    stale_timeout = [
-                        exec_id for exec_id in list(self._processed_timeout_executors)
-                        if exec_id not in current_executor_ids
-                    ]
-                    for exec_id in stale_timeout:
-                        self._processed_timeout_executors.discard(exec_id)
-
-                    # Enforce hard cap (convert to list, remove oldest)
+                # Enforce hard cap if needed
                     if len(self._processed_timeout_executors) > MAX_TIMEOUT_TRACKED:
                         excess = len(self._processed_timeout_executors) - MAX_TIMEOUT_TRACKED
                         oldest_ids = list(self._processed_timeout_executors)[:excess]
@@ -1629,6 +1658,12 @@ class MultiCoinGridController(ControllerBase):
 
                     if stale_timeout:
                         cleanup_stats['timeout_executors'] = len(stale_timeout)
+
+                # 6. Force garbage collection if significant cleanup occurred
+                import gc
+                if cleanup_stats:
+                    gc.collect()
+                    cleanup_stats['gc_collected'] = True
 
                 # Measure RSS after cleanup
                 rss_after_mb = process.memory_info().rss / 1024 / 1024
@@ -2881,6 +2916,7 @@ class MultiCoinGridController(ControllerBase):
                     min_trend_pct=float(self.config.trend_min_change_pct),
                     exclude_coins=list(excluded_coins_with_active) if excluded_coins_with_active else None,
                     orderbook_config=orderbook_config,
+                    trade_direction=self._get_trade_direction_for_discovery(),
                 )
 
                 self.logger().info(
@@ -2949,6 +2985,7 @@ class MultiCoinGridController(ControllerBase):
                     min_trend_pct=float(self.config.trend_min_change_pct),
                     exclude_coins=list(excluded_coins_with_active) if excluded_coins_with_active else None,
                     orderbook_config=orderbook_config,
+                    trade_direction=self._get_trade_direction_for_discovery(),
                 )
 
                 max_slots = self._get_current_max_slots()
@@ -5704,6 +5741,30 @@ class MultiCoinGridController(ControllerBase):
         self.logger().info(f"🔧 DEBUG: Built orderbook config: mode={config['mode']}, order_size={config['order_size']}, multiplier={config['min_depth_multiplier']}")
         return config
 
+    def _get_trade_direction_for_discovery(self) -> str:
+        """
+        Get trade direction for coin discovery.
+
+        Checks if config has 'trade_direction' attribute (futures controller)
+        and returns the appropriate direction string for trend filtering.
+
+        Returns:
+            "long", "short", or "auto" based on config
+        """
+        # Check for trade_direction in config (used by futures controller)
+        if hasattr(self.config, 'trade_direction'):
+            direction = getattr(self.config, 'trade_direction')
+            # Handle enum or string value
+            direction_str = str(direction).lower()
+            # Extract just the direction part if it's an enum like "FuturesTradeDirection.SHORT"
+            if '.' in direction_str:
+                direction_str = direction_str.split('.')[-1]
+            self.logger().debug(f"🎯 Trade direction for discovery: {direction_str}")
+            return direction_str
+
+        # Default to "long" for spot trading (base controller)
+        return "long"
+
     def _check_smart_entry_v2(self, symbol: str) -> bool:
         """
         Check entry permission using SmartEntry v2.0 (with coin profiles)
@@ -6153,6 +6214,10 @@ class MultiCoinGridController(ControllerBase):
         try:
             base_grids = self.config.num_grids
 
+            # Check if dynamic grid sizer is disabled - return base_grids immediately
+            if not getattr(self.config, 'use_dynamic_grid_sizer', True):
+                self.logger().debug(f"📊 {symbol}: Dynamic grid sizing DISABLED, using config num_grids={base_grids}")
+                return base_grids
             # HYBRID GRID v2.0: Use DynamicGridSizer v2 if available
             if self.grid_sizer_v2 and trend.candles and len(trend.candles) >= 20:
                 try:
@@ -6226,6 +6291,11 @@ class MultiCoinGridController(ControllerBase):
         Returns:
             Volatility-adjusted position size
         """
+        # Check if volatility position sizing is disabled
+        if not getattr(self.config, 'use_volatility_position_sizing', True):
+            self.logger().debug(f"💰 {symbol}: Volatility position sizing DISABLED, using base size €{base_size}")
+            return base_size
+
         try:
             # Get ATR and current price using TrendCalculator
             trend = self.trend_calculator.get_trend(symbol)
@@ -6659,7 +6729,7 @@ class MultiCoinGridController(ControllerBase):
                 self.logger().info(f"📚 Initializing order book for {symbol}...")
                 order_book = await tracker._initial_order_book_for_trading_pair(symbol)
                 tracker._order_books[symbol] = order_book
-                tracker._tracking_message_queues[symbol] = asyncio.Queue()
+                tracker._tracking_message_queues[symbol] = asyncio.Queue(maxsize=5000)  # Bounded to prevent memory leak
                 tracker._tracking_tasks[symbol] = safe_ensure_future(tracker._track_single_book(symbol))
                 self.logger().info(f"✅ Order book initialized for {symbol}")
 
@@ -6985,6 +7055,23 @@ class MultiCoinGridController(ControllerBase):
         trade_amount_quote = total_amount_quote if total_amount_quote is not None else Decimal(
             str(self.config.total_amount_quote))
 
+        # ============================================================
+        # CRITICAL VALIDATION: Check if trade_amount meets minimum
+        # ============================================================
+        min_order = Decimal(str(self.config.min_order_amount_quote))
+        per_level_amount = trade_amount_quote / Decimal(str(num_grids))
+
+        if per_level_amount < min_order:
+            self.logger().error(
+                f"❌ {symbol} LONG grid REJECTED: per-level amount €{per_level_amount:.2f} "
+                f"< min_order_amount €{min_order}!\n"
+                f"   📊 Breakdown: total={trade_amount_quote}, levels={num_grids}, "
+                f"per_level={per_level_amount:.2f}\n"
+                f"   🔧 FIX: Increase 'risk_max_balance_per_trade_pct' in config, "
+                f"or reduce 'max_simultaneous_coins' or 'num_grids'"
+            )
+            return None
+
         # Story D1: Calculate adaptive timeout based on market volatility
         adaptive_timeout_sec = self.config.no_fill_timeout_sec  # Default fallback
         try:
@@ -7045,8 +7132,8 @@ class MultiCoinGridController(ControllerBase):
             trailing_stop=None,
             open_order_type=order_type,
             take_profit_order_type=order_type,
-            stop_loss_order_type=OrderType.MARKET,
-            time_limit_order_type=OrderType.MARKET
+            stop_loss_order_type=OrderType.LIMIT,  # LIMIT for lower fees (0.20% vs 0.35%)
+            time_limit_order_type=OrderType.LIMIT   # LIMIT for lower fees (0.20% vs 0.35%)
         )
 
         grid_config = GridExecutorConfig(
@@ -7065,7 +7152,9 @@ class MultiCoinGridController(ControllerBase):
             max_open_orders=max(1, min(self.config.max_open_orders, num_grids)),
             max_orders_per_batch=2,  # Can place 2 OPEN orders per batch
             order_frequency=self.config.order_frequency,
-            activation_bounds=Decimal("0.05"),  # 5% activation bounds
+            # FIX: Use take_profit as activation_bounds so SELL orders are placed immediately after BUY fills
+            # Previously 0.05 (5%) meant SELL orders only placed when price is within 5% of TP
+            activation_bounds=self.config.take_profit_pct,  # Match TP% so sells are placed immediately
             keep_position=False,  # Don't keep position on stop
             leverage=leverage,  # Use derivative_leverage from config (for futures) or 1 (for spot)
             deduct_base_fees=False,  # FALSE for Kraken EUR pairs (fees paid in quote, not base)
@@ -7778,7 +7867,7 @@ class MultiCoinGridController(ControllerBase):
             # ---------------------------------------
             # LAYER 3: EMERGENCY EXIT (PRIORITY #1)
             # ---------------------------------------
-            emergency_exit_pct = getattr(self.config, 'emergency_exit_pct', -2.0)  # Default tightened to -2.0%
+            emergency_exit_pct = getattr(self.config, 'emergency_exit_pct', -12.0)  # Default: -12% (only flash crash)
             if price_change_pct <= emergency_exit_pct:
                 self.logger().critical(
                     f"[EXIT] 🚨 {coin} EMERGENCY EXIT TRIGGERED:\n" f"   Entry Price: €{
@@ -7793,7 +7882,7 @@ class MultiCoinGridController(ControllerBase):
             # ---------------------------------------
             # LAYER 3: HARD STOP (Fail-safe)
             # ---------------------------------------
-            hard_stop_pct = getattr(self.config, 'hard_stop_pct', -3.0)  # Default tightened to -3.0%
+            hard_stop_pct = getattr(self.config, 'hard_stop_pct', -15.0)  # Default: -15% (ultimate fail-safe)
             if price_change_pct <= hard_stop_pct:
                 self.logger().critical(
                     f"[EXIT] 🛑 {coin} HARD STOP TRIGGERED:\n" f"   Entry Price: €{
@@ -7865,8 +7954,8 @@ class MultiCoinGridController(ControllerBase):
                 return None
             # Check if multi-timeframe data is available
             if hasattr(trend, 'trend_60m') and trend.trend_60m != 0.0:
-                exit_short_threshold = getattr(self.config, 'exit_short_threshold', -1.5)
-                exit_mid_threshold = getattr(self.config, 'exit_mid_threshold', -0.5)
+                exit_short_threshold = getattr(self.config, 'exit_short_threshold', -4.0)  # Default: -4% (less sensitive)
+                exit_mid_threshold = getattr(self.config, 'exit_mid_threshold', -3.0)  # Default: -3% (less sensitive)
 
                 severe_short_trend = trend.trend_60m < exit_short_threshold
                 mid_term_break_with_price = trend.trend_240m < exit_mid_threshold and price_change_pct < -1.0

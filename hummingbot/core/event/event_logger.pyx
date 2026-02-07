@@ -17,7 +17,9 @@ cdef class EventLogger(EventListener):
         # We limit the amount of events we keep reference to the most recent ones
         # But we keep all references to order fill events, because they are required for PnL calculation
         self._generic_logged_events = deque(maxlen=50)
-        self._order_filled_logged_events = deque()
+        # FIX: Bounded order fill events to prevent memory leak (was unbounded deque())
+        # Keep last 10000 fills - enough for PnL calculation while preventing unbounded growth
+        self._order_filled_logged_events = deque(maxlen=10000)
         self._logged_events = {OrderFilledEvent: self._order_filled_logged_events}
         self._waiting = {}
         self._wait_returns = {}

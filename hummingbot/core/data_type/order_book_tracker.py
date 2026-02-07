@@ -40,9 +40,10 @@ class OrderBookTracker:
         self._order_books: Dict[str, OrderBook] = {}
         self._tracking_message_queues: Dict[str, asyncio.Queue] = {}
         self._past_diffs_windows: Dict[str, Deque] = defaultdict(lambda: deque(maxlen=self.PAST_DIFF_WINDOW_SIZE))
-        self._order_book_diff_stream: asyncio.Queue = asyncio.Queue()
-        self._order_book_snapshot_stream: asyncio.Queue = asyncio.Queue()
-        self._order_book_trade_stream: asyncio.Queue = asyncio.Queue()
+        # FIX: Bounded queues to prevent memory leak (was unbounded asyncio.Queue())
+        self._order_book_diff_stream: asyncio.Queue = asyncio.Queue(maxsize=10000)
+        self._order_book_snapshot_stream: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        self._order_book_trade_stream: asyncio.Queue = asyncio.Queue(maxsize=10000)
         self._ev_loop: asyncio.BaseEventLoop = asyncio.get_event_loop()
         self._saved_message_queues: Dict[str, Deque[OrderBookMessage]] = defaultdict(lambda: deque(maxlen=1000))
 
@@ -178,7 +179,8 @@ class OrderBookTracker:
         """
         for index, trading_pair in enumerate(self._trading_pairs):
             self._order_books[trading_pair] = await self._initial_order_book_for_trading_pair(trading_pair)
-            self._tracking_message_queues[trading_pair] = asyncio.Queue()
+            # FIX: Bounded queue to prevent memory leak (was unbounded asyncio.Queue())
+            self._tracking_message_queues[trading_pair] = asyncio.Queue(maxsize=5000)
             self._tracking_tasks[trading_pair] = safe_ensure_future(self._track_single_book(trading_pair))
             self.logger().info(f"Initialized order book for {trading_pair}. "
                                f"{index + 1}/{len(self._trading_pairs)} completed.")

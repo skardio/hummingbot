@@ -59,11 +59,11 @@ class GridExecutor(ExecutorBase):
         :param max_retries: The maximum number of retries for the PositionExecutor, defaults to 5.
         """
         self.config: GridExecutorConfig = config
-        if config.triple_barrier_config.time_limit_order_type != OrderType.MARKET or \
-                config.triple_barrier_config.stop_loss_order_type != OrderType.MARKET:
-            error = "Only market orders are supported for time_limit and stop_loss"
-            self.logger().error(error)
-            raise ValueError(error)
+        # Store configured order types for stop_loss and time_limit exits
+        # LIMIT orders can be used for lower fees, but execution is not guaranteed
+        # MARKET orders guarantee execution but have higher fees
+        self._stop_loss_order_type = config.triple_barrier_config.stop_loss_order_type
+        self._time_limit_order_type = config.triple_barrier_config.time_limit_order_type
         super().__init__(strategy=strategy, config=config, connectors=[config.connector_name],
                          update_interval=update_interval)
         self.open_order_price_type = PriceType.BestBid if config.side == TradeType.BUY else PriceType.BestAsk
@@ -227,12 +227,19 @@ class GridExecutor(ExecutorBase):
 
         # Get available balance
         try:
-            if side == TradeType.BUY:
-                # For BUY: need quote asset
+            if self.is_perpetual:
+                # For PERPETUAL futures: always use quote asset (USDT) for margin
+                # Both LONG (buy) and SHORT (sell) require USDT margin, not base asset
+                quote_asset = trading_pair.split("-")[1] if "-" in trading_pair else "USDT"
+                available_balance = connector.get_available_balance(quote_asset)
+                # For perpetuals, calculate required margin based on leverage
+                # This will be validated differently in validate_order_before_submit
+            elif side == TradeType.BUY:
+                # For spot BUY: need quote asset
                 quote_asset = trading_pair.split("-")[1] if "-" in trading_pair else "USDT"
                 available_balance = connector.get_available_balance(quote_asset)
             else:
-                # For SELL: need base asset
+                # For spot SELL: need base asset
                 base_asset = trading_pair.split("-")[0] if "-" in trading_pair else trading_pair
                 available_balance = connector.get_available_balance(base_asset)
         except Exception as e:
@@ -247,6 +254,7 @@ class GridExecutor(ExecutorBase):
             quantity=amount,
             trading_rules=trading_rules,
             available_balance=available_balance,
+            is_perpetual=self.is_perpetual,  # Pass perpetual flag for correct balance check
         )
 
         if not result.is_valid:
@@ -1452,6 +1460,25 @@ class GridExecutor(ExecutorBase):
             else:
                 # Regular shutdown process for non-held positions
                 order_execution_completed = self.position_size_base == Decimal("0")
+
+                # FIX: Also check actual exchange balance to detect externally sold positions
+                # This prevents infinite retry loops when coins were sold outside the bot
+                if not order_execution_completed:
+                    try:
+                        base_asset = self.config.trading_pair.split("-")[0]
+                        actual_balance = self._strategy.connectors[self.config.connector_name].get_available_balance(base_asset)
+                        min_order_size = self.trading_rules.min_order_size if self.trading_rules else Decimal("0.00001")
+                        if actual_balance < min_order_size:
+                            self.logger().warning(
+                                f"⚠️ Position externally closed: tracked={self.position_size_base} {base_asset}, "
+                                f"actual={actual_balance} {base_asset} (< min {min_order_size}). "
+                                f"Forcing shutdown to prevent infinite retries."
+                            )
+                            order_execution_completed = True
+                            self.close_type = CloseType.FAILED  # Mark as failed since we didn't close it ourselves
+                    except Exception as e:
+                        self.logger().debug(f"Could not verify actual balance: {e}")
+
                 if order_execution_completed:
                     # Story B1: Log unwind completion if we were in unwind mode
                     if self._unwind_phase in ["GRACEFUL", "AGGRESSIVE"]:
@@ -1538,6 +1565,20 @@ class GridExecutor(ExecutorBase):
                 )
                 return
 
+            # FIX: Also check actual exchange balance to prevent infinite retries
+            # when position was sold externally (outside the bot)
+            try:
+                base_asset = self.config.trading_pair.split("-")[0]
+                actual_balance = self._strategy.connectors[self.config.connector_name].get_available_balance(base_asset)
+                if actual_balance < minimum_order_size:
+                    self.logger().warning(
+                        f"⚠️ Actual balance {actual_balance} {base_asset} is below minimum order size "
+                        f"({minimum_order_size}) - position was likely sold externally. Skipping close."
+                    )
+                    return
+            except Exception as e:
+                self.logger().debug(f"Could not verify actual balance before close: {e}")
+
             order_amount = await self._determine_close_order_amount(self.position_size_base)
             if order_amount is None:
                 # Wait for next loop (or manual action) before attempting again
@@ -1588,44 +1629,59 @@ class GridExecutor(ExecutorBase):
             try:
                 # Get actual available balance
                 base_asset = self.config.trading_pair.split("-")[0]
-                available_balance = self._strategy.connectors[self.config.connector_name].get_available_balance(base_asset)
+                connector_balance = self._strategy.connectors[self.config.connector_name].get_available_balance(base_asset)
 
-                # If available balance is less than order amount, adjust to available balance
-                if available_balance < order_candidate.amount:
-                    # Get connector instance to call get_order_size_quantum (needs connector interface, not MDP)
+                # FIX: Use internal position_size_base if connector balance seems stale/wrong
+                # This happens when Kraken balance sync is delayed after a fill
+                internal_inventory = self.position_size_base
+                if connector_balance < order_candidate.amount and internal_inventory >= order_candidate.amount:
+                    self.logger().warning(
+                        f"⚠️ Executor {self.config.id[:8]}... Balance sync issue detected: "
+                        f"connector reports {connector_balance} {base_asset}, "
+                        f"but internal inventory is {internal_inventory} {base_asset}. "
+                        f"Proceeding with order using internal inventory."
+                    )
+                    # Don't adjust - trust the internal inventory and try to place the order
+                    # The exchange will reject if balance is truly insufficient
+                elif connector_balance < order_candidate.amount:
+                    # Get connector instance to call get_order_size_quantum
                     connector = self._strategy.connectors[self.config.connector_name]
                     min_order_size = connector.get_order_size_quantum(
                         self.config.trading_pair, order_candidate.amount
                     )
 
-                    if available_balance >= min_order_size:
+                    if connector_balance >= min_order_size:
                         self.logger().warning(
                             f"⚠️ Executor {self.config.id[:8]}... Adjusting close order: "
                             f"requested {order_candidate.amount} {base_asset}, "
-                            f"available {available_balance} {base_asset}, "
+                            f"available {connector_balance} {base_asset}, "
                             f"using available balance"
                         )
-                        order_candidate.amount = available_balance
+                        order_candidate.amount = connector_balance
                     else:
-                        self.logger().error(
-                            f"❌ Executor {self.config.id[:8]}... Cannot place close order: "
-                            f"available balance ({available_balance} {base_asset}) "
-                            f"< minimum order size ({min_order_size} {base_asset}). "
-                            f"Terminating executor to prevent infinite retries."
-                        )
-                        # Reset the level to prevent infinite retry loop
-                        level.reset_close_order()
-
-                        # CRITICAL: Terminate executor if we have 0 inventory
-                        # This prevents infinite retry loops for executors with dust/zero balance
-                        self.update_position_metrics()
-                        if self.position_size_base < min_order_size:
-                            self.logger().warning(
-                                f"⚠️ Executor {self.config.id[:8]} has no tradeable inventory "
-                                f"({self.position_size_base} < {min_order_size}), forcing shutdown"
+                        # Check if internal inventory is also 0 - if so, position was truly sold externally
+                        if internal_inventory < min_order_size:
+                            self.logger().error(
+                                f"❌ Executor {self.config.id[:8]}... Cannot place close order: "
+                                f"available balance ({connector_balance} {base_asset}) "
+                                f"< minimum order size ({min_order_size} {base_asset}). "
+                                f"Position was likely sold externally. Terminating executor."
                             )
-                            self._status = RunnableStatus.SHUTTING_DOWN
-                        return
+                            # Reset the level to prevent infinite retry loop
+                            level.reset_close_order()
+
+                            # CRITICAL FIX: Mark position as externally closed and TERMINATE immediately
+                            self.close_type = CloseType.FAILED
+                            self._status = RunnableStatus.TERMINATED
+                            return
+                        else:
+                            # Internal inventory says we have coins, but connector disagrees
+                            # This is a balance sync issue - proceed with order, exchange will verify
+                            self.logger().warning(
+                                f"⚠️ Executor {self.config.id[:8]}... Balance discrepancy: "
+                                f"connector={connector_balance}, internal={internal_inventory} {base_asset}. "
+                                f"Proceeding with order - exchange will verify."
+                            )
             except Exception as e:
                 self.logger().warning(
                     f"⚠️ Could not verify balance before placing close order: {e}. "
@@ -1967,13 +2023,12 @@ class GridExecutor(ExecutorBase):
         if n_close_orders_pending >= 1:
             return []
 
+        # FIX: ALWAYS place close (SELL) orders immediately after BUY is filled
+        # The activation_bounds check was causing SELL orders to be delayed/skipped
+        # when price was > activation_bounds away from TP price, leaving inventory unsold
+        # activation_bounds should only apply to OPEN (BUY) orders, not CLOSE (SELL) orders
         for level in open_orders_filled:
-            if self.config.activation_bounds:
-                tp_to_mid = abs(self.get_take_profit_price(level) - self.mid_price) / self.mid_price
-                if tp_to_mid < self.config.activation_bounds:
-                    close_orders_proposal.append(level)
-            else:
-                close_orders_proposal.append(level)
+            close_orders_proposal.append(level)
 
         # CRITICAL: Return max 1 close order at a time (serialize close orders)
         # This prevents race conditions where multiple levels try to sell same inventory
@@ -1996,22 +2051,18 @@ class GridExecutor(ExecutorBase):
 
     def get_close_order_ids_to_cancel(self):
         """
-        This method is responsible for controlling the close orders. It will check if the take profit is greater than the
-        current price and cancel the close order.
+        This method is responsible for controlling the close orders.
 
-        :return: None
+        FIX: activation_bounds should NOT be used to cancel close orders!
+        Close orders (SELL) are placed at a target price (e.g., +5% TP).
+        Cancelling them because they're "too far" from mid_price defeats the purpose.
+        activation_bounds is meant for OPEN orders only - to avoid buying when price moves away.
+
+        :return: Empty list - close orders should not be cancelled by activation_bounds
         """
-        if self.config.activation_bounds:
-            close_orders_to_cancel = []
-            close_orders_placed = [level.active_close_order for level in
-                                   self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
-            for order in close_orders_placed:
-                price = order.price
-                if price:
-                    distance_to_mid = abs(price - self.mid_price) / self.mid_price
-                    if distance_to_mid > self.config.activation_bounds:
-                        close_orders_to_cancel.append(order.order_id)
-            return close_orders_to_cancel
+        # FIX: Return empty list - don't cancel close orders based on activation_bounds
+        # The old logic was cancelling SELL orders when price > activation_bounds from mid,
+        # which prevented sells from ever executing (constant cancel/replace loop).
         return []
 
     def _filter_levels_by_activation_bounds(self):
@@ -2056,20 +2107,26 @@ class GridExecutor(ExecutorBase):
         """
         Take profit condition:
         - For BUY grids: trigger when mid_price > end_price (price has risen above sell target)
-        - For SELL grids: trigger when mid_price < start_price (price has dropped below upper bound)
+        - For SELL grids (spot/traditional): trigger when mid_price < start_price
+        - For SHORT grids (futures): trigger when mid_price < end_price (price dropped to TP zone)
 
-        Note: For SELL grids, start_price is the upper bound (where selling begins) and end_price is the
-        lower bound (buy-back target). Take-profit should trigger when price drops below start_price,
-        indicating the sell grid has reached its profit target.
+        SHORT mode is detected via custom_info['trade_direction'] == 'short'
         """
         if self.config.side == TradeType.BUY:
             # BUY grid: take profit when price rises above end_price (sell target)
             return self.mid_price > self.config.end_price
         else:
-            # SELL grid: take profit when price drops below start_price (upper bound)
-            # BUG FIX: Changed from end_price to start_price for correct SELL grid take-profit logic
-            # This ensures the strategy triggers take-profit at the correct price level
-            return self.mid_price < self.config.start_price
+            # Check if this is a futures SHORT grid
+            is_short_mode = (
+                self.config.custom_info and
+                self.config.custom_info.get('trade_direction', '').lower() == 'short'
+            )
+            if is_short_mode:
+                # SHORT futures: take profit when price drops below end_price (lower bound)
+                return self.mid_price < self.config.end_price
+            else:
+                # Traditional SELL grid: original Hummingbot logic
+                return self.mid_price < self.config.start_price
 
     def stop_loss_condition(self):
         """
@@ -2289,14 +2346,22 @@ class GridExecutor(ExecutorBase):
 
             order_amount_to_use = target_amount
 
-            # PHASE 1 FIX: PANIC = MARKET ORDER (not LIMIT)
-            # When bot panics (stop_loss, early_stop), we need EXIT CERTAINTY, not maker fees
-            # Maker fees save ~0.0075% but 10s delay can cost 0.5%+ in fast-moving market
-            # Only use LIMIT orders for regular take-profit exits where we have time
-            use_limit_order = close_type not in [CloseType.STOP_LOSS, CloseType.TIME_LIMIT, CloseType.EARLY_STOP]
+            # Determine order type based on close_type and configured order types
+            # Default behavior: PANIC exits (stop_loss, early_stop, time_limit) use configured order type
+            # This allows users to choose LIMIT for lower fees or MARKET for guaranteed execution
+            if close_type == CloseType.STOP_LOSS:
+                use_limit_order = self._stop_loss_order_type == OrderType.LIMIT
+            elif close_type == CloseType.TIME_LIMIT:
+                use_limit_order = self._time_limit_order_type == OrderType.LIMIT
+            elif close_type == CloseType.EARLY_STOP:
+                # Early stop uses same logic as stop_loss
+                use_limit_order = self._stop_loss_order_type == OrderType.LIMIT
+            else:
+                # Regular exits (take_profit, etc.) use LIMIT by default
+                use_limit_order = True
 
             # PHASE 3.5: Log invariants (production monitoring)
-            order_type_chosen = "LIMIT_MAKER" if use_limit_order else "MARKET"
+            order_type_chosen = "LIMIT" if use_limit_order else "MARKET"
             self.logger().info(
                 f"📋 CLOSE DECISION: "
                 f"close_type={close_type}, "
@@ -2696,8 +2761,7 @@ class GridExecutor(ExecutorBase):
             # Check if it's just a price-out-of-range issue (which we already warned about)
             if self.close_type == CloseType.TAKE_PROFIT:
                 # For BUY grids, TAKE_PROFIT means price > end_price (price risen above sell target)
-                # For SELL grids, TAKE_PROFIT means price < start_price (price dropped below upper bound)
-                # BUG FIX: Updated comment and condition to match take_profit_condition() logic
+                # For SELL grids, TAKE_PROFIT means price < end_price (price dropped to take profit zone)
                 # This is expected if price moved outside range - don't fail immediately if no position yet
                 price_out_of_range = False
                 if self.config.side == TradeType.BUY and self.mid_price > self.config.end_price:
@@ -2706,13 +2770,28 @@ class GridExecutor(ExecutorBase):
                         f"⚠️  Grid range exceeded (price {self.mid_price:.4f} > end {self.config.end_price:.4f}) "
                         f"- but no position yet, so continuing"
                     )
-                elif self.config.side == TradeType.SELL and self.mid_price < self.config.start_price:
-                    # BUG FIX: Changed from end_price to start_price to match take_profit_condition()
-                    price_out_of_range = True
-                    self.logger().warning(
-                        f"⚠️  Grid range exceeded (price {self.mid_price:.4f} < start {self.config.start_price:.4f}) "
-                        f"- but no position yet, so continuing"
+                elif self.config.side == TradeType.SELL:
+                    # Check if this is a futures SHORT grid
+                    is_short_mode = (
+                        self.config.custom_info and
+                        self.config.custom_info.get('trade_direction', '').lower() == 'short'
                     )
+                    if is_short_mode:
+                        # SHORT futures: out of range when price drops below end_price (TP zone)
+                        if self.mid_price < self.config.end_price:
+                            price_out_of_range = True
+                            self.logger().warning(
+                                f"⚠️  SHORT grid range exceeded (price {self.mid_price:.4f} < end {self.config.end_price:.4f}) "
+                                f"- but no position yet, so continuing"
+                            )
+                    else:
+                        # Traditional SELL: out of range when price drops below start_price
+                        if self.mid_price < self.config.start_price:
+                            price_out_of_range = True
+                            self.logger().warning(
+                                f"⚠️  Grid range exceeded (price {self.mid_price:.4f} < start {self.config.start_price:.4f}) "
+                                f"- but no position yet, so continuing"
+                            )
 
                 if price_out_of_range:
                     # Check if there's an open position (filled open orders without close orders)
@@ -3081,16 +3160,26 @@ class GridExecutor(ExecutorBase):
         Calculate the net pnl percentage
 
         DEFENSIVE: Prevents absurd values when filled_amount is tiny (precision bug)
-        Returns 0 if filled_amount < $0.01 (sub-penny position = meaningless %)
+        Returns 0 if filled_amount < $1 (sub-dollar position = meaningless %)
+        Also caps result at ±100% (anything beyond that is likely a calculation error)
 
         :return: The net pnl percentage.
         """
-        if self.filled_amount_quote <= Decimal("0.01"):
+        if self.filled_amount_quote <= Decimal("1"):
             # Position too small to calculate meaningful percentage
-            # (prevents -2162.46% display bugs from micro-fills)
+            # (prevents -2162.46% or -92.44% display bugs from micro-fills)
             return Decimal("0")
 
-        return self.get_net_pnl_quote() / self.filled_amount_quote
+        pnl_pct = self.get_net_pnl_quote() / self.filled_amount_quote
+
+        # Sanity check: cap at ±100% - anything higher is a calculation bug
+        # (e.g., from fees being larger than position due to precision issues)
+        if pnl_pct > Decimal("1"):
+            return Decimal("0")
+        if pnl_pct < Decimal("-1"):
+            return Decimal("0")
+
+        return pnl_pct
 
     async def _sleep(self, delay: float):
         """

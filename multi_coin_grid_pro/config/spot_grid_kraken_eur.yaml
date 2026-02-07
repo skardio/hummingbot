@@ -59,6 +59,8 @@ blacklist:
   - M-EUR
   - Q-EUR          # Kraken blokkeert Q-EUR trading voor NL accounts
   - STBL-EUR       # Kraken blokkeert STBL-EUR trading voor NL accounts
+  # NOTE: ORA-EUR and OPEN-EUR are now auto-detected and excluded by WebSocket validation
+  # No need to manually blacklist pairs that fail WS subscription anymore!
 
 
 # ==============================================================================
@@ -731,8 +733,22 @@ max_open_orders: 30               # Increased for 10 grids × 2 coins
 order_frequency: 3
 
 min_switch_interval_seconds: 600    # 🚀 FIX: 1800→600 (10 min - faster switching)
-min_hold_time_seconds: 1800        # 🔧 FIX: 300→1800 (30 min - allow grid sells time to execute!)
-max_hold_time_seconds: 14400      # ✅ NEW: 4 hours max hold → force rotation to better opportunities (prevents 21h+ stuck positions)
+min_hold_time_seconds: 7200        # 🔧 FIX: 1800→7200 (2 hours - give grid time to recover/DCA!)
+max_hold_time_seconds: 14400      # ✅ DEPRECATED: Use hard_hold_time_seconds instead
+
+# ==============================================================================
+# TREND-AWARE EXIT SYSTEM (Soft/Hard Hold Time)
+# ==============================================================================
+# Prevents "dom verkopen" after fixed time when trend is still bullish
+# After soft_hold: only exit if trend bearish OR pnl too negative
+# After hard_hold: always exit (bag-holder prevention)
+# ==============================================================================
+
+soft_hold_time_seconds: 7200       # ⏰ 2 uur - trend-aware exit kicks in
+hard_hold_time_seconds: 21600      # ⏰ 6 uur - always exit (bag-holder prevention)
+soft_exit_min_trend_pct: 0.3       # 📈 Trend must be > 0.3% to extend hold
+soft_exit_max_loss_pct: -1.5       # 📉 Exit even with good trend if loss > 1.5%
+soft_exit_extend_seconds: 1800     # ⏳ Extend by 30 min if trend bullish
 
 # ==============================================================================
 # STORY A1: MULTI-TIMEOUT LIFECYCLE (Professional Rotation)

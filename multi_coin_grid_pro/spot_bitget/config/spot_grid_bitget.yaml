@@ -182,6 +182,10 @@ blacklist:
   - OORT-USDT
   - FIS-USDT
   - NFP-USDT
+  # Low liquidity pairs - cause "Can't parse order status" errors
+  - IRYS-USDT
+  - AXS-USDT
+  - IDOL-USDT
 
 # ==============================================================================
 # DYNAMIC COIN DISCOVERY - Now works for Bitget!
@@ -651,8 +655,22 @@ order_frequency: 3
 # max_entry_spread_pct: removed (handled in smart_entry_filter)
 
 min_switch_interval_seconds: 600    # 🚀 FIX: 1800→600 (10 min - faster switching)
-min_hold_time_seconds: 1800         # 🔧 FIX: 300→1800 (30 min - allow grid sells time to execute!)
+min_hold_time_seconds: 7200         # 🔧 FIX: 1800→7200 (2 hours - give grid time to recover/DCA!)
 max_hold_time_seconds: 14400      # ✅ NEW: 4 hours max hold → force rotation to better opportunities
+
+# ==============================================================================
+# TREND-AWARE EXIT SYSTEM (Soft/Hard Hold Time)
+# ==============================================================================
+# Prevents "dom verkopen" after fixed time when trend is still bullish
+# After soft_hold: only exit if trend bearish OR pnl too negative
+# After hard_hold: always exit (bag-holder prevention)
+# ==============================================================================
+
+soft_hold_time_seconds: 7200       # ⏰ 2 uur - trend-aware exit kicks in
+hard_hold_time_seconds: 21600      # ⏰ 6 uur - always exit (bag-holder prevention)
+soft_exit_min_trend_pct: 0.3       # 📈 Trend must be > 0.3% to extend hold
+soft_exit_max_loss_pct: -1.5       # 📉 Exit even with good trend if loss > 1.5%
+soft_exit_extend_seconds: 1800     # ⏳ Extend by 30 min if trend bullish
 
 # TIMEOUT LIFECYCLE - prevents stuck positions
 no_fill_timeout_sec: 1200         # ⏰ 20 min - no fills → cancel + close (no inventory)

@@ -281,13 +281,35 @@ class TrendCalculator:
             exchange_name = self.connector.name.replace("_paper_trade", "")
             logger.info(f"📥 Loading historical data for {len(symbols_to_load)} coins from {exchange_name}...")
 
+            # Map connector names to ccxt exchange names
+            ccxt_exchange_map = {
+                "bitget_perpetual": "bitget",
+                "binance_perpetual": "binance",
+                "bybit_perpetual": "bybit",
+                "gate_io_perpetual": "gateio",
+                "okx_perpetual": "okx",
+                "kraken": "kraken",
+                "binance": "binance",
+                "kucoin": "kucoin",
+            }
+
+            ccxt_name = ccxt_exchange_map.get(exchange_name, exchange_name)
+
             # Create ccxt exchange instance dynamically
-            exchange_class = getattr(ccxt, exchange_name, None)
+            exchange_class = getattr(ccxt, ccxt_name, None)
             if not exchange_class:
-                logger.error(f"❌ Unsupported exchange for historical data: {exchange_name}")
+                logger.error(f"❌ Unsupported exchange for historical data: {exchange_name} (ccxt: {ccxt_name})")
                 return
 
-            exchange = exchange_class()
+            # For perpetual futures, we need to set options
+            exchange_options = {}
+            if "perpetual" in exchange_name:
+                exchange_options = {
+                    'defaultType': 'swap',  # For perpetual futures
+                    'options': {'defaultType': 'swap'}
+                }
+
+            exchange = exchange_class(exchange_options)
 
             # Calculate timeframe: get 30 hours of data (buffer for 5m candles)
             since_ms = int((time.time() - (30 * 3600)) * 1000)  # 30 hours ago
@@ -299,6 +321,14 @@ class TrendCalculator:
                 try:
                     # Convert XRP-EUR to XRP/EUR format for ccxt
                     ccxt_symbol = symbol.replace("-", "/")
+
+                    # For perpetual futures, add the margin coin suffix (e.g., BTC/USDT:USDT)
+                    if "perpetual" in exchange_name:
+                        # Extract quote currency (e.g., USDT from BTC/USDT)
+                        parts = ccxt_symbol.split("/")
+                        if len(parts) == 2:
+                            quote = parts[1]
+                            ccxt_symbol = f"{ccxt_symbol}:{quote}"
 
                     # Fetch 5-minute OHLCV data (limit = 720 candles max!)
                     # Supported timeframes: 1m, 5m, 15m, 30m, 1h, 4h, 1d
@@ -1234,13 +1264,19 @@ class TrendCalculator:
         return best_symbol
 
     def get_top_n_coins(self, n: int, min_trend_pct: float, exclude_coins: Optional[List[str]] = None,
-                        orderbook_config: Optional[dict] = None) -> List[str]:
+                        orderbook_config: Optional[dict] = None,
+                        trade_direction: str = "long") -> List[str]:
         """
-        Find top N coins with best (highest) trends, filtered by orderbook depth
+        Find top N coins with best trends, filtered by orderbook depth.
+
+        Supports LONG, SHORT, and AUTO trade directions:
+        - LONG: Returns coins with highest positive trends (>= min_trend_pct)
+        - SHORT: Returns coins with most negative trends (<= -min_trend_pct)
+        - AUTO: Returns coins with strongest trends (positive OR negative)
 
         Args:
             n: Number of top coins to return
-            min_trend_pct: Minimum trend percentage required
+            min_trend_pct: Minimum trend percentage required (absolute value)
             exclude_coins: Optional list of coin symbols to exclude from selection
             orderbook_config: Optional dict with depth filtering config:
                 - enabled: bool (default True if provided)
@@ -1249,10 +1285,14 @@ class TrendCalculator:
                 - depth_levels: int (default 10)
                 - min_depth_multiplier: float (default 5.0)
                 - order_size: Decimal (required if enabled)
+            trade_direction: "long", "short", or "auto" (default "long")
 
         Returns:
             List of symbols for top N coins, or empty list if no coins meet criteria
         """
+        # Normalize trade_direction
+        trade_direction = str(trade_direction).lower()
+
         # Parse orderbook config with mode support
         depth_filtering_enabled = False
         shadow_mode = False
@@ -1371,20 +1411,46 @@ class TrendCalculator:
             # Store ALL coins for fallback (even if below min_trend)
             all_coins.append((symbol, trend_value))
 
+            # Check if coin qualifies based on trade_direction
+            # LONG: need positive trend >= min_trend_pct
+            # SHORT: need negative trend <= -min_trend_pct
+            # AUTO: need strong trend in either direction (abs >= min_trend_pct)
+            passes = False
+            if trade_direction == "long":
+                passes = trend_value >= min_trend_pct
+            elif trade_direction == "short":
+                passes = trend_value <= -min_trend_pct
+            elif trade_direction == "auto":
+                passes = abs(trend_value) >= min_trend_pct
+            else:
+                # Default to long behavior for unknown directions
+                passes = trend_value >= min_trend_pct
+
             # DEBUG: Log first 5 coins to see what's happening
             if len(qualifying_coins) < 5:
                 logger.info(
                     f"🔍 DEBUG {symbol}: consensus={trend.consensus_trend_pct:.4f}%, "
-                    f"min_req={min_trend_pct:.4f}%, passes={trend_value >= min_trend_pct}"
+                    f"min_req={min_trend_pct:.4f}%, direction={trade_direction}, passes={passes}"
                 )
 
-            # Only include coins that meet minimum trend requirement
-            if trend_value >= min_trend_pct:
+            # Only include coins that meet the trend requirement for their direction
+            if passes:
                 qualifying_coins.append((symbol, trend_value))
 
-        # Sort both lists by trend strength (descending)
-        qualifying_coins.sort(key=lambda x: x[1], reverse=True)
-        all_coins.sort(key=lambda x: x[1], reverse=True)
+        # Sort by trend strength based on direction
+        # LONG: highest positive first
+        # SHORT: most negative first (lowest value)
+        # AUTO: strongest absolute trend first
+        if trade_direction == "short":
+            qualifying_coins.sort(key=lambda x: x[1], reverse=False)  # Most negative first
+            all_coins.sort(key=lambda x: x[1], reverse=False)
+        elif trade_direction == "auto":
+            qualifying_coins.sort(key=lambda x: abs(x[1]), reverse=True)  # Strongest absolute first
+            all_coins.sort(key=lambda x: abs(x[1]), reverse=True)
+        else:  # long
+            qualifying_coins.sort(key=lambda x: x[1], reverse=True)  # Most positive first
+            all_coins.sort(key=lambda x: x[1], reverse=True)
+
         top_n = qualifying_coins[:n]
 
         # Log depth filtering stats

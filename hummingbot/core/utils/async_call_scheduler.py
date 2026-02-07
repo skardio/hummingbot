@@ -35,7 +35,7 @@ class AsyncCallScheduler:
         return cls._acs_logger
 
     def __init__(self, call_interval: float = 0.01):
-        self._coro_queue: asyncio.Queue = asyncio.Queue()
+        self._coro_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)  # Bounded to prevent memory leak
         self._coro_scheduler_task: Optional[asyncio.Task] = None
         self._call_interval: float = call_interval
         self.reset_event_loop()

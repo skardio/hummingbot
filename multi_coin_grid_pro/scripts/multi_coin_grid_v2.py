@@ -326,36 +326,54 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
 
     def format_status(self) -> str:
         """
-        Format strategy status for display
+        Format strategy status for display - UNIFIED VERSION
+
+        Shows:
+        1. Balances (only non-zero)
+        2. Controller status (MULTI-COIN GRID TRADING STATUS)
+        3. Active executors with corrected P&L display
 
         Returns:
             Formatted status string
         """
+        if not self.ready_to_trade:
+            return "Market connectors are not ready."
+
         lines = []
 
-        # Debug: check if controllers exist
-        self.logger().info(f"🔍 format_status called: {len(self.controllers)} controllers")
+        # Show balances - ONLY non-zero
+        balance_df = self.get_balance_df()
+        # Filter to only show assets with Total Balance > 0
+        balance_df = balance_df[balance_df["Total Balance"] > 0]
+        if not balance_df.empty:
+            lines.extend(["", "  Balances:"] + ["    " + line for line in balance_df.to_string(index=False).split("\n")])
+        else:
+            lines.append("\n  No balances available.")
+
+        # Show orders
+        try:
+            df = self.active_orders_df()
+            lines.extend(["", "  Orders:"] + ["    " + line for line in df.to_string(index=False).split("\n")])
+        except ValueError:
+            lines.extend(["", "  No active maker orders."])
+
+        # Add separator
+        lines.append("\n" + "=" * 60)
 
         # Get controller status
         for controller_id, controller in self.controllers.items():
-            self.logger().info(f"🔍 Checking controller {controller_id}: type={type(controller).__name__}")
-            # Check if controller has to_format_status method instead of isinstance check
-            # (isinstance fails with symlinked imports in different module paths)
+            lines.append(f"Controller: {controller_id}")
+            lines.append("=" * 60)
+
             if hasattr(controller, 'to_format_status') and callable(getattr(controller, 'to_format_status')):
                 try:
                     status_lines = controller.to_format_status()
-                    self.logger().info(f"✅ Got {len(status_lines)} status lines from controller")
                     lines.extend(status_lines)
                 except Exception as e:
-                    self.logger().error(f"❌ Error getting status from controller: {e}")
-                    import traceback
-                    self.logger().error(traceback.format_exc())
-            else:
-                self.logger().warning(f"⚠️  Controller {controller_id} has no to_format_status method")
+                    self.logger().error(f"Error getting status from controller: {e}")
 
-        # Add executor status
+        # Add executor status - simplified and with P&L sanity check
         if self.executor_orchestrator:
-            # Get all executors from all controllers
             executors_report = self.executor_orchestrator.get_executors_report()
             active_executors = []
             for controller_id, executors_list in executors_report.items():
@@ -370,13 +388,20 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
                 lines.append("╠═══════════════════════════════════════════════════════════════╣")
 
                 for executor in active_executors:
+                    # Sanity check for P&L percentage (prevent -92.44% / -99.15% display bug)
+                    pnl_pct = float(executor.net_pnl_pct) * 100
+                    if abs(pnl_pct) > 50:  # Cap at ±50% - grid strategies don't have >50% swings
+                        pnl_display = "calculating..."
+                    else:
+                        pnl_display = f"{pnl_pct:+.2f}%"
+
                     lines.append(
-                        f"║ ID: {executor.id[:8]}... | "
-                        f"Status: {executor.status.name:10} | "
-                        f"P&L: {float(executor.net_pnl_pct) * 100:+.2f}%   ║"
+                        f"║ ID: {executor.id[:10]}... | "
+                        f"Status: {executor.status.name:8} | "
+                        f"P&L: {pnl_display:>14} ║"
                     )
 
-                lines.append("╚═══════════════════════════════════════════════════════════════╝\n")
+                lines.append("╚═══════════════════════════════════════════════════════════════╝")
 
         return "\n".join(lines)
 

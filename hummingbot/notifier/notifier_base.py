@@ -17,7 +17,7 @@ class NotifierBase:
 
     def __init__(self):
         self._started = False
-        self._message_queue: asyncio.Queue = asyncio.Queue()
+        self._message_queue: asyncio.Queue = asyncio.Queue(maxsize=5000)  # Bounded to prevent memory leak
         self._send_message_task: Optional[asyncio.Task] = None
 
     def add_message_to_queue(self, message: str):

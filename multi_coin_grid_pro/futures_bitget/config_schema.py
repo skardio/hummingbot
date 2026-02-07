@@ -14,10 +14,55 @@ class FuturesPositionMode(str, Enum):
     HEDGE = "HEDGE"
 
 
+class FuturesTradeDirection(str, Enum):
+    """Trading direction for futures grid."""
+    LONG = "long"      # Buy low, sell high (profit when price goes UP)
+    SHORT = "short"    # Sell high, buy low (profit when price goes DOWN)
+    AUTO = "auto"      # Automatically choose based on trend
+
+
 class FuturesGridBitgetConfig(MultiCoinGridConfig):
     """
     Extends the generic multi-coin config with Bitget futures-specific settings.
     """
+
+    # === TRADE DIRECTION (NEW!) ===
+    trade_direction: FuturesTradeDirection = Field(
+        default=FuturesTradeDirection.AUTO,
+        description="Trading direction: 'long' (profit when UP), 'short' (profit when DOWN), 'auto' (based on trend).",
+    )
+    auto_direction_threshold_pct: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=5.0,
+        description="Trend threshold for AUTO mode: >+X% = LONG, <-X% = SHORT.",
+    )
+
+    # === SHORT ENTRY THRESHOLDS ===
+    short_24h_min_pct: float = Field(
+        default=-1.0,
+        le=0,
+        description="24h trend must be below this value for SHORT entry (e.g., -1.0 = need 24h < -1%).",
+    )
+    short_4h_min_pct: float = Field(
+        default=-1.0,
+        le=0,
+        description="4h trend must be below this value for SHORT entry (e.g., -1.0 = need 4h < -1%).",
+    )
+    short_1h_max_pct: float = Field(
+        default=1.0,
+        description="1h trend can be up to this value for SHORT (allows small bounces, e.g., +1%).",
+    )
+    short_pump_1h_max: float = Field(
+        default=2.0,
+        ge=0.5,
+        description="Reject SHORT if 1h trend exceeds this (pump protection, e.g., reject if 1h > +2%).",
+    )
+    short_pump_4h_max: float = Field(
+        default=1.0,
+        ge=0.5,
+        description="AND 4h trend exceeds this (both required for pump rejection).",
+    )
 
     derivative_leverage: int = Field(
         default=1,
@@ -90,9 +135,9 @@ class FuturesGridBitgetConfig(MultiCoinGridConfig):
     )
     risk_guard_sell_starvation_seconds: int = Field(
         default=900,
-        ge=180,
+        ge=0,  # 0 = disabled (grid executor tracks sells internally)
         le=3600,
-        description="Max tijd (seconden) zonder sell voordat we exit doen (15min = 900s).",
+        description="Max tijd (seconden) zonder sell voordat we exit doen. 0 = disabled.",
     )
     risk_guard_trend_break_pct: float = Field(
         default=-1.5,
@@ -114,4 +159,38 @@ class FuturesGridBitgetConfig(MultiCoinGridConfig):
     warmup_min_1h_trend_pct: float = Field(
         default=0.5,
         description="Minimum 1h trend (%) tijdens warmup fase.",
+    )
+
+    # === EXCHANGE-SIDE STOP LOSS (SAFETY NET) ===
+    # These orders are placed on Bitget itself, so if the bot crashes,
+    # the exchange will still close the position automatically.
+    exchange_stop_loss_enabled: bool = Field(
+        default=True,
+        description="Place a stop-loss order on Bitget when grid starts (safety net if bot crashes).",
+    )
+    exchange_stop_loss_pct: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=20.0,
+        description="Stop-loss trigger distance from entry (%). E.g., 5.0 = SL triggers at -5% for LONG.",
+    )
+    exchange_take_profit_enabled: bool = Field(
+        default=False,
+        description="Place a take-profit order on Bitget (optional, grid already handles TP).",
+    )
+    exchange_take_profit_pct: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=50.0,
+        description="Take-profit trigger distance from entry (%). E.g., 10.0 = TP triggers at +10% for LONG.",
+    )
+
+    # === DYNAMIC FEATURE TOGGLES (for small accounts) ===
+    use_dynamic_grid_sizer: bool = Field(
+        default=True,
+        description="Use ATR-based dynamic grid sizing. Disable for small accounts to keep fixed num_grids.",
+    )
+    use_volatility_position_sizing: bool = Field(
+        default=True,
+        description="Adjust position size based on volatility. Disable for small accounts to prevent order size < min.",
     )

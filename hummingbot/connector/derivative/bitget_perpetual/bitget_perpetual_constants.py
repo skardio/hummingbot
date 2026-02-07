@@ -71,6 +71,10 @@ SET_POSITION_MODE_ENDPOINT = "/api/v2/mix/account/set-position-mode"
 SET_MARGIN_MODE_ENDPOINT = "/api/v2/mix/account/set-margin-mode"
 ACCOUNT_BILLS_ENDPOINT = "/api/v2/mix/account/bill"
 
+# TPSL (Take Profit / Stop Loss) Plan Orders
+PLACE_TPSL_ORDER_ENDPOINT = "/api/v2/mix/order/place-tpsl-order"
+CANCEL_TPSL_ORDER_ENDPOINT = "/api/v2/mix/order/cancel-plan-order"
+
 API_CODE = "bntva"
 
 PUBLIC_WS_BOOKS = "books"
@@ -117,4 +121,6 @@ RATE_LIMITS = [
     RateLimit(limit_id=ACCOUNT_BILLS_ENDPOINT, limit=10, time_interval=1),
     RateLimit(limit_id=SET_POSITION_MODE_ENDPOINT, limit=5, time_interval=1),
     RateLimit(limit_id=SET_MARGIN_MODE_ENDPOINT, limit=5, time_interval=1),
+    RateLimit(limit_id=PLACE_TPSL_ORDER_ENDPOINT, limit=10, time_interval=1),
+    RateLimit(limit_id=CANCEL_TPSL_ORDER_ENDPOINT, limit=10, time_interval=1),
 ]

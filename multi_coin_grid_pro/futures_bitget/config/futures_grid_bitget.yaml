@@ -1,39 +1,118 @@
 controller_name: futures_grid_bitget
 log_level: INFO
 
-paper_trading: true
+paper_trading: false  # ← LIVE TRADING
 connector_name: bitget_perpetual
 quote_asset: USDT
+
+# ============================================================
+# TRADE DIRECTION (NEW!)
+# ============================================================
+# "long"  - Only LONG grids (buy low, sell high) - profit when UP
+# "short" - Only SHORT grids (sell high, buy low) - profit when DOWN
+# "auto"  - Auto-select based on trend (best for changing markets!)
+# ============================================================
+trade_direction: auto
+auto_direction_threshold_pct: 1.0   # Trend must be >+1% for LONG or <-1% for SHORT
+
+# SHORT entry thresholds (used when direction=short or auto selects short)
+short_24h_min_pct: -1.0      # 24h trend must be < -1% for SHORT
+short_4h_min_pct: -1.0       # 4h trend must be < -1% for SHORT
+short_1h_max_pct: 1.0        # 1h trend can be up to +1% (allow small bounces)
+short_pump_1h_max: 2.0       # Reject SHORT if 1h > +2% (pump protection)
+short_pump_4h_max: 1.0       # AND 4h > +1% (both required for pump reject)
 
 # === CAPITAL MANAGEMENT ===
 total_amount_quote: 50           # Totaal capital in USDT
 min_order_amount_quote: 5          # Minimum order size
 derivative_leverage: 5            # Leverage 1-125x (START MET 5-10x!)
-max_exposure_per_coin_pct: 0.2     # Max 20% per coin
-max_total_exposure_pct: 0.9        # Max 90% totaal
+max_exposure_per_coin_pct: 0.4     # Max 40% per coin = 20 USDT (voor 2 coins)
+max_total_exposure_pct: 0.9        # Max 90% totaal = 45 USDT
+max_simultaneous_coins: 2          # Max 2 grids (50/2=25, met 2 levels = 12.5 per order > 5 min)
+
+# ============================================================
+# DYNAMIC SLOTS - DISABLED FOR SMALL ACCOUNTS
+# ============================================================
+# With €50 capital, dynamic slots calculates 4 coins which is too many.
+# We disable it to use max_simultaneous_coins instead.
+dynamic_slots:
+  enabled: false                   # Disable dynamic slots, use max_simultaneous_coins
+
+# Risk reference balance - SET TO YOUR ACTUAL ACCOUNT BALANCE!
+# This is used to calculate exposure limits (max_total_exposure_pct applies to this)
+risk_reference_balance_quote: 1500   # Jouw Bitget account balans (~€1500 gezien €1122 exposure)
+
+# ============================================================
+# RISK MANAGER PER-TRADE LIMITS - CRITICAL FOR ORDER SIZING!
+# ============================================================
+# FORMULA: max_trade = risk_reference_balance × (risk_max_balance_per_trade_pct / 100)
+# THEN:    per_coin = max_trade / max_simultaneous_coins
+#
+# Example with current settings:
+#   max_trade = 1500 × 5% = 75 USDT
+#   per_coin  = 75 / 2    = 37.5 USDT per coin
+#   per_order = 37.5 / 4 levels = ~9 USDT (> 5 USDT min, OK!)
+#
+# WARNING: If per_order < min_order_amount_quote (5 USDT), orders FAIL silently!
+# ============================================================
+risk_max_balance_per_trade_pct: 5.0     # 5% = max 75 USDT per trade (was 0.5% = 7.5 USDT, te laag!)
+risk_max_total_open_risk_pct: 10.0      # 10% = max 150 USDT totaal open (2 coins à 75 USDT)
 
 # === POSITION MODE ===
-position_mode: ONEWAY              # ONEWAY (simpel) of HEDGE (advanced)
+position_mode: HEDGE               # HEDGE omdat bestaande posities in HEDGE mode zijn geopend!
 
-# Trading universe
+# Trading universe - Top Bitget perpetual pairs (verified)
 manual_trading_pairs:
+  # === TOP 10 MAJORS ===
   - BTC-USDT
   - ETH-USDT
   - SOL-USDT
   - XRP-USDT
-  - LINK-USDT
-  - AVAX-USDT
+  - BNB-USDT
+  - ADA-USDT
   - DOGE-USDT
+  - AVAX-USDT
+  - DOT-USDT
+  - LINK-USDT
+  # === LAYER 2 & SCALING ===
+  - POL-USDT
   - ARB-USDT
   - OP-USDT
+  - IMX-USDT
+  - STRK-USDT
+  # === NEW GEN L1 ===
   - SUI-USDT
   - SEI-USDT
+  - APT-USDT
   - TIA-USDT
   - INJ-USDT
+  # === DEFI ===
+  - UNI-USDT
+  - AAVE-USDT
+  - LDO-USDT
+  - CRV-USDT
+  - COMP-USDT
+  # === AI & DATA ===
+  - FET-USDT
+  - AR-USDT
+  - GRT-USDT
+  - TAO-USDT
+  - WLD-USDT
+  # === GAMING & METAVERSE ===
+  - AXS-USDT
+  - SAND-USDT
+  - MANA-USDT
+  - GALA-USDT
+  - ENJ-USDT
+  # === COSMOS ECOSYSTEM ===
   - ATOM-USDT
-  - APT-USDT
+  - NEAR-USDT
+  # === MEMES (hoge volatiliteit = veel kansen!) ===
+  - SHIB-USDT
+  - PEPE-USDT
+  - WIF-USDT
 
-max_coins_to_monitor: 10
+max_coins_to_monitor: 15
 min_24h_volume_eur: 500000
 exclude_expensive_coins: false
 
@@ -42,7 +121,8 @@ trend_lookback_minutes: 1440
 trend_lookback_short_minutes: 60
 trend_lookback_mid_minutes: 240
 trend_lookback_long_minutes: 1440
-use_multi_timeframe: true
+use_multi_timeframe: false
+use_multi_timeframe_buy: false       # MTF protection DISABLED voor SHORT testing
 switch_threshold_percent: 1.0
 min_switch_interval_seconds: 900
 min_hold_time_seconds: 900
@@ -50,16 +130,24 @@ min_hold_time_seconds: 900
 # Grids (perps optimized)
 grid_range_pct_down: 5.0            # groter
 grid_range_pct_up: 12.0             # groter
-num_grids: 4                        # extra fill
+num_grids: 2                        # FIXED: 2 levels zodat 12.5/2=6.25 > 5 min
 use_atr_grid_ranges: true
 atr_multiplier_down: 1.0
 atr_multiplier_up: 1.5
 use_asymmetric_grids: true
 smart_refill_threshold_pct: 3.0
 
+# ============================================================
+# DYNAMIC FEATURES - DISABLED FOR SMALL ACCOUNTS (<€100)
+# ============================================================
+# These features adjust grid count and position size based on volatility.
+# With small capital, this can cause orders to fall below minimum.
+use_dynamic_grid_sizer: false        # Don't adjust num_grids dynamically
+use_volatility_position_sizing: false  # Don't reduce position size for high volatility
+
 # Risk
-stop_loss_pct: 0.10                 # ruimer
-take_profit_pct: 0.02
+stop_loss_pct: 0.015                # 1.5% SL (met 5x leverage = 7.5% capital risk)
+take_profit_pct: 0.02               # 2% TP per grid level
 max_open_orders: 6
 order_frequency: 3
 
@@ -76,6 +164,29 @@ max_daily_loss_eur: 50.0             # USDT for futures
 coin_rotation_threshold: 90
 trend_min_change_pct: 0.1  # Verlaagd van 0.5 naar 0.1 voor bear markets (futures)
 price_update_interval: 30
+
+# ============================================================
+# STALENESS THRESHOLDS (verhoogd voor perpetuals)
+# ============================================================
+# Bitget perps hebben soms tragere websocket updates dan spot
+# Default is 2000ms - te strikt voor perps API
+max_price_age_ms: 30000              # 30 seconden (was 2s - te strikt)
+max_orderbook_age_ms: 60000          # 60 seconden (was 5s)
+
+# ============================================================
+# EXCHANGE-SIDE STOP LOSS (SAFETY NET!)
+# ============================================================
+# Deze orders worden op Bitget zelf geplaatst.
+# Als de bot crasht, sluit Bitget de positie automatisch!
+#
+# BELANGRIJK: Dit is je LAATSTE VERDEDIGINGSLIJN tegen liquidatie.
+# ============================================================
+
+exchange_stop_loss_enabled: true     # Plaats SL order op Bitget (AANBEVOLEN!)
+exchange_stop_loss_pct: 5.0          # SL trigger bij -5% van entry (voor 5x = -25% van capital)
+
+exchange_take_profit_enabled: false  # TP via grid is beter, maar kan aan
+exchange_take_profit_pct: 10.0       # Als aan: TP trigger bij +10% van entry
 
 # ============================================================
 # FUTURES-SPECIFIC RISK MANAGEMENT
@@ -105,17 +216,30 @@ futures_emergency_exit_pct: -1.5             # Emergency exit bij -1.5% (ipv -2%
 futures_hard_stop_pct: -2.5                  # Hard stop bij -2.5% (ipv -3% spot)
 
 # === ENTRY FILTERS (MULTI-TIMEFRAME) ===
-# Alleen traden in DUIDELIJKE UPTREND!
-# Futures grid in downtrend = liquidatie risico
+# Alleen traden in DUIDELIJKE TREND!
+# Met trade_direction=auto: LONG bij uptrend, SHORT bij downtrend
 #
+# MTF Thresholds (voor trend richting detectie):
+# Deze worden GEÏNVERTEERD voor SHORT trades automatisch
+mtf_1h_min_pct: -3.0           # LONG: 1h > -3%, SHORT: 1h < +3%
+mtf_4h_min_pct: -2.5           # LONG: 4h > -2.5%, SHORT: 4h < +2.5%
+mtf_24h_min_pct: -2.5          # LONG: 24h > -2.5%, SHORT: 24h < +2.5%
+mtf_declining_1h_max: -4.0     # Crash (LONG) / Pump (SHORT) protection
+mtf_declining_4h_max: -2.0
+
 # Normale trading (24h data beschikbaar):
 futures_min_entry_strength_24h: 1.5          # 24h trend > +1.5% VERPLICHT
 futures_min_entry_strength_4h: 1.0           # 4h trend > +1.0% VERPLICHT
 futures_min_entry_strength_1h: 0.0           # 1h trend ≥ 0.0% VERPLICHT
 #
 # Warmup mode (24h data nog niet compleet, eerste uur bot draait):
-warmup_min_4h_trend_pct: 1.0                 # 4h trend > +1.0%
-warmup_min_1h_trend_pct: 0.5                 # 1h trend ≥ +0.5%
+# Versoepeld voor SHORT: 4h hoeft maar -0.3% te zijn (markt daalt langzaam)
+warmup_min_4h_trend_pct: 0.3                 # 4h trend > +0.3% (LONG) of < -0.3% (SHORT)
+warmup_min_1h_trend_pct: 0.3                 # 1h trend ≥ +0.3% (LONG) of ≤ -0.3% (SHORT)
+
+# Trend confirmation
+trend_confirmation_timeframes: 1             # Hoeveel timeframes moeten confirmeren
+trend_min_entry_strength: 0.001              # Minimale trendsterkte voor entry
 
 # ============================================================
 # RISKGUARD: AUTOMATISCHE KILL-SWITCHES
@@ -153,10 +277,12 @@ risk_guard_max_grid_depth_pct: 0.65          # Stop als 65% van levels gevuld
 #                                            # Agressief: 0.80 (80%, gevaarlijk!)
 
 # --- GUARD 4: SELL STARVATION ---
+# ⚠️  DISABLED: Grid executor tracks sells internally, not via notify_sell_filled()
 # Stop als geen sell orders gevuld worden
 # Geen sells = geen profit = alleen funding fees betalen
 #
-risk_guard_sell_starvation_seconds: 900      # Stop na 15 min zonder sell
+risk_guard_sell_starvation_seconds: 0        # 0 = DISABLED (grid tracks internally)
+#                                            # Was: 900s (15 min zonder sell)
 #                                            # Conservatief: 600s (10 min)
 #                                            # Agressief: 1800s (30 min)
 

@@ -63,9 +63,14 @@ class DynamicSlotManager:
         # Currency symbol for logging
         self.currency_symbol = "$" if self.quote_asset in ("USD", "USDT", "USDC") else "€"
 
-        # Allow config to override regime multipliers
+        # Allow config to override regime multipliers (ensure Decimal type)
         custom_multipliers = config.get("regime_multipliers", {})
-        self.regime_multipliers = {**self.REGIME_MULTIPLIERS, **custom_multipliers}
+        # Convert custom multipliers to Decimal to avoid type mismatch
+        custom_multipliers_decimal = {
+            k: Decimal(str(v)) if not isinstance(v, Decimal) else v
+            for k, v in custom_multipliers.items()
+        }
+        self.regime_multipliers = {**self.REGIME_MULTIPLIERS, **custom_multipliers_decimal}
 
     def logger(self) -> logging.Logger:
         if self._logger is None:

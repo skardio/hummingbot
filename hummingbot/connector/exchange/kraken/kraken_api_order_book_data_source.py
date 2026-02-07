@@ -22,6 +22,11 @@ if TYPE_CHECKING:
 
 
 class KrakenAPIOrderBookDataSource(OrderBookTrackerDataSource):
+    # Track pairs that failed WebSocket subscription (class-level to persist across reconnects)
+    _ws_failed_pairs: set = set()
+    _ws_error_counts: dict = {}  # {pair: count}
+    _WS_ERROR_THRESHOLD: int = 3  # Auto-skip after 3 errors
+
     async def resubscribe_pair(self, trading_pair: str, ws: Optional[WSAssistant] = None):
         """
         Unsubscribes and then re-subscribes to order book and trade channels for a single trading pair.
@@ -173,8 +178,49 @@ class KrakenAPIOrderBookDataSource(OrderBookTrackerDataSource):
         else:
             if event_message.get("errorMessage") is not None:
                 err_msg = event_message.get("errorMessage")
+                # Check if this is a "pair not supported" error - handle gracefully
+                if "pair not supported" in err_msg.lower() or "currency pair not supported" in err_msg.lower():
+                    # Extract the pair from error message (e.g., "Currency pair not supported ORA/EUR")
+                    import re
+                    pair_match = re.search(r'([A-Z0-9]+/[A-Z]+)', err_msg)
+                    if pair_match:
+                        failed_pair = pair_match.group(1)
+                        # Track error count
+                        KrakenAPIOrderBookDataSource._ws_error_counts[failed_pair] = \
+                            KrakenAPIOrderBookDataSource._ws_error_counts.get(failed_pair, 0) + 1
+                        count = KrakenAPIOrderBookDataSource._ws_error_counts[failed_pair]
+
+                        # Only log once when first seen or when hitting threshold
+                        if count == 1:
+                            self.logger().warning(
+                                f"⚠️  WebSocket: {failed_pair} not supported by Kraken WS API - will auto-skip"
+                            )
+
+                        # Add to failed pairs after threshold
+                        if count >= KrakenAPIOrderBookDataSource._WS_ERROR_THRESHOLD:
+                            if failed_pair not in KrakenAPIOrderBookDataSource._ws_failed_pairs:
+                                KrakenAPIOrderBookDataSource._ws_failed_pairs.add(failed_pair)
+                                self.logger().warning(
+                                    f"🚫 WebSocket: {failed_pair} auto-blacklisted after {count} errors"
+                                )
+
+                        # Return empty channel instead of raising - this skips the message gracefully
+                        return ""
+
+                # For other errors, still raise
                 raise IOError(f"Error event received from the server ({err_msg})")
         return channel
+
+    @classmethod
+    def get_ws_failed_pairs(cls) -> set:
+        """Get set of pairs that failed WebSocket subscription (for external filtering)"""
+        return cls._ws_failed_pairs.copy()
+
+    @classmethod
+    def clear_ws_failed_pairs(cls):
+        """Clear the failed pairs set (e.g., on bot restart)"""
+        cls._ws_failed_pairs.clear()
+        cls._ws_error_counts.clear()
 
     async def _connected_websocket_assistant(self) -> WSAssistant:
         ws: WSAssistant = await self._api_factory.get_ws_assistant()
@@ -190,7 +236,18 @@ class KrakenAPIOrderBookDataSource(OrderBookTrackerDataSource):
         ]
         for trade in trades:
             trade_msg: OrderBookMessage = KrakenOrderBook.trade_message_from_exchange(trade)
-            message_queue.put_nowait(trade_msg)
+            try:
+                message_queue.put_nowait(trade_msg)
+            except asyncio.QueueFull:
+                # Queue is full, drop oldest message and add new one
+                try:
+                    message_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    message_queue.put_nowait(trade_msg)
+                except asyncio.QueueFull:
+                    pass  # Still full, skip this message
 
     async def _parse_order_book_diff_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
         msg_dict = {"trading_pair": convert_from_exchange_trading_pair(raw_message[-1]),
@@ -206,4 +263,15 @@ class KrakenAPIOrderBookDataSource(OrderBookTrackerDataSource):
         else:
             order_book_message: OrderBookMessage = KrakenOrderBook.diff_message_from_exchange(
                 msg_dict, time.time())
-        message_queue.put_nowait(order_book_message)
+        try:
+            message_queue.put_nowait(order_book_message)
+        except asyncio.QueueFull:
+            # Queue is full, drop oldest message and add new one
+            try:
+                message_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                message_queue.put_nowait(order_book_message)
+            except asyncio.QueueFull:
+                pass  # Still full, skip this message

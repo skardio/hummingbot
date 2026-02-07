@@ -298,6 +298,7 @@ def validate_order_before_submit(
     trading_rules,
     available_balance: Decimal,
     min_notional_buffer_pct: float = 0.10,
+    is_perpetual: bool = False,  # For futures: balance is quote asset (margin)
 ) -> StandaloneValidationResult:
     """
     Standalone order validation without connector dependency.
@@ -387,8 +388,22 @@ def validate_order_before_submit(
 
     # 7. Check balance
     if available_balance is not None:
-        if side_str == "BUY":
-            # For buy: need notional + buffer
+        if is_perpetual:
+            # For perpetual futures: both BUY and SELL use quote asset as margin
+            # The available_balance passed in is already the quote (USDT) balance
+            # For shorts, we just need enough margin, not the actual asset
+            # Margin requirement is roughly: notional / leverage (but we don't have leverage here)
+            # So just check if we have some reasonable balance
+            # Note: actual margin check should be done by connector
+            required = notional * Decimal("0.25")  # Assume ~4x leverage, need 25% as margin
+            if available_balance < required:
+                return StandaloneValidationResult(
+                    is_valid=False,
+                    skip_reason=OrderSkipReason.INSUFFICIENT_BALANCE,
+                    message=f"Insufficient margin: have {float(available_balance):.4f}, need ~{float(required):.4f}"
+                )
+        elif side_str == "BUY":
+            # For spot buy: need notional + buffer
             required = notional * Decimal("1.05")  # 5% buffer for fees
             if available_balance < required:
                 return StandaloneValidationResult(
@@ -397,7 +412,7 @@ def validate_order_before_submit(
                     message=f"Insufficient balance: have {float(available_balance):.4f}, need {float(required):.4f}"
                 )
         else:
-            # For sell: need quantity
+            # For spot sell: need quantity
             if available_balance < quantized_qty:
                 return StandaloneValidationResult(
                     is_valid=False,
