@@ -14,6 +14,7 @@ The risk manager tracks:
 from __future__ import annotations
 
 import datetime as _dt
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, MutableMapping, Optional
@@ -289,10 +290,14 @@ class GlobalRiskManager:
 
     @property
     def cumulative_daily_loss_quote(self) -> Decimal:
+        # Auto-reset on new day when accessed
+        self._reset_if_new_day(time.time())
         return self._daily_loss_quote
 
     @property
     def daily_loss_pct(self) -> Decimal:
+        # Auto-reset on new day when accessed
+        self._reset_if_new_day(time.time())
         if self._reference_balance_quote == DecimalZero:
             return DecimalZero
         return (self._daily_loss_quote / self._reference_balance_quote) * DecimalHundred
@@ -300,3 +305,51 @@ class GlobalRiskManager:
     @property
     def total_open_notional(self) -> Decimal:
         return self._total_open_notional
+
+    @property
+    def daily_realised_pnl(self) -> Decimal:
+        """Daily realised PnL in quote currency"""
+        # Auto-reset on new day when accessed
+        self._reset_if_new_day(time.time())
+        return self._daily_realised_pnl_quote
+
+    def reset_daily_loss(self, reason: str = "manual") -> None:
+        """
+        Reset daily loss tracking. Used for:
+        - External fill reconciliation (fills detected outside bot)
+        - Manual reset after false positive loss detection
+
+        Args:
+            reason: Why the reset is being performed (for logging)
+        """
+        old_loss = self._daily_loss_quote
+        self._daily_loss_quote = DecimalZero
+        self._daily_realised_pnl_quote = DecimalZero
+        self._consecutive_losses = 0
+        self._last_loss_time = None
+        # Log for audit trail
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            f"🔄 DAILY_LOSS_RESET: reason={reason} | "
+            f"old_loss={float(old_loss):.2f} | new_loss=0.00"
+        )
+
+    def adjust_daily_loss(self, adjustment_quote: Decimal, reason: str = "reconciliation") -> None:
+        """
+        Adjust daily loss by a specific amount. Used when reconciling
+        external fills that were tracked incorrectly.
+
+        Args:
+            adjustment_quote: Amount to subtract from daily loss (positive = reduce loss)
+            reason: Why adjustment is being made
+        """
+        old_loss = self._daily_loss_quote
+        self._daily_loss_quote = max(DecimalZero, self._daily_loss_quote - adjustment_quote)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            f"🔄 DAILY_LOSS_ADJUST: reason={reason} | "
+            f"adjustment={float(adjustment_quote):+.2f} | "
+            f"old_loss={float(old_loss):.2f} | new_loss={float(self._daily_loss_quote):.2f}"
+        )

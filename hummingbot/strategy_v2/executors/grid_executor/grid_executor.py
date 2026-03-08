@@ -107,6 +107,11 @@ class GridExecutor(ExecutorBase):
         self._insufficient_funds_retries = 0
         self._max_insufficient_funds_retries = 3  # After 3 attempts, mark executor as failed
 
+        # CRITICAL FIX: Balance mismatch spam prevention
+        # Track close order placement attempts when balance < order amount
+        self._balance_mismatch_attempts = 0
+        self._max_balance_mismatch_attempts = 10  # Stop after 10 failed attempts
+
         # Cancel retry backoff tracking (BITGET FIX)
         # Prevents excessive cancel retries when exchange is slow to confirm
         self._cancel_request_times = {}  # order_id -> last cancel request timestamp
@@ -121,6 +126,15 @@ class GridExecutor(ExecutorBase):
         # Phase 1+3: Closing state management (prevent double sell bug)
         self._closing_in_progress = False  # Guard flag to prevent duplicate close orders
         self._close_order_id = None  # Track active close order ID
+
+        # ==============================================================================
+        # EXCHANGE BALANCE SYNC FIX: Delay SELL after BUY fill
+        # Kraken/Bitget/other exchanges take 2-5 seconds to update balance after a fill.
+        # Without this delay, SELL orders fail with "Insufficient funds" because
+        # the connector reports 0 balance while the exchange is still processing.
+        # Set to 5s to match the connector's SHORT_POLL_INTERVAL (5 seconds).
+        # ==============================================================================
+        self._balance_sync_delay = 5.0  # seconds to wait after BUY fill before placing SELL
 
         # ==============================================================================
         # STORY A1: Multi-Timeout Lifecycle Tracking
@@ -242,6 +256,15 @@ class GridExecutor(ExecutorBase):
                 # For spot SELL: need base asset
                 base_asset = trading_pair.split("-")[0] if "-" in trading_pair else trading_pair
                 available_balance = connector.get_available_balance(base_asset)
+
+                # FIX: Race condition after BUY fill - exchange balance may not be updated yet
+                # If exchange reports 0 but we have tracked inventory from fills, use tracked amount
+                if available_balance == Decimal("0") and self.position_size_base > Decimal("0"):
+                    self.logger().debug(
+                        f"📊 Balance sync fix: Exchange reports 0 {base_asset}, using tracked position "
+                        f"{float(self.position_size_base):.6f} for SELL validation"
+                    )
+                    available_balance = self.position_size_base
         except Exception as e:
             self.logger().warning(f"⚠️  US-003: Could not get balance for {trading_pair}: {e} - proceeding without validation")
             available_balance = Decimal("999999")  # Skip balance check
@@ -402,7 +425,15 @@ class GridExecutor(ExecutorBase):
                         # US-006: Set early stop reason
                         self._early_stop_reason = EarlyStopReason.INSUFFICIENT_BALANCE
                         self.logger().error("Not enough budget to open position.")
-                        self.stop()
+                        # FIX: Check if we have inventory to sell before stopping
+                        self.update_position_metrics()
+                        if self.position_size_base > Decimal("0"):
+                            self.logger().warning(
+                                f"🔄 INSUFFICIENT_BALANCE but have inventory: {self.position_size_base} - initiating forced close"
+                            )
+                            self.start_forced_close(CloseType.INSUFFICIENT_BALANCE)
+                        else:
+                            self.stop()
                         return None
                     quote_asset = trading_pair_parts[1]
                     try:
@@ -421,7 +452,16 @@ class GridExecutor(ExecutorBase):
             # US-006: Set early stop reason
             self._early_stop_reason = EarlyStopReason.INSUFFICIENT_BALANCE
             self.logger().error("Not enough budget to open position.")
-            self.stop()
+            # FIX: Check if we have inventory to sell before stopping
+            self.update_position_metrics()
+            if self.position_size_base > Decimal("0"):
+                self.logger().warning(
+                    f"🔄 INSUFFICIENT_BALANCE but have inventory: {self.position_size_base} - initiating forced close"
+                )
+                self.start_forced_close(CloseType.INSUFFICIENT_BALANCE)
+            else:
+                self.stop()
+            return None
 
     def _generate_grid_levels(self):
         grid_levels = []
@@ -762,6 +802,10 @@ class GridExecutor(ExecutorBase):
                 connector = self.connectors[self.config.connector_name]
                 in_flight_order = connector.in_flight_orders.get(self._close_order_id)
 
+                # CRITICAL FIX (2026-02-26): Also check TrackedOrder's cached InFlightOrder
+                if in_flight_order is None and self._close_order and self._close_order.order:
+                    in_flight_order = self._close_order.order
+
                 if in_flight_order and not in_flight_order.is_done:
                     # Check how long order has been open
                     order_age = self._strategy.current_timestamp - in_flight_order.creation_timestamp
@@ -784,6 +828,21 @@ class GridExecutor(ExecutorBase):
                         # Set flag to force market order on next close attempt
                         self._force_aggressive_close = True
                         return True
+                elif in_flight_order is None:
+                    # CRITICAL FIX (2026-02-26): Order not in any tracker - check age
+                    # If order was placed but is no longer tracked, it's likely completed
+                    order_timestamp = getattr(self._close_order, 'creation_timestamp', None)
+                    if order_timestamp:
+                        order_age = self._strategy.current_timestamp - order_timestamp
+                        if order_age > 60:
+                            self.logger().info(
+                                f"✅ Story A1: Close order assumed completed (order_id: {self._close_order_id}, "
+                                f"order age: {order_age:.0f}s) - not found in any tracker"
+                            )
+                            # Reset state - the control_close_process will handle the transition
+                            self._closing_in_progress = False
+                            self._close_order_id = None
+                            return True
             except Exception as e:
                 self.logger().warning(f"⚠️  Could not check bounded close escalation: {e}")
 
@@ -1171,6 +1230,20 @@ class GridExecutor(ExecutorBase):
             close_order_ids_to_cancel = self.get_close_order_ids_to_cancel()
             for level in open_orders_to_create:
                 self.adjust_and_place_open_order(level)
+
+            # ==============================================================================
+            # EXCHANGE BALANCE SYNC FIX: Force balance refresh before placing SELL orders
+            # Kraken/Bitget only poll balances every 5 seconds via REST API.
+            # After a BUY fill, the local balance cache may still show 0.
+            # Force a fresh balance fetch before attempting to place SELL orders.
+            # ==============================================================================
+            if close_orders_to_create:
+                self.logger().debug(
+                    f"🔄 Executor {self.config.id[:8]}... Refreshing balance before placing "
+                    f"{len(close_orders_to_create)} close order(s)"
+                )
+                await self._refresh_connector_balances()
+
             for level in close_orders_to_create:
                 self.adjust_and_place_close_order(level)
             for orders_id_to_cancel in open_order_ids_to_cancel + close_order_ids_to_cancel:
@@ -1197,6 +1270,17 @@ class GridExecutor(ExecutorBase):
                     # Try to get order from connector's order tracker
                     in_flight_order = connector.in_flight_orders.get(self._close_order_id)
 
+                    # CRITICAL FIX (2026-02-26): Also check TrackedOrder's cached InFlightOrder
+                    # When order is filled and removed from connector's in_flight_orders,
+                    # the TrackedOrder may still have a reference to the InFlightOrder with correct state.
+                    # This was causing the CRV stuck bug where filled orders were not detected.
+                    if in_flight_order is None and self._close_order and self._close_order.order:
+                        in_flight_order = self._close_order.order
+                        self.logger().debug(
+                            f"🔍 PHASE 3.5: Using TrackedOrder's cached InFlightOrder "
+                            f"(order_id: {self._close_order_id}, state: {getattr(in_flight_order, 'current_state', 'unknown')})"
+                        )
+
                     if in_flight_order:
                         if in_flight_order.is_done:  # FILLED, CANCELED, or FAILED
                             if in_flight_order.is_filled:
@@ -1221,21 +1305,43 @@ class GridExecutor(ExecutorBase):
                                 f"⏳ Close order still pending (order_id: {self._close_order_id}, "
                                 f"state: {in_flight_order.current_state})"
                             )
+                    else:
+                        # CRITICAL FIX (2026-02-26): Order not found anywhere!
+                        # This happens when the order was filled and fully cleaned up from all trackers.
+                        # Check if enough time has passed to assume it completed.
+                        order_timestamp = getattr(self._close_order, 'creation_timestamp', None)
+                        if order_timestamp:
+                            order_age = self._strategy.current_timestamp - order_timestamp
+                            # If order was placed >60s ago and is not in any tracker, assume it filled
+                            if order_age > 60:
+                                self.logger().info(
+                                    f"✅ PHASE 3.5: Close order ASSUMED FILLED (order_id: {self._close_order_id}) - "
+                                    f"order age: {order_age:.0f}s, not found in any tracker"
+                                )
+                                self._status = RunnableStatus.SHUTTING_DOWN
+                                self._closing_in_progress = False
+                                return
 
                     # SECONDARY: Balance sanity check (in case order status not available)
+                    #
+                    # CRITICAL FIX (2026-02-23): Use get_balance() (total) instead of get_available_balance()!
+                    # When we have a pending LIMIT SELL order, our tokens are in "reserved" not "available".
+                    # Using get_available_balance() would incorrectly show ~0 and trigger premature shutdown.
+                    # This was the root cause of the SWEAT bug.
                     trading_pair_parts = self.config.trading_pair.split("-")
                     if len(trading_pair_parts) >= 2:
                         base_asset = trading_pair_parts[0]
-                        available_balance = self._coerce_to_decimal(
-                            connector.get_available_balance(base_asset)
+                        # Use get_balance() for total (available + reserved) balance
+                        total_balance = self._coerce_to_decimal(
+                            connector.get_balance(base_asset)
                         )
                         min_order_size = getattr(self.trading_rules, "min_order_size", Decimal("0"))
 
-                        # Only if balance is truly dust (< 10% of min), force transition
-                        if available_balance < min_order_size * Decimal("0.1"):
+                        # Only if TOTAL balance is truly dust (< 10% of min), force transition
+                        if total_balance < min_order_size * Decimal("0.1"):
                             self.logger().info(
                                 f"✅ PHASE 3.5: Position closed by BALANCE FALLBACK check "
-                                f"(remaining: {available_balance} {base_asset} < dust threshold {min_order_size * Decimal('0.1')})"
+                                f"(total_balance: {total_balance} {base_asset} < dust threshold {min_order_size * Decimal('0.1')})"
                             )
                             self._status = RunnableStatus.SHUTTING_DOWN
                             self._closing_in_progress = False
@@ -1244,7 +1350,7 @@ class GridExecutor(ExecutorBase):
                             if HAS_LOG_THROTTLE and should_log(f"close_pending_{self.config.id}", interval_sec=120):
                                 self.logger().debug(
                                     f"⏳ PHASE 3.5: Close order pending - order_id: {self._close_order_id}, "
-                                    f"balance: {available_balance} {base_asset}, min_order: {min_order_size} {base_asset}"
+                                    f"total_balance: {total_balance} {base_asset}, min_order: {min_order_size} {base_asset}"
                                 )
                 except Exception as e:
                     self.logger().warning(f"⚠️  Could not check close progress: {e}")
@@ -1463,21 +1569,41 @@ class GridExecutor(ExecutorBase):
 
                 # FIX: Also check actual exchange balance to detect externally sold positions
                 # This prevents infinite retry loops when coins were sold outside the bot
-                if not order_execution_completed:
+                #
+                # CRITICAL FIX (2026-02-23): Skip this check if we have a pending close order!
+                # When a LIMIT SELL order is placed, the exchange moves tokens from "available" to "reserved".
+                # If we check get_available_balance() while our own close order is pending, we'll see ~0
+                # and incorrectly conclude the position was "externally closed".
+                # This caused the SWEAT bug where the bot abandoned a position with an unfilled sell order.
+                has_pending_close_order = (
+                    self._close_order is not None and
+                    self._close_order.order is not None and
+                    not self._close_order.order.is_done
+                )
+
+                if not order_execution_completed and not has_pending_close_order:
                     try:
                         base_asset = self.config.trading_pair.split("-")[0]
-                        actual_balance = self._strategy.connectors[self.config.connector_name].get_available_balance(base_asset)
+                        # Use get_balance() (total) instead of get_available_balance() for more accurate check
+                        # This includes both available AND reserved (locked in orders) balance
+                        connector = self._strategy.connectors[self.config.connector_name]
+                        actual_balance = connector.get_balance(base_asset)
                         min_order_size = self.trading_rules.min_order_size if self.trading_rules else Decimal("0.00001")
                         if actual_balance < min_order_size:
                             self.logger().warning(
                                 f"⚠️ Position externally closed: tracked={self.position_size_base} {base_asset}, "
-                                f"actual={actual_balance} {base_asset} (< min {min_order_size}). "
+                                f"actual_total={actual_balance} {base_asset} (< min {min_order_size}). "
                                 f"Forcing shutdown to prevent infinite retries."
                             )
                             order_execution_completed = True
                             self.close_type = CloseType.FAILED  # Mark as failed since we didn't close it ourselves
                     except Exception as e:
                         self.logger().debug(f"Could not verify actual balance: {e}")
+                elif has_pending_close_order:
+                    self.logger().debug(
+                        f"⏳ Skipping external-close check: pending close order {self._close_order.order_id[:8]}... "
+                        f"(balance may be reserved)"
+                    )
 
                 if order_execution_completed:
                     # Story B1: Log unwind completion if we were in unwind mode
@@ -1584,6 +1710,19 @@ class GridExecutor(ExecutorBase):
                 # Wait for next loop (or manual action) before attempting again
                 return
 
+            # CRITICAL FIX: After 5 failed close attempts, force MARKET order
+            # This prevents infinite LIMIT order retries when price moves away or network issues
+            if self._balance_mismatch_attempts >= 5:
+                self.logger().error(
+                    f"❌ FORCE MARKET ORDER: After {self._balance_mismatch_attempts} failed close attempts, "
+                    f"switching from LIMIT to MARKET order to guarantee execution. "
+                    f"Original close_type: {self.close_type}, forcing to TIME_LIMIT (market)."
+                )
+                # Force market order by setting TIME_LIMIT close type
+                self.close_type = CloseType.HARD_CAP_TIME_LIMIT
+                # Reset counter to prevent spam
+                self._balance_mismatch_attempts = 0
+
             self.place_close_order_and_cancel_open_orders(
                 close_type=self.close_type,
                 price=close_price,
@@ -1623,69 +1762,83 @@ class GridExecutor(ExecutorBase):
         order_candidate = self._get_close_order_candidate(level)
         self.adjust_order_candidates(self.config.connector_name, [order_candidate])
 
-        # BUG FIX: Check available balance before placing close order
-        # Prevents infinite "Insufficient funds" retries when actual balance < order amount
+        # ==============================================================================
+        # BALANCE VALIDATION before placing close order
+        # NOTE: Balance sync delay is handled in get_close_orders_to_create() which waits
+        # 3 seconds after BUY fill before allowing SELL. If we get here, balance SHOULD
+        # be synced. This is a fallback check.
+        # ==============================================================================
         if order_candidate.amount > 0:
             try:
-                # Get actual available balance
                 base_asset = self.config.trading_pair.split("-")[0]
-                connector_balance = self._strategy.connectors[self.config.connector_name].get_available_balance(base_asset)
-
-                # FIX: Use internal position_size_base if connector balance seems stale/wrong
-                # This happens when Kraken balance sync is delayed after a fill
+                connector = self._strategy.connectors[self.config.connector_name]
+                connector_balance = connector.get_available_balance(base_asset)
                 internal_inventory = self.position_size_base
-                if connector_balance < order_candidate.amount and internal_inventory >= order_candidate.amount:
-                    self.logger().warning(
-                        f"⚠️ Executor {self.config.id[:8]}... Balance sync issue detected: "
-                        f"connector reports {connector_balance} {base_asset}, "
-                        f"but internal inventory is {internal_inventory} {base_asset}. "
-                        f"Proceeding with order using internal inventory."
-                    )
-                    # Don't adjust - trust the internal inventory and try to place the order
-                    # The exchange will reject if balance is truly insufficient
-                elif connector_balance < order_candidate.amount:
-                    # Get connector instance to call get_order_size_quantum
-                    connector = self._strategy.connectors[self.config.connector_name]
-                    min_order_size = connector.get_order_size_quantum(
-                        self.config.trading_pair, order_candidate.amount
-                    )
+                min_order_size = connector.get_order_size_quantum(
+                    self.config.trading_pair, order_candidate.amount
+                )
 
-                    if connector_balance >= min_order_size:
+                # Case 1: Connector has sufficient balance - proceed normally
+                if connector_balance >= order_candidate.amount:
+                    pass  # All good, place order
+
+                # Case 2: Balance still not synced after delay - this shouldn't happen often
+                # If it does, it means 3 seconds wasn't enough. Log and retry on next cycle.
+                elif connector_balance < order_candidate.amount and internal_inventory >= order_candidate.amount:
+                    self._balance_mismatch_attempts += 1
+                    if self._balance_mismatch_attempts <= 3:
+                        # First few attempts: wait for sync (will retry on next control_task cycle)
                         self.logger().warning(
-                            f"⚠️ Executor {self.config.id[:8]}... Adjusting close order: "
-                            f"requested {order_candidate.amount} {base_asset}, "
-                            f"available {connector_balance} {base_asset}, "
-                            f"using available balance"
+                            f"⏳ Executor {self.config.id[:8]}... Balance still syncing after delay "
+                            f"(attempt {self._balance_mismatch_attempts}/3): "
+                            f"connector={connector_balance}, internal={internal_inventory} {base_asset}. "
+                            f"Waiting for next cycle..."
                         )
-                        order_candidate.amount = connector_balance
+                        return  # Don't place order yet, retry on next cycle
                     else:
-                        # Check if internal inventory is also 0 - if so, position was truly sold externally
-                        if internal_inventory < min_order_size:
-                            self.logger().error(
-                                f"❌ Executor {self.config.id[:8]}... Cannot place close order: "
-                                f"available balance ({connector_balance} {base_asset}) "
-                                f"< minimum order size ({min_order_size} {base_asset}). "
-                                f"Position was likely sold externally. Terminating executor."
-                            )
-                            # Reset the level to prevent infinite retry loop
-                            level.reset_close_order()
+                        # After 3 retries: try placing order anyway, exchange will verify
+                        self.logger().warning(
+                            f"⚠️ Executor {self.config.id[:8]}... Balance sync timeout after {self._balance_mismatch_attempts} attempts. "
+                            f"Attempting order anyway (exchange will verify)."
+                        )
 
-                            # CRITICAL FIX: Mark position as externally closed and TERMINATE immediately
-                            self.close_type = CloseType.FAILED
-                            self._status = RunnableStatus.TERMINATED
-                            return
-                        else:
-                            # Internal inventory says we have coins, but connector disagrees
-                            # This is a balance sync issue - proceed with order, exchange will verify
-                            self.logger().warning(
-                                f"⚠️ Executor {self.config.id[:8]}... Balance discrepancy: "
-                                f"connector={connector_balance}, internal={internal_inventory} {base_asset}. "
-                                f"Proceeding with order - exchange will verify."
-                            )
+                # Case 3: Neither connector nor internal shows sufficient balance
+                elif connector_balance < min_order_size and internal_inventory < min_order_size:
+                    self.logger().error(
+                        f"❌ Executor {self.config.id[:8]}... No balance available: "
+                        f"connector={connector_balance}, internal={internal_inventory} {base_asset}. "
+                        f"Position was likely sold externally. Terminating."
+                    )
+                    level.reset_close_order()
+                    self.close_type = CloseType.FAILED
+                    self._status = RunnableStatus.TERMINATED
+                    self._early_stop_reason = EarlyStopReason.INSUFFICIENT_BALANCE
+                    return
+
+                # Case 4: Connector has partial balance - use what's available
+                elif connector_balance >= min_order_size:
+                    self._balance_mismatch_attempts += 1
+                    if self._balance_mismatch_attempts >= self._max_balance_mismatch_attempts:
+                        self.logger().error(
+                            f"❌ SPAM PREVENTION: Executor {self.config.id[:8]}... stopped after "
+                            f"{self._balance_mismatch_attempts} failed attempts. TERMINATING."
+                        )
+                        level.reset_close_order()
+                        self.close_type = CloseType.FAILED
+                        self._status = RunnableStatus.TERMINATED
+                        self._early_stop_reason = EarlyStopReason.INSUFFICIENT_BALANCE
+                        return
+
+                    self.logger().warning(
+                        f"⚠️ Executor {self.config.id[:8]}... Using partial balance: "
+                        f"requested {order_candidate.amount}, available {connector_balance} {base_asset}"
+                    )
+                    order_candidate.amount = connector_balance
+
             except Exception as e:
                 self.logger().warning(
                     f"⚠️ Could not verify balance before placing close order: {e}. "
-                    f"Proceeding with order placement (may fail)..."
+                    f"Proceeding with order placement..."
                 )
 
             # US-003: Use validated placement to prevent min notional/balance errors
@@ -1709,6 +1862,14 @@ class GridExecutor(ExecutorBase):
                         f"(was: {self._insufficient_funds_retries})"
                     )
                     self._insufficient_funds_retries = 0
+
+                # CRITICAL FIX: Also reset balance mismatch counter on success
+                if self._balance_mismatch_attempts > 0:
+                    self.logger().debug(
+                        f"✅ Close order placed successfully, resetting balance mismatch counter "
+                        f"(was: {self._balance_mismatch_attempts})"
+                    )
+                    self._balance_mismatch_attempts = 0
 
     def get_take_profit_price(self, level: GridLevel):
         return level.price * (1 + level.take_profit) if self.config.side == TradeType.BUY else level.price * (1 - level.take_profit)
@@ -2008,6 +2169,10 @@ class GridExecutor(ExecutorBase):
         CRITICAL FIX: Limits close orders to 1 per batch to prevent "Insufficient funds" race conditions
         when multiple levels try to sell the same inventory simultaneously.
 
+        EXCHANGE BALANCE SYNC FIX: Waits for balance_sync_delay (3s) after BUY fill before placing SELL.
+        This prevents "Insufficient funds" errors on Kraken, Bitget, and other exchanges where the
+        balance API doesn't update instantly after a fill.
+
         :return: List of levels that need close orders
         """
         close_orders_proposal = []
@@ -2023,11 +2188,34 @@ class GridExecutor(ExecutorBase):
         if n_close_orders_pending >= 1:
             return []
 
+        current_time = self._strategy.current_timestamp
+
         # FIX: ALWAYS place close (SELL) orders immediately after BUY is filled
         # The activation_bounds check was causing SELL orders to be delayed/skipped
         # when price was > activation_bounds away from TP price, leaving inventory unsold
         # activation_bounds should only apply to OPEN (BUY) orders, not CLOSE (SELL) orders
         for level in open_orders_filled:
+            # ==============================================================================
+            # EXCHANGE BALANCE SYNC FIX: Check if enough time has passed since BUY fill
+            # Kraken/Bitget/other exchanges take 2-5 seconds to update balance after fill.
+            # If we try to SELL too soon, the connector reports 0 balance and order fails.
+            # ==============================================================================
+            if level.active_open_order and level.active_open_order.last_update_timestamp:
+                fill_time = level.active_open_order.last_update_timestamp
+                time_since_fill = current_time - fill_time
+
+                # Only apply delay if time_since_fill is non-negative and within delay window
+                # Negative time_since_fill can happen in tests or if timestamps are misaligned
+                if 0 <= time_since_fill < self._balance_sync_delay:
+                    # Not enough time has passed - wait for balance to sync
+                    remaining = self._balance_sync_delay - time_since_fill
+                    self.logger().debug(
+                        f"⏳ Executor {self.config.id[:8]}... Balance sync delay: "
+                        f"waiting {remaining:.1f}s more before placing SELL "
+                        f"(fill was {time_since_fill:.1f}s ago, need {self._balance_sync_delay}s)"
+                    )
+                    continue  # Skip this level for now, will be picked up on next control_task cycle
+
             close_orders_proposal.append(level)
 
         # CRITICAL: Return max 1 close order at a time (serialize close orders)
@@ -2985,6 +3173,28 @@ class GridExecutor(ExecutorBase):
                 self._failed_orders.append(level.active_open_order.order_id)
                 self.max_open_creation_timestamp = 0
                 level.reset_open_order()
+
+                # CRITICAL FIX: Handle "Insufficient funds" on OPEN/BUY orders
+                # This prevents infinite retry spam when account has insufficient balance
+                if is_insufficient_funds:
+                    self._insufficient_funds_retries += 1
+                    self.logger().warning(
+                        f"⚠️ Executor {self.config.id[:8]}... OPEN order failed with 'Insufficient funds' "
+                        f"(retry {self._insufficient_funds_retries}/{self._max_insufficient_funds_retries}). "
+                        f"Account balance too low for {self.config.trading_pair}."
+                    )
+
+                    # Terminate immediately after max retries
+                    if self._insufficient_funds_retries >= self._max_insufficient_funds_retries:
+                        self.logger().error(
+                            f"❌ Executor {self.config.id[:8]}... TERMINATING: Insufficient funds after "
+                            f"{self._max_insufficient_funds_retries} retries. Need more {self.config.trading_pair.split('-')[1]} balance."
+                        )
+                        self._status = RunnableStatus.TERMINATED
+                        self.close_type = CloseType.INSUFFICIENT_BALANCE
+                        self._early_stop_reason = EarlyStopReason.INSUFFICIENT_BALANCE
+                        return
+
         for level in levels_close_order_placed:
             if event.order_id == level.active_close_order.order_id:
                 self._failed_orders.append(level.active_close_order.order_id)

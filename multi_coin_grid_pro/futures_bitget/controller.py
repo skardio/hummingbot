@@ -6,10 +6,14 @@ Supports:
 - SHORT grids: Sell high, buy low (profit when price goes DOWN)
 - AUTO mode: Automatically choose direction based on market trend
 - Exchange-side TPSL: Stop-loss orders placed on Bitget (safety net if bot crashes)
+- Funding rate filter: Skip trades where you pay high funding (direction-aware)
+- Correlation filter: Limit exposure to correlated assets
+- Trailing stop: Lock profits when grid is winning
 """
 
+import time
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from hummingbot.core.data_type.common import PositionMode, TradeType
 from hummingbot.strategy_v2.models.executor_actions import CreateExecutorAction, ExecutorAction, StopExecutorAction
@@ -50,6 +54,22 @@ class FuturesGridBitgetController(MultiCoinGridController):
 
         # Risk Guard: centralized kill-switch logic
         self.risk_guard = FuturesGridRiskGuard(self)
+
+        # ============================================================
+        # SPRINT 2: Funding Rate Filter
+        # ============================================================
+        self._funding_rate_cache: Dict[str, Dict] = {}  # {symbol: {rate: float, timestamp: float}}
+
+        # ============================================================
+        # SPRINT 2: Correlation Filter
+        # ============================================================
+        self._active_correlation_groups: Set[str] = set()  # Track which groups have active positions
+
+        # ============================================================
+        # SPRINT 3: Trailing Stop
+        # ============================================================
+        self._trailing_stop_high_water_marks: Dict[str, Decimal] = {}  # {symbol: highest_pnl_pct}
+        self._trailing_stop_activated: Dict[str, bool] = {}  # {symbol: is_activated}
 
     def _initialize_components(self):
         initialized = super()._initialize_components()
@@ -104,7 +124,19 @@ class FuturesGridBitgetController(MultiCoinGridController):
                 return
 
             for pos_key, pos in positions.items():
-                symbol = str(pos_key).split("_")[0] if "_" in str(pos_key) else str(pos_key)
+                # Handle HEDGE mode position keys like "OP-USDTLONG" or "OP-USDTSHORT"
+                symbol = str(pos_key)
+
+                # Remove LONG/SHORT suffix from HEDGE mode position keys
+                if symbol.endswith("LONG"):
+                    symbol = symbol[:-4]  # Remove "LONG"
+                elif symbol.endswith("SHORT"):
+                    symbol = symbol[:-5]  # Remove "SHORT"
+
+                # Also handle underscore format like "OPUSDT_LONG"
+                if "_" in symbol:
+                    symbol = symbol.split("_")[0]
+
                 # Normalize symbol format (SOLUSDT -> SOL-USDT)
                 if "-" not in symbol and "USDT" in symbol:
                     symbol = symbol.replace("USDT", "-USDT")
@@ -529,10 +561,10 @@ class FuturesGridBitgetController(MultiCoinGridController):
         # AUTO mode: determine based on trend
         trend = self.trend_calculator.get_trend(symbol)
         if not trend:
-            self.logger().warning(f"⚠️  {symbol}: No trend data, defaulting to LONG")
-            return FuturesTradeDirection.LONG
+            self.logger().warning(f"⚠️  {symbol}: No trend data, skipping (no blind trades)")
+            return None  # Don't trade without trend data
 
-        threshold = float(getattr(self.config, 'auto_direction_threshold_pct', 1.0))
+        threshold = float(getattr(self.config, 'auto_direction_threshold_pct', 0.5))
         consensus = float(trend.consensus_trend_pct)
 
         if consensus > threshold:
@@ -554,15 +586,556 @@ class FuturesGridBitgetController(MultiCoinGridController):
 
         return direction
 
+    # ============================================================
+    # PORTFOLIO EXPOSURE CAPS (Sprint 1 Risk Management)
+    # ============================================================
+
+    def _check_portfolio_exposure_caps(self, symbol: str, requested_notional: Decimal) -> tuple[bool, str]:
+        """
+        Three-layer portfolio exposure check before opening new grid.
+
+        Layer 1: max_open_positions - limits concurrent grids
+        Layer 2: max_total_risk_pct - limits total risk exposure
+        Layer 3: max_notional_exposure_pct - limits leverage-aware notional
+
+        Returns:
+            (can_open, reason) - True if allowed, False with reason if blocked
+        """
+        # Count current open positions (active grids)
+        active_count = len([e for e in self.executors_info if e.is_active])
+
+        # Layer 1: Position count cap
+        max_positions = int(getattr(self.config, 'max_open_positions', 4))
+        if active_count >= max_positions:
+            return False, f"MAX_POSITIONS: {active_count}/{max_positions} grids open"
+
+        # Get reference balance for calculations
+        ref_balance = Decimal(str(getattr(self.config, 'risk_reference_balance_quote', 1000)))
+
+        # Layer 2: Total risk percentage cap
+        max_total_risk_pct = Decimal(str(getattr(self.config, 'max_total_risk_pct', 8.0)))
+        per_trade_risk_pct = Decimal(str(getattr(self.config, 'risk_max_balance_per_trade_pct', 2.0)))
+
+        # Calculate current total risk (active positions × per-trade risk)
+        current_total_risk_pct = Decimal(str(active_count)) * per_trade_risk_pct
+        projected_risk_pct = current_total_risk_pct + per_trade_risk_pct
+
+        if projected_risk_pct > max_total_risk_pct:
+            return False, (
+                f"MAX_TOTAL_RISK: {projected_risk_pct:.1f}% > {max_total_risk_pct:.1f}% "
+                f"(current={current_total_risk_pct:.1f}%, adding={per_trade_risk_pct:.1f}%)"
+            )
+
+        # Layer 3: Notional exposure cap (leverage-aware)
+        max_notional_pct = Decimal(str(getattr(self.config, 'max_notional_exposure_pct', 150.0)))
+        max_notional = ref_balance * max_notional_pct / Decimal("100")
+
+        # Calculate current notional from active positions
+        current_notional = self._calculate_current_notional()
+        leverage = Decimal(str(getattr(self.config, 'derivative_leverage', 5)))
+        projected_notional = current_notional + (requested_notional * leverage)
+
+        if projected_notional > max_notional:
+            return False, (
+                f"MAX_NOTIONAL: {projected_notional:.0f} > {max_notional:.0f} USDT "
+                f"(current={current_notional:.0f}, adding={requested_notional * leverage:.0f})"
+            )
+
+        # All checks passed
+        self.logger().debug(
+            f"✅ Portfolio caps OK for {symbol}: "
+            f"positions={active_count + 1}/{max_positions}, "
+            f"risk={projected_risk_pct:.1f}/{max_total_risk_pct:.1f}%, "
+            f"notional={projected_notional:.0f}/{max_notional:.0f}"
+        )
+        return True, ""
+
+    def _calculate_current_notional(self) -> Decimal:
+        """
+        Calculate current total notional exposure from open positions.
+
+        Returns:
+            Total notional in quote currency (USDT)
+        """
+        total_notional = Decimal("0")
+
+        try:
+            # Get positions from connector
+            if self.connector and hasattr(self.connector, 'account_positions'):
+                positions = self.connector.account_positions
+                for pos_key, pos in positions.items():
+                    position_size = abs(Decimal(str(pos.amount)))
+                    if position_size > 0:
+                        # Get position value
+                        entry_price = Decimal(str(pos.entry_price)) if hasattr(pos, 'entry_price') and pos.entry_price else Decimal("0")
+                        if entry_price > 0:
+                            notional = position_size * entry_price
+                            total_notional += notional
+        except Exception as e:
+            self.logger().debug(f"Could not calculate notional from positions: {e}")
+            # Fallback: estimate from active executors
+            for executor in self.executors_info:
+                if executor.is_active:
+                    exec_config = getattr(executor, 'config', None)
+                    if exec_config and hasattr(exec_config, 'total_amount_quote'):
+                        leverage = Decimal(str(getattr(self.config, 'derivative_leverage', 5)))
+                        total_notional += Decimal(str(exec_config.total_amount_quote)) * leverage
+
+        return total_notional
+
+    # ============================================================
+    # SPRINT 2: FUNDING RATE FILTER (Direction-Aware)
+    # ============================================================
+
+    async def _fetch_funding_rate(self, symbol: str) -> Optional[float]:
+        """
+        Fetch current funding rate from Bitget API.
+
+        Returns:
+            Funding rate as percentage (e.g., 0.01 = 0.01%), or None if failed
+        """
+        try:
+            if not self.connector or not hasattr(self.connector, '_api_get'):
+                return None
+
+            from hummingbot.connector.derivative.bitget_perpetual import bitget_perpetual_constants as CONSTANTS
+
+            # Get exchange symbol format
+            if hasattr(self.connector, 'exchange_symbol_associated_to_pair'):
+                exchange_symbol = await self.connector.exchange_symbol_associated_to_pair(symbol)
+            else:
+                exchange_symbol = symbol.replace("-", "")
+
+            # Get product type
+            if hasattr(self.connector, 'product_type_associated_to_trading_pair'):
+                product_type = await self.connector.product_type_associated_to_trading_pair(symbol)
+            else:
+                product_type = CONSTANTS.USDT_PRODUCT_TYPE
+
+            # Fetch funding rate
+            response = await self.connector._api_get(
+                path_url="/api/v2/mix/market/current-fund-rate",
+                params={"symbol": exchange_symbol, "productType": product_type},
+            )
+
+            if response.get("code") == "00000":
+                data = response.get("data", [])
+                if data:
+                    # Rate is returned as string like "0.0001" (0.01%)
+                    rate_str = data[0].get("fundingRate", "0")
+                    rate = float(rate_str) * 100  # Convert to percentage
+                    return rate
+            return None
+
+        except Exception as e:
+            self.logger().debug(f"Could not fetch funding rate for {symbol}: {e}")
+            return None
+
+    def _get_cached_funding_rate(self, symbol: str) -> Optional[float]:
+        """
+        Get funding rate from cache, or return None if expired/missing.
+        """
+        cache_entry = self._funding_rate_cache.get(symbol)
+        if not cache_entry:
+            return None
+
+        cache_seconds = int(getattr(self.config, 'funding_rate_cache_seconds', 300))
+        current_time = self.market_data_provider.time() if self.market_data_provider else time.time()
+        if current_time - cache_entry['timestamp'] > cache_seconds:
+            return None  # Cache expired
+
+        return cache_entry['rate']
+
+    def _update_funding_rate_cache(self, symbol: str, rate: float) -> None:
+        """Update the funding rate cache for a symbol."""
+        current_time = self.market_data_provider.time() if self.market_data_provider else time.time()
+        self._funding_rate_cache[symbol] = {
+            'rate': rate,
+            'timestamp': current_time
+        }
+
+    def _check_funding_rate_filter(self, symbol: str, direction: FuturesTradeDirection) -> tuple[bool, str]:
+        """
+        Check if funding rate is acceptable for the given direction.
+
+        Direction-aware logic:
+        - Positive funding rate: LONGS pay, SHORTS receive
+        - Negative funding rate: SHORTS pay, LONGS receive
+
+        Returns:
+            (can_trade, reason) - True if OK to trade, False with reason if blocked
+        """
+        if not getattr(self.config, 'funding_rate_filter_enabled', False):
+            return True, ""
+
+        # Try to get cached rate first
+        funding_rate = self._get_cached_funding_rate(symbol)
+
+        if funding_rate is None:
+            # No cached rate - we'll fetch async but allow trade for now
+            # Schedule async fetch for next time
+            try:
+                from hummingbot.core.utils.async_utils import safe_ensure_future
+                safe_ensure_future(self._async_update_funding_rate(symbol))
+            except Exception:
+                pass
+            return True, ""  # Allow trade when no data (conservative)
+
+        max_cost = float(getattr(self.config, 'max_funding_cost_pct', 0.03))
+
+        # Calculate YOUR cost based on direction
+        if direction == FuturesTradeDirection.LONG:
+            # Positive funding = LONGS pay
+            your_cost = funding_rate if funding_rate > 0 else 0
+        else:  # SHORT
+            # Negative funding = SHORTS pay (positive funding = shorts receive)
+            your_cost = -funding_rate if funding_rate < 0 else 0
+
+        if your_cost > max_cost:
+            return False, (
+                f"FUNDING_RATE: {direction.value.upper()} would pay {your_cost:.4f}% > max {max_cost:.4f}% "
+                f"(rate={funding_rate:+.4f}%)"
+            )
+
+        # Log if we're receiving funding (bonus!)
+        if your_cost < 0:
+            self.logger().info(
+                f"💰 {symbol} {direction.value.upper()} BONUS: receiving {abs(your_cost):.4f}% funding "
+                f"(rate={funding_rate:+.4f}%)"
+            )
+
+        return True, ""
+
+    async def _async_update_funding_rate(self, symbol: str) -> None:
+        """Async helper to update funding rate cache."""
+        try:
+            rate = await self._fetch_funding_rate(symbol)
+            if rate is not None:
+                self._update_funding_rate_cache(symbol, rate)
+        except Exception as e:
+            self.logger().debug(f"Failed to update funding rate for {symbol}: {e}")
+
+    # ============================================================
+    # SPRINT 2: CORRELATION FILTER
+    # ============================================================
+
+    def _get_correlation_group(self, symbol: str) -> Optional[str]:
+        """
+        Get the correlation group for a symbol.
+
+        Returns:
+            Group name (e.g., 'major_caps') or None if not in any group
+        """
+        correlation_groups = getattr(self.config, 'correlation_groups', {})
+        if not correlation_groups:
+            return None
+
+        for group_name, symbols in correlation_groups.items():
+            if symbol in symbols:
+                return group_name
+
+        return None
+
+    def _check_correlation_filter(self, symbol: str) -> tuple[bool, str]:
+        """
+        Check if we can open a position for this symbol based on correlation groups.
+
+        Prevents opening multiple positions in highly correlated assets.
+
+        Returns:
+            (can_trade, reason) - True if OK to trade, False with reason if blocked
+        """
+        if not getattr(self.config, 'correlation_filter_enabled', False):
+            return True, ""
+
+        group = self._get_correlation_group(symbol)
+        if not group:
+            # Symbol not in any correlation group - allow
+            return True, ""
+
+        max_per_group = int(getattr(self.config, 'max_correlated_positions', 1))
+
+        # Count active positions in this correlation group
+        active_in_group = 0
+        correlation_groups = getattr(self.config, 'correlation_groups', {})
+        group_symbols = correlation_groups.get(group, [])
+
+        for executor in self.executors_info:
+            if executor.is_active:
+                exec_symbol = getattr(executor.config, 'trading_pair', '') if executor.config else ''
+                if exec_symbol in group_symbols:
+                    active_in_group += 1
+
+        if active_in_group >= max_per_group:
+            # Find which symbols are active in this group for logging
+            active_symbols = []
+            for executor in self.executors_info:
+                if executor.is_active:
+                    exec_symbol = getattr(executor.config, 'trading_pair', '') if executor.config else ''
+                    if exec_symbol in group_symbols:
+                        active_symbols.append(exec_symbol)
+
+            return False, (
+                f"CORRELATION: group '{group}' has {active_in_group}/{max_per_group} positions "
+                f"(active: {active_symbols})"
+            )
+
+        return True, ""
+
+    def _update_correlation_tracking(self, symbol: str, is_opening: bool) -> None:
+        """Update correlation group tracking when position opens/closes."""
+        group = self._get_correlation_group(symbol)
+        if group:
+            if is_opening:
+                self._active_correlation_groups.add(group)
+            # Note: We don't remove from set on close because there might be other positions in group
+
+    # ============================================================
+    # SPRINT 3: TRAILING STOP (Profit Lock)
+    # ============================================================
+
+    def _check_trailing_stop(self, symbol: str) -> Optional[StopExecutorAction]:
+        """
+        Check if trailing stop should trigger for a symbol.
+
+        Trailing stop logic:
+        1. Activates when unrealized PnL exceeds activation threshold
+        2. Tracks highest PnL (high water mark)
+        3. Triggers stop when PnL drops by distance threshold from high water mark
+
+        Returns:
+            StopExecutorAction if trailing stop triggered, None otherwise
+        """
+        if not getattr(self.config, 'trailing_stop_enabled', False):
+            return None
+
+        # Get current unrealized PnL for the symbol
+        current_pnl_pct = self._get_position_pnl_pct(symbol)
+        if current_pnl_pct is None:
+            return None
+
+        activation_pct = Decimal(str(getattr(self.config, 'trailing_stop_activation_pct', 2.0)))
+        distance_pct = Decimal(str(getattr(self.config, 'trailing_stop_distance_pct', 1.0)))
+
+        # Check if trailing stop is activated
+        is_activated = self._trailing_stop_activated.get(symbol, False)
+        high_water_mark = self._trailing_stop_high_water_marks.get(symbol, Decimal("0"))
+
+        if not is_activated:
+            # Check if we should activate
+            if current_pnl_pct >= activation_pct:
+                self._trailing_stop_activated[symbol] = True
+                self._trailing_stop_high_water_marks[symbol] = current_pnl_pct
+                self.logger().info(
+                    f"🎯 {symbol} TRAILING STOP ACTIVATED: PnL {current_pnl_pct:.2f}% >= {activation_pct:.2f}%"
+                )
+            return None
+
+        # Trailing stop is activated - update high water mark if new high
+        if current_pnl_pct > high_water_mark:
+            self._trailing_stop_high_water_marks[symbol] = current_pnl_pct
+            high_water_mark = current_pnl_pct
+            self.logger().debug(
+                f"📈 {symbol} new high water mark: {high_water_mark:.2f}%"
+            )
+
+        # Check if we should trigger (dropped too far from high water mark)
+        distance_from_high = high_water_mark - current_pnl_pct
+
+        if distance_from_high >= distance_pct:
+            self.logger().warning(
+                f"🛑 {symbol} TRAILING STOP TRIGGERED: "
+                f"PnL dropped {distance_from_high:.2f}% from high ({high_water_mark:.2f}% → {current_pnl_pct:.2f}%)"
+            )
+            # Clean up tracking
+            self._trailing_stop_activated.pop(symbol, None)
+            self._trailing_stop_high_water_marks.pop(symbol, None)
+            return self._create_stop_action_for_symbol(symbol, "TRAILING_STOP")
+
+        return None
+
+    def _get_position_pnl_pct(self, symbol: str) -> Optional[Decimal]:
+        """
+        Get current unrealized PnL percentage for a position.
+
+        Returns:
+            PnL as percentage (e.g., 2.5 = +2.5%), or None if no position
+        """
+        try:
+            if not self.connector or not hasattr(self.connector, 'account_positions'):
+                return None
+
+            positions = self.connector.account_positions
+            for pos_key, pos in positions.items():
+                if symbol in str(pos_key):
+                    position_size = abs(Decimal(str(pos.amount)))
+                    if position_size > 0:
+                        # Get unrealized PnL
+                        unrealized_pnl = Decimal(str(getattr(pos, 'unrealized_pnl', 0)))
+                        entry_price = Decimal(str(getattr(pos, 'entry_price', 0)))
+
+                        if entry_price > 0:
+                            # Calculate PnL percentage
+                            position_value = position_size * entry_price
+                            if position_value > 0:
+                                pnl_pct = (unrealized_pnl / position_value) * Decimal("100")
+                                return pnl_pct
+            return None
+
+        except Exception as e:
+            self.logger().debug(f"Could not get PnL for {symbol}: {e}")
+            return None
+
+    def _create_stop_action_for_symbol(self, symbol: str, reason: str) -> Optional[StopExecutorAction]:
+        """
+        Create a stop action for a specific symbol's executor.
+
+        Returns:
+            StopExecutorAction or None if no active executor found
+        """
+        for executor in self.executors_info:
+            if executor.is_active:
+                exec_symbol = getattr(executor.config, 'trading_pair', '') if executor.config else ''
+                if exec_symbol == symbol:
+                    self.logger().info(f"🛑 Creating stop action for {symbol}: {reason}")
+                    return StopExecutorAction(
+                        controller_id=self.config.id,
+                        executor_id=executor.id
+                    )
+        return None
+
+    def _reset_trailing_stop(self, symbol: str) -> None:
+        """Reset trailing stop tracking for a symbol (called when grid closes)."""
+        self._trailing_stop_activated.pop(symbol, None)
+        self._trailing_stop_high_water_marks.pop(symbol, None)
+
+    # ============================================================
+    # SPRINT 3: DYNAMIC TIMEOUT
+    # ============================================================
+
+    def _get_dynamic_timeout(self, symbol: str) -> int:
+        """
+        Calculate dynamic grid timeout based on volatility.
+
+        Low volatility → longer timeout (market needs more time)
+        High volatility → shorter timeout (quick moves expected)
+
+        Returns:
+            Timeout in seconds
+        """
+        if not getattr(self.config, 'dynamic_timeout_enabled', False):
+            return int(getattr(self.config, 'risk_guard_max_grid_time_seconds', 3600))
+
+        base_timeout = int(getattr(self.config, 'base_grid_timeout_seconds', 3600))
+        low_vol_multiplier = float(getattr(self.config, 'low_volatility_multiplier', 2.0))
+        high_vol_multiplier = float(getattr(self.config, 'high_volatility_multiplier', 0.5))
+        vol_threshold_low = float(getattr(self.config, 'volatility_threshold_low', 0.5))
+        vol_threshold_high = float(getattr(self.config, 'volatility_threshold_high', 2.0))
+
+        # Get current ATR/volatility
+        try:
+            trend = self.trend_calculator.get_trend(symbol)
+            if trend and hasattr(trend, 'atr_pct') and trend.atr_pct:
+                atr_pct = float(trend.atr_pct)
+
+                if atr_pct < vol_threshold_low:
+                    # Low volatility - extend timeout
+                    timeout = int(base_timeout * low_vol_multiplier)
+                    self.logger().debug(
+                        f"📊 {symbol} low volatility ({atr_pct:.2f}% < {vol_threshold_low}%), "
+                        f"timeout extended to {timeout}s"
+                    )
+                elif atr_pct > vol_threshold_high:
+                    # High volatility - shorten timeout
+                    timeout = int(base_timeout * high_vol_multiplier)
+                    self.logger().debug(
+                        f"📊 {symbol} high volatility ({atr_pct:.2f}% > {vol_threshold_high}%), "
+                        f"timeout shortened to {timeout}s"
+                    )
+                else:
+                    # Normal volatility - use base timeout
+                    timeout = base_timeout
+
+                return timeout
+
+        except Exception as e:
+            self.logger().debug(f"Could not calculate dynamic timeout for {symbol}: {e}")
+
+        return base_timeout
+
     def _create_grid_action(self, symbol: str, total_amount_quote=None):
         """
         Create grid action with correct direction (LONG or SHORT).
+
+        Includes all risk filters (Sprint 1-3):
+        - Portfolio exposure caps (Sprint 1)
+        - Funding rate filter (Sprint 2)
+        - Correlation filter (Sprint 2)
 
         For SHORT grids:
         - TradeType.SELL instead of BUY
         - Swapped start/end prices (start > end)
         - Inverted liquidation calculation
         """
+        # ============================================================
+        # SPRINT 1: Portfolio Exposure Cap Check
+        # ============================================================
+        # Calculate requested notional for this trade
+        if total_amount_quote:
+            requested_notional = Decimal(str(total_amount_quote))
+        else:
+            # Calculate from config
+            ref_balance = Decimal(str(getattr(self.config, 'risk_reference_balance_quote', 1000)))
+            risk_pct = Decimal(str(getattr(self.config, 'risk_max_balance_per_trade_pct', 2.0)))
+            requested_notional = ref_balance * risk_pct / Decimal("100")
+            total_amount_quote = requested_notional  # Set for downstream use
+
+        # ============================================================
+        # DYNAMIC MARGIN CHECK: Adjust capital to available balance
+        # ============================================================
+        try:
+            available_balance = Decimal(str(self.connector.get_available_balance("USDT")))
+            leverage = Decimal(str(getattr(self.config, 'derivative_leverage', 3)))
+            min_order_quote = Decimal(str(getattr(self.config, 'min_order_amount_quote', 5)))
+
+            # Max notional we can open with available margin
+            max_notional = available_balance * leverage
+
+            if max_notional < min_order_quote:
+                self.logger().warning(
+                    f"⏸️  {symbol}: Insufficient margin ({available_balance:.2f} USDT available, "
+                    f"need {min_order_quote / leverage:.2f} USDT for min order). Waiting..."
+                )
+                return None
+
+            if requested_notional > max_notional:
+                old_notional = requested_notional
+                requested_notional = max_notional * Decimal("0.95")  # 5% buffer
+                total_amount_quote = requested_notional
+                self.logger().info(
+                    f"💰 {symbol}: Adjusted capital {old_notional:.2f} → {requested_notional:.2f} USDT "
+                    f"(available margin: {available_balance:.2f} USDT × {leverage}x leverage)"
+                )
+        except Exception as e:
+            self.logger().debug(f"Could not check available margin for {symbol}: {e}")
+
+        can_open, reason = self._check_portfolio_exposure_caps(symbol, requested_notional)
+        if not can_open:
+            self.logger().warning(
+                f"🛑 PORTFOLIO CAP BLOCKED {symbol}: {reason}"
+            )
+            return None
+
+        # ============================================================
+        # SPRINT 2: Correlation Filter Check
+        # ============================================================
+        can_trade, corr_reason = self._check_correlation_filter(symbol)
+        if not can_trade:
+            self.logger().warning(
+                f"🛑 CORRELATION BLOCKED {symbol}: {corr_reason}"
+            )
+            return None
+
         # Determine direction BEFORE creating the grid
         direction = self._determine_trade_direction(symbol)
 
@@ -571,8 +1144,21 @@ class FuturesGridBitgetController(MultiCoinGridController):
             self.logger().info(f"⏸️  {symbol}: Skipping - trend in neutral zone")
             return None
 
+        # ============================================================
+        # SPRINT 2: Funding Rate Filter Check (direction-aware)
+        # ============================================================
+        can_trade, funding_reason = self._check_funding_rate_filter(symbol, direction)
+        if not can_trade:
+            self.logger().warning(
+                f"🛑 FUNDING RATE BLOCKED {symbol}: {funding_reason}"
+            )
+            return None
+
         # Store active direction for this symbol
         self.active_directions[symbol] = direction
+
+        # Update correlation tracking
+        self._update_correlation_tracking(symbol, is_opening=True)
 
         # For SHORT: We need to override the grid creation
         if direction == FuturesTradeDirection.SHORT:
@@ -584,6 +1170,7 @@ class FuturesGridBitgetController(MultiCoinGridController):
         if action is None:
             self.liquidation_prices.pop(symbol, None)
             self.active_directions.pop(symbol, None)
+            self._update_correlation_tracking(symbol, is_opening=False)
             return None
 
         self._apply_leverage(symbol)
@@ -986,6 +1573,7 @@ class FuturesGridBitgetController(MultiCoinGridController):
                 self.liquidation_prices.pop(self.active_coin, None)
                 self.risk_guard.notify_grid_stopped(self.active_coin)
                 self._schedule_cancel_exchange_tpsl(self.active_coin)
+                self._reset_trailing_stop(self.active_coin)
                 return [risk_stop]
 
         # PRIORITEIT 2: Liquidation risk monitoring
@@ -994,9 +1582,19 @@ class FuturesGridBitgetController(MultiCoinGridController):
             if self.active_coin:
                 self.risk_guard.notify_grid_stopped(self.active_coin)
                 self._schedule_cancel_exchange_tpsl(self.active_coin)
+                self._reset_trailing_stop(self.active_coin)
             return [liquidation_action]
 
-        # PRIORITEIT 3: Normale grid logic
+        # PRIORITEIT 3: Trailing stop check (Sprint 3)
+        if self.active_coin and self._is_executor_actually_active():
+            trailing_stop_action = self._check_trailing_stop(self.active_coin)
+            if trailing_stop_action:
+                self.liquidation_prices.pop(self.active_coin, None)
+                self.risk_guard.notify_grid_stopped(self.active_coin)
+                self._schedule_cancel_exchange_tpsl(self.active_coin)
+                return [trailing_stop_action]
+
+        # PRIORITEIT 4: Normale grid logic
         return super().determine_executor_actions()
 
     def _schedule_cancel_exchange_tpsl(self, symbol: str) -> None:

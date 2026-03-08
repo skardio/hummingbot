@@ -23,8 +23,13 @@ paper_trading: false                # 💰 LIVE TRADING MODE
 # ==============================================================================
 
 use_dynamic_pair_discovery: true
-max_coins_to_monitor: 25
+max_coins_to_monitor: 30                  # Was 25 → 30 (match met top_n voor orderbook prefetch)
 min_24h_volume_quote: 500000          # Minimum 24h volume in quote currency (USD)
+
+# US-007: Dynamic Pair Manager (two-tier discovery: REST scans all, WebSocket for best)
+use_dynamic_pair_manager: true       # Enable two-tier pair discovery
+pair_scan_interval_seconds: 300      # Interval between REST scans (5 min)
+max_spread_pct: 0.5                  # Maximum bid-ask spread filter
 exclude_expensive_coins: false
 
 blacklist:
@@ -99,10 +104,10 @@ adaptive_filters:
     rsi_buy_min: 25.0
     rsi_buy_max: 68.0       # 🛡️ Baseline: 68 (voorkom late pumps)
     rsi_extreme_min: 18.0
-    vwap_max_deviation_pct: 30.0
+    vwap_max_deviation_pct: 18.0    # 🔧 FIX: 30→18 (align with smart_entry_filter)
     max_up_accel_pct: 4.0
     max_down_accel_pct: -8.0
-    atr_min_pct: 0.05       # 🔧 FIX: 0.08→0.05 (was blocking low-vol coins)
+    atr_min_pct: 0.08       # 🔧 FIX: 0.05→0.08 (align with smart_entry_filter)
     atr_max_pct: 7.0
     spike_5m_max_pct: 4.0
     wick_ratio_min: 0.0
@@ -155,8 +160,8 @@ manual_trading_pairs: []  # Dynamic discovery mode
 # ==============================================================================
 
 use_multi_timeframe_buy: true
-mtf_1h_min_pct: 0.0
-mtf_4h_min_pct: 0.0
+mtf_1h_min_pct: -2.0              # 🔧 FIX: 0→-2 (allow -2% pullback)
+mtf_4h_min_pct: -1.5              # 🔧 FIX: 0→-1.5 (allow -1.5% pullback)
 mtf_24h_min_pct: -2.5
 mtf_declining_1h_max: -4.0
 mtf_declining_4h_max: -2.0
@@ -294,7 +299,7 @@ orderbook_liquidity:
 orderbook_prefetch:
   enabled: true
   mode: live
-  top_n: 15
+  top_n: 30                          # Was 15 → 30 (moet >= max_coins_to_monitor zijn!)
   max_subscriptions_per_minute: 20
 
 # ==============================================================================
@@ -318,7 +323,7 @@ smart_entry_filter:
   max_down_accel_pct: -8.0
   max_up_accel_pct: 4.0
 
-  max_trend_24h_pct: 35.0
+  max_trend_24h_pct: 25.0          # 🔧 FIX: 35→25 (profiles override for memes)
   min_trend_24h_pct: -10.0
 
   max_entry_spread_pct: 0.3
@@ -383,11 +388,401 @@ smart_entry_filter:
 # ==============================================================================
 
 coin_profiles:
-  # USD pairs use same thresholds as EUR initially
-  # Add per-coin overrides here as needed:
-  # SOL-USD:
-  #   max_atr_pct_for_grid: 5
-  #   vwap_max_deviation_pct: 12.0
+
+  FET-USD:
+    rsi_extreme_low: 20.0
+    rsi_block_min: 76.0
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7           # Strakker: niet beide extreem
+    vwap_max_deviation_pct: 14.0      # Midcap AI
+    max_trend_24h_pct: 25.0
+
+  SUI-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 15.0
+    rsi_extreme_low: 18.0
+    rsi_block_min: 75.0
+    max_trend_24h_pct: 25.0
+
+  TAO-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7           # AI coin - midcap
+    vwap_max_deviation_pct: 14.0      # Midcap AI
+    rsi_extreme_low: 20.0
+    rsi_block_min: 73.0
+    max_trend_24h_pct: 22.0           # AI coins kunnen hard pumpen
+
+  PEPE-USD:
+    rsi_extreme_low: 18.0
+    rsi_block_min: 80.0
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 20.0
+    max_trend_24h_pct: 40.0
+
+  AVAX-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7           # Iets strakker: niet beide extreem
+    vwap_max_deviation_pct: 11.0     # Strakker: L1
+    rsi_extreme_low: 22.0
+    rsi_block_min: 74.0
+    max_trend_24h_pct: 20.0
+
+  LINK-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 9.0      # Strakker: stable oracle
+    rsi_extreme_low: 23.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 18.0
+
+  DOT-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 9.0      # Strakker: stable L1
+    rsi_extreme_low: 22.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 18.0
+
+  # NEAR-USD removed - in blacklist (no orderbook data)
+
+  ATOM-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 10.0     # Strakker: stable cosmos
+    rsi_extreme_low: 22.0
+    rsi_block_min: 71.0
+    max_trend_24h_pct: 18.0
+
+  FTM-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7           # Iets strakker: niet beide extreem
+    vwap_max_deviation_pct: 13.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 75.0
+    max_trend_24h_pct: 22.0
+
+  SOL-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 10.0     # Strakker: large cap
+    rsi_extreme_low: 22.0
+    rsi_block_min: 71.0
+    max_trend_24h_pct: 16.0
+    max_5m_spike_pct: 1.8
+
+  ADA-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 4
+    vwap_max_deviation_pct: 9.0      # Strakker: stable large cap
+    rsi_extreme_low: 23.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 16.0
+
+  XRP-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 9.0      # Strakker: large cap
+    rsi_extreme_low: 22.0
+    rsi_block_min: 71.0
+    max_trend_24h_pct: 18.0
+
+  POL-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 10.0     # Strakker: L2
+    rsi_extreme_low: 22.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 20.0
+
+  LTC-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 4
+    vwap_max_deviation_pct: 8.0      # Strakker: OG stable
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 14.0
+
+  BCH-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 8.0      # Strakker: OG stable
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 14.0
+
+  # PUMP-USD removed - in blacklist
+
+  DYDX-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8           # Iets strakker
+    vwap_max_deviation_pct: 13.0     # Midcap DeFi
+    rsi_extreme_low: 22.0
+    rsi_block_min: 76.0
+    max_trend_24h_pct: 22.0
+
+  XDC-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 10.0     # Strakker
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 18.0
+
+  SNX-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5.0
+    vwap_max_deviation_pct: 10.0
+    rsi_extreme_low: 25.0
+    rsi_block_min: 74.0
+    max_trend_24h_pct: 18.0
+    max_5m_spike_pct: 1.5
+
+  BTC-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 3
+    vwap_max_deviation_pct: 6.0
+    rsi_extreme_low: 25.0
+    rsi_block_min: 68.0
+    max_trend_24h_pct: 10.0
+    max_5m_spike_pct: 1.2
+
+  ETH-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 4
+    vwap_max_deviation_pct: 7.5
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 12.0
+    max_5m_spike_pct: 1.3
+
+  DOGE-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 18.0
+    rsi_extreme_low: 18.0
+    rsi_block_min: 80.0
+    max_trend_24h_pct: 35.0
+    max_5m_spike_pct: 1.8
+
+  SHIB-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 22.0
+    rsi_extreme_low: 17.0
+    rsi_block_min: 82.0
+    max_trend_24h_pct: 40.0
+    max_5m_spike_pct: 2.0
+
+  # AAVE-USD removed - in blacklist (no orderbook data)
+
+  UNI-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 12.0
+    rsi_extreme_low: 22.0
+    rsi_block_min: 75.0
+    max_trend_24h_pct: 18.0
+    max_5m_spike_pct: 1.5
+
+  INJ-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 77.0
+    max_trend_24h_pct: 22.0
+    max_5m_spike_pct: 1.6
+
+  RNDR-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 13.0
+    rsi_extreme_low: 21.0
+    rsi_block_min: 76.0
+    max_trend_24h_pct: 22.0
+    max_5m_spike_pct: 1.6
+
+  ARB-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 78.0
+    max_trend_24h_pct: 25.0
+    max_5m_spike_pct: 1.7
+
+  OP-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 78.0
+    max_trend_24h_pct: 25.0
+    max_5m_spike_pct: 1.7
+
+  SEI-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 16.0
+    rsi_extreme_low: 19.0
+    rsi_block_min: 79.0
+    max_trend_24h_pct: 30.0
+    max_5m_spike_pct: 1.8
+
+  WIF-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 11
+    vwap_max_deviation_pct: 22.0
+    rsi_extreme_low: 17.0
+    rsi_block_min: 84.0
+    max_trend_24h_pct: 45.0
+    max_5m_spike_pct: 2.2
+
+  SAND-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 12.0
+    rsi_extreme_low: 21.0
+    rsi_block_min: 74.0
+    max_trend_24h_pct: 20.0
+
+  QNT-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 9.0
+    rsi_extreme_low: 23.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 16.0
+
+  HBAR-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 10.0
+    rsi_extreme_low: 22.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 18.0
+
+  MANA-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 12.0
+    rsi_extreme_low: 21.0
+    rsi_block_min: 74.0
+    max_trend_24h_pct: 20.0
+
+  PENGU-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 20.0
+    rsi_extreme_low: 17.0
+    rsi_block_min: 82.0
+    max_trend_24h_pct: 40.0
+
+  0G-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 18.0
+    rsi_extreme_low: 18.0
+    rsi_block_min: 80.0
+    max_trend_24h_pct: 35.0
+
+  KTA-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 16.0
+    rsi_extreme_low: 19.0
+    rsi_block_min: 79.0
+    max_trend_24h_pct: 30.0
+
+  SENT-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 77.0
+    max_trend_24h_pct: 24.0
+
+  ALGO-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 9.0
+    rsi_extreme_low: 23.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 16.0
+
+  FLR-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 10.0
+    rsi_extreme_low: 22.0
+    rsi_block_min: 73.0
+    max_trend_24h_pct: 18.0
+
+  DASH-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 9.0
+    rsi_extreme_low: 23.0
+    rsi_block_min: 71.0
+    max_trend_24h_pct: 14.0
+
+  BNB-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 4
+    vwap_max_deviation_pct: 8.0
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 14.0
+
+  WLD-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 77.0
+    max_trend_24h_pct: 24.0
+
+  ICP-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 12.0
+    rsi_extreme_low: 21.0
+    rsi_block_min: 74.0
+    max_trend_24h_pct: 20.0
+
+  HYPE-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 18.0
+    rsi_extreme_low: 18.0
+    rsi_block_min: 82.0
+    max_trend_24h_pct: 35.0
+
+  BONK-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 22.0
+    rsi_extreme_low: 17.0
+    rsi_block_min: 83.0
+    max_trend_24h_pct: 45.0
+
+  AZTEC-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 15.0
+    rsi_extreme_low: 19.0
+    rsi_block_min: 78.0
+    max_trend_24h_pct: 28.0
+
+  FUN-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 77.0
+    max_trend_24h_pct: 24.0
 
 # ==============================================================================
 # GRID CONFIGURATION
@@ -396,13 +791,13 @@ coin_profiles:
 grid_range_pct_down: 4.0
 grid_range_pct_up: 12.0
 
-num_grids: 7
+num_grids: 5                      # 🔧 FIX: 7→5 (capital math: $300/4=$75, 5 grids=$15/level)
 
 use_dynamic_grid_sizer: true
 
 dynamic_grid_sizer:
-  min_grids: 7
-  max_grids: 15
+  min_grids: 4                    # 🔧 FIX: 7→4 (allow smaller accounts)
+  max_grids: 12                   # 🔧 FIX: 15→12 (order limit safety)
   low_vol_atr_pct: 0.7
   mid_vol_atr_pct: 2.0
   high_vol_atr_pct: 4.0
@@ -452,12 +847,13 @@ coin_discovery_refresh_interval_seconds: 3600
 #    Example: $300 account → 3 slots × $100/coin
 # ==============================================================================
 
-max_simultaneous_coins: 6
+max_simultaneous_coins: 4             # 🔧 FIX: 6→4 (order math: 4×7×2=56 < 60)
 
 total_amount_quote: 300             # 🔄 CHANGED: $300 USD budget
 min_order_amount_quote: 15          # $15 minimum order
 
 risk_reference_balance_quote: 400   # 🔄 CHANGED: $400 reference
+risk_max_daily_loss_pct: 30         # 30% daily loss limit (matches max_daily_loss_pct)
 risk_max_balance_per_trade_pct: 60
 risk_max_total_open_risk_pct: 75
 
@@ -491,7 +887,7 @@ min_win_rate_threshold: 0.35
 pause_cooldown_minutes: 120
 resume_min_pnl_pct: 0.0
 
-min_grid_profit_pct: 2.0
+min_grid_profit_pct: 0.8          # 🔧 FIX: 2.0→0.8 (Kraken 0.26%×2 + spread + buffer)
 
 emergency_exit_pct: -12.0    # Alleen bij flash crash / exchange fuck-up / news-nuke
 hard_stop_pct: -15.0          # Absolute laatste vangnet - niet bij normale volatiliteit
@@ -500,8 +896,8 @@ hard_stop_pct: -15.0          # Absolute laatste vangnet - niet bij normale vola
 # DRAWDOWN / KILL SWITCH
 # ==============================================================================
 
-max_daily_loss_pct: 2.5
-max_daily_loss_quote: 12.0          # Max daily loss in quote currency ($12 USD)
+max_daily_loss_pct: 30.0            # TIJDELIJK: Verhoogd naar 30% vanwege PnL tracking bug (20250214)
+max_daily_loss_quote: 120.0         # Max daily loss in quote currency ($120 USD)
 max_weekly_loss_pct: 7.0
 max_monthly_loss_pct: 10.0
 
@@ -517,12 +913,12 @@ telegram:
 # ORDER MANAGEMENT
 # ==============================================================================
 
-max_open_orders: 30
+max_open_orders: 60               # 🔧 FIX: 30→60 (Kraken limit ~60)
 order_frequency: 3
 
 min_switch_interval_seconds: 600
-min_hold_time_seconds: 7200       # 🔧 FIX: 1800→7200 (2 hours - give grid time to recover/DCA!)
-max_hold_time_seconds: 14400
+min_hold_time_seconds: 3600       # 🔧 FIX: 7200→3600 (1h - clear progression)
+max_hold_time_seconds: 21600      # 🔧 FIX: 14400→21600 (align with hard_hold)
 
 # ==============================================================================
 # TREND-AWARE EXIT SYSTEM (Soft/Hard Hold Time)

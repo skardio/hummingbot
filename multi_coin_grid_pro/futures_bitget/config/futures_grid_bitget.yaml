@@ -6,14 +6,17 @@ connector_name: bitget_perpetual
 quote_asset: USDT
 
 # ============================================================
-# TRADE DIRECTION (NEW!)
+# TRADE DIRECTION
 # ============================================================
 # "long"  - Only LONG grids (buy low, sell high) - profit when UP
 # "short" - Only SHORT grids (sell high, buy low) - profit when DOWN
-# "auto"  - Auto-select based on trend (best for changing markets!)
+# "auto"  - Auto-select based on trend:
+#           - trend > +threshold → LONG
+#           - trend < -threshold → SHORT
+#           - trend in between → SKIP (no trade)
 # ============================================================
 trade_direction: auto
-auto_direction_threshold_pct: 1.0   # Trend must be >+1% for LONG or <-1% for SHORT
+auto_direction_threshold_pct: 0.5   # Trend moet > +0.5% voor LONG of < -0.5% voor SHORT
 
 # SHORT entry thresholds (used when direction=short or auto selects short)
 short_24h_min_pct: -1.0      # 24h trend must be < -1% for SHORT
@@ -23,12 +26,12 @@ short_pump_1h_max: 2.0       # Reject SHORT if 1h > +2% (pump protection)
 short_pump_4h_max: 1.0       # AND 4h > +1% (both required for pump reject)
 
 # === CAPITAL MANAGEMENT ===
-total_amount_quote: 50           # Totaal capital in USDT
-min_order_amount_quote: 5          # Minimum order size
-derivative_leverage: 5            # Leverage 1-125x (START MET 5-10x!)
-max_exposure_per_coin_pct: 0.4     # Max 40% per coin = 20 USDT (voor 2 coins)
-max_total_exposure_pct: 0.9        # Max 90% totaal = 45 USDT
-max_simultaneous_coins: 2          # Max 2 grids (50/2=25, met 2 levels = 12.5 per order > 5 min)
+total_amount_quote: 50
+min_order_amount_quote: 5
+derivative_leverage: 3
+max_exposure_per_coin_pct: 0.8
+max_total_exposure_pct: 0.9
+max_simultaneous_coins: 1
 
 # ============================================================
 # DYNAMIC SLOTS - DISABLED FOR SMALL ACCOUNTS
@@ -43,20 +46,41 @@ dynamic_slots:
 risk_reference_balance_quote: 1500   # Jouw Bitget account balans (~€1500 gezien €1122 exposure)
 
 # ============================================================
-# RISK MANAGER PER-TRADE LIMITS - CRITICAL FOR ORDER SIZING!
+# RISK MANAGER - THREE-LAYER PROTECTION (Sprint 1)
 # ============================================================
-# FORMULA: max_trade = risk_reference_balance × (risk_max_balance_per_trade_pct / 100)
-# THEN:    per_coin = max_trade / max_simultaneous_coins
+# LAAG 1: Per-trade risk (hoeveel je verliest als 1 grid faalt)
+# LAAG 2: Portfolio position cap (max aantal grids tegelijk)
+# LAAG 3: Notional exposure cap (leverage-aware totaal)
 #
-# Example with current settings:
-#   max_trade = 1500 × 5% = 75 USDT
-#   per_coin  = 75 / 2    = 37.5 USDT per coin
-#   per_order = 37.5 / 4 levels = ~9 USDT (> 5 USDT min, OK!)
+# FORMULA: max_trade = risk_reference_balance × (risk_max_balance_per_trade_pct / 100)
+#
+# Example met huidige settings:
+#   reference_balance = 1500 USDT
+#   per_trade_risk = 2% = max 30 USDT risk per grid
+#   max_open_positions = 4 = max 4 grids tegelijk
+#   max_total_risk = 8% = max 120 USDT totale risk (4 × 30)
+#   max_notional = 150% = max 2250 USDT notional (bij 5x = 450 margin)
 #
 # WARNING: If per_order < min_order_amount_quote (5 USDT), orders FAIL silently!
 # ============================================================
-risk_max_balance_per_trade_pct: 5.0     # 5% = max 75 USDT per trade (was 0.5% = 7.5 USDT, te laag!)
-risk_max_total_open_risk_pct: 10.0      # 10% = max 150 USDT totaal open (2 coins à 75 USDT)
+
+# LAAG 1: Per-trade risk (verlaagd van 5% naar 2%)
+risk_max_balance_per_trade_pct: 2.0     # 2% = max 30 USDT risk per trade (was 5%!)
+
+# Daily loss limit
+risk_max_daily_loss_pct: 30.0            # TIJDELIJK: Verhoogd naar 30% vanwege PnL tracking bug (20250214)
+
+# LAAG 2: Portfolio position caps
+max_open_positions: 4                    # Max 4 grids tegelijk
+max_total_risk_pct: 8.0                  # Max 8% totale risk (4 × 2%)
+
+# LAAG 3: Notional exposure cap (leverage-aware)
+max_notional_exposure_pct: 150.0         # Max 150% van balance als notional
+                                         # Bij 5x leverage en 1500 balance:
+                                         # Max 2250 notional = 450 margin used
+
+# Legacy (wordt nog steeds gebruikt door base controller)
+risk_max_total_open_risk_pct: 10.0       # Backup cap
 
 # === POSITION MODE ===
 position_mode: HEDGE               # HEDGE omdat bestaande posities in HEDGE mode zijn geopend!
@@ -116,6 +140,11 @@ max_coins_to_monitor: 15
 min_24h_volume_eur: 500000
 exclude_expensive_coins: false
 
+# US-007: Dynamic Pair Manager (two-tier discovery: REST scans all, WebSocket for best)
+use_dynamic_pair_manager: true       # Enable two-tier pair discovery
+pair_scan_interval_seconds: 300      # Interval between REST scans (5 min)
+max_spread_pct: 0.5                  # Maximum bid-ask spread filter
+
 # Trend filtering
 trend_lookback_minutes: 1440
 trend_lookback_short_minutes: 60
@@ -127,10 +156,10 @@ switch_threshold_percent: 1.0
 min_switch_interval_seconds: 900
 min_hold_time_seconds: 900
 
-# Grids (perps optimized)
-grid_range_pct_down: 5.0            # groter
-grid_range_pct_up: 12.0             # groter
-num_grids: 2                        # FIXED: 2 levels zodat 12.5/2=6.25 > 5 min
+# Grids
+grid_range_pct_down: 5.0
+grid_range_pct_up: 12.0
+num_grids: 3
 use_atr_grid_ranges: true
 atr_multiplier_down: 1.0
 atr_multiplier_up: 1.5
@@ -145,17 +174,101 @@ smart_refill_threshold_pct: 3.0
 use_dynamic_grid_sizer: false        # Don't adjust num_grids dynamically
 use_volatility_position_sizing: false  # Don't reduce position size for high volatility
 
+# ============================================================
+# FUNDING RATE FILTER (Direction-Aware) - Sprint 2
+# ============================================================
+# Funding is betaald elke 8 uur. Bij hoge funding (0.1% = 0.3%/dag) eet dit winst op.
+# MAAR: Funding is niet altijd kosten!
+# - Positieve funding rate: LONGS betalen, SHORTS ontvangen
+# - Negatieve funding rate: SHORTS betalen, LONGS ontvangen
+#
+# Deze filter blokkeert alleen als JIJ betaalt, niet als je ontvangt!
+funding_rate_filter_enabled: false           # Aan zetten na Sprint 2 implementatie
+max_funding_cost_pct: 0.03                   # Skip als JIJ > 0.03% moet betalen
+funding_rate_cache_seconds: 300              # Cache funding rate 5 min
+
+# ============================================================
+# CORRELATION FILTER - Sprint 2
+# ============================================================
+# Voorkomt dat je dubbel verliest bij gecorreleerde coins
+# (BTC en ETH dumpen vaak samen)
+correlation_filter_enabled: false            # Aan zetten na Sprint 2 implementatie
+max_correlated_positions: 1                  # Max 1 positie per groep
+
+# Correlation groups (coins die vaak samen bewegen)
+correlation_groups:
+  major_caps:
+    - BTC-USDT
+    - ETH-USDT
+  layer1_alts:
+    - SOL-USDT
+    - AVAX-USDT
+    - DOT-USDT
+    - NEAR-USDT
+    - APT-USDT
+    - SUI-USDT
+  layer2:
+    - ARB-USDT
+    - OP-USDT
+    - POL-USDT
+  meme_coins:
+    - DOGE-USDT
+    - SHIB-USDT
+    - PEPE-USDT
+    - WIF-USDT
+  ai_tokens:
+    - FET-USDT
+    - TAO-USDT
+    - WLD-USDT
+  defi:
+    - UNI-USDT
+    - AAVE-USDT
+    - LDO-USDT
+
+# ============================================================
+# TRAILING STOP (Sprint 3 - Profit Lock)
+# ============================================================
+# Lockt winst als grid in profit is. Werkt als volgt:
+# 1. Grid heeft +2.5% unrealized PnL
+# 2. Trailing stop activeert (threshold = 2%)
+# 3. High water mark = +2.5%
+# 4. Prijs daalt, PnL = +1.8% (distance = 0.7%, OK)
+# 5. Prijs daalt meer, PnL = +1.4% (distance = 1.1% > 1%)
+# 6. TRAILING STOP TRIGGERED → close grid met +1.4% profit
+#
+# BELANGRIJK: Grid-aware - let op dat dit mean-reversion niet killt!
+# Zet distance hoog genoeg zodat normale grid bounces niet triggeren.
+trailing_stop_enabled: false                 # Aan zetten na testing
+trailing_stop_activation_pct: 2.0            # Activeer na +2% profit
+trailing_stop_distance_pct: 1.0              # Max 1% teruggeven van top
+
+# ============================================================
+# DYNAMIC TIMEOUT (Sprint 3 - Volatility-Based)
+# ============================================================
+# Past grid timeout aan op basis van volatiliteit:
+# - Lage volatiliteit → langere timeout (markt beweegt langzaam)
+# - Hoge volatiliteit → kortere timeout (snelle moves verwacht)
+#
+# Dit voorkomt dat grids te vroeg stoppen in rustige markten,
+# of te lang blijven hangen in volatiele markten.
+dynamic_timeout_enabled: false               # Aan zetten na testing
+base_grid_timeout_seconds: 3600              # 1 uur basis
+low_volatility_multiplier: 2.0               # 2 uur bij lage vol
+high_volatility_multiplier: 0.5              # 30 min bij hoge vol
+volatility_threshold_low: 0.5                # ATR < 0.5% = laag
+volatility_threshold_high: 2.0               # ATR > 2.0% = hoog
+
 # Risk
-stop_loss_pct: 0.015                # 1.5% SL (met 5x leverage = 7.5% capital risk)
-take_profit_pct: 0.02               # 2% TP per grid level
-max_open_orders: 6
-order_frequency: 3
+stop_loss_pct: 0.03
+take_profit_pct: 0.05
+max_open_orders: 4
+order_frequency: 30
 
 # PHASE 1: Slippage Protection (Fix #1)
 max_entry_spread_pct: 0.5            # reject if spread > 0.5%
 
 # PHASE 1: Drawdown & Loss Limits (Fix #2 & #3)
-max_daily_loss_pct: 5.0              # max daily loss %
+max_daily_loss_pct: 30.0             # TIJDELIJK: Verhoogd naar 30% vanwege PnL tracking bug (20250214)
 max_weekly_loss_pct: 10.0
 max_monthly_loss_pct: 15.0
 max_daily_loss_eur: 50.0             # USDT for futures
@@ -185,8 +298,8 @@ max_orderbook_age_ms: 60000          # 60 seconden (was 5s)
 exchange_stop_loss_enabled: true     # Plaats SL order op Bitget (AANBEVOLEN!)
 exchange_stop_loss_pct: 5.0          # SL trigger bij -5% van entry (voor 5x = -25% van capital)
 
-exchange_take_profit_enabled: false  # TP via grid is beter, maar kan aan
-exchange_take_profit_pct: 10.0       # Als aan: TP trigger bij +10% van entry
+exchange_take_profit_enabled: true   # Backup TP op exchange (vangnet als bot faalt)
+exchange_take_profit_pct: 8.0        # Exchange TP bij +8% (bot probeert eerst +5%)
 
 # ============================================================
 # FUTURES-SPECIFIC RISK MANAGEMENT

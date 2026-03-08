@@ -149,8 +149,10 @@ class BudgetAllocator:
         if available < Decimal("0"):
             available = Decimal("0")
 
-        # Check if we have enough
-        if available >= required_quote:
+        # Check if we have enough (with small tolerance for floating point precision)
+        # This handles cases where both DynamicSlotManager and BudgetAllocator apply buffers
+        tolerance = Decimal("0.01")  # $0.01 tolerance
+        if available >= required_quote - tolerance:
             self.logger.debug(
                 f"✅ US-004 BUDGET OK | {symbol or 'new'}: "
                 f"need {required_quote:.2f}, have {available:.2f} free "

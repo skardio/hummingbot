@@ -19,6 +19,11 @@ paper_trading: false
 
 use_dynamic_pair_discovery: true
 max_coins_to_monitor: 25            # 🚀 TASK 1.0: Universe throttling (was 50)
+
+# US-007: Dynamic Pair Manager (two-tier discovery: REST scans all, WebSocket for best)
+use_dynamic_pair_manager: true       # Enable two-tier pair discovery
+pair_scan_interval_seconds: 300      # Interval between REST scans (5 min)
+max_spread_pct: 0.5                  # Maximum bid-ask spread filter
 min_24h_volume_eur: 150000          # 🚀 Higher volume = more liquid (was 100k)
 exclude_expensive_coins: false
 
@@ -656,6 +661,7 @@ total_amount_quote: 280            # 🚀 200→280 (€93 per coin with 3 slots
 min_order_amount_quote: 15         # 🚀 10→15 (larger orders)
 
 risk_reference_balance_quote: 350  # 🚀 250→350 (higher reference)
+risk_max_daily_loss_pct: 30         # 30% daily loss limit (matches max_daily_loss_pct)
 risk_max_balance_per_trade_pct: 60  # 🚀 TASK 1.2: 80%→60% (safer with 4-6 grids, was 80)
 risk_max_total_open_risk_pct: 75   # 🚀 TASK 1.2: Total exposure cap (was 80)
 
@@ -712,8 +718,8 @@ hard_stop_pct: -15.0               # 🛡️ Was -5%, nu -15% - ultiem vangnet
 # DRAWDOWN / KILL SWITCH - CRASH PROTECTION (Grid-Aware)
 # ==============================================================================
 
-max_daily_loss_pct: 2.5      # 🛡️ 2.5% daily (managed by ProfessionalRiskManager)
-max_daily_loss_eur: 10.0     # 🛡️ Hard €10 limit per dag
+max_daily_loss_pct: 30.0     # TIJDELIJK: Verhoogd naar 30% vanwege PnL tracking bug (20250214)
+max_daily_loss_eur: 100.0    # TIJDELIJK: Verhoogd naar €100
 max_weekly_loss_pct: 7.0     # 🛡️ 7% weekly (stricter than 8%)
 max_monthly_loss_pct: 10.0   # 🛡️ 10% monthly (stricter than 12%)
 

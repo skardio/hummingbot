@@ -185,6 +185,115 @@ class FuturesGridBitgetConfig(MultiCoinGridConfig):
         description="Take-profit trigger distance from entry (%). E.g., 10.0 = TP triggers at +10% for LONG.",
     )
 
+    # === PORTFOLIO EXPOSURE CAPS (Sprint 1 Risk Management) ===
+    # Three-layer protection: per-trade, total risk, and notional exposure
+    max_open_positions: int = Field(
+        default=4,
+        ge=1,
+        le=20,
+        description="Maximum number of simultaneous grid positions (portfolio position cap).",
+    )
+    max_total_risk_pct: float = Field(
+        default=8.0,
+        ge=1.0,
+        le=50.0,
+        description="Maximum total risk as % of reference balance (e.g., 8% = max 4 grids at 2% each).",
+    )
+    max_notional_exposure_pct: float = Field(
+        default=150.0,
+        ge=50.0,
+        le=500.0,
+        description="Maximum notional exposure as % of reference balance (leverage-aware cap).",
+    )
+
+    # === FUNDING RATE FILTER (Direction-Aware) ===
+    funding_rate_filter_enabled: bool = Field(
+        default=False,
+        description="Enable funding rate filter to skip trades where you pay high funding.",
+    )
+    max_funding_cost_pct: float = Field(
+        default=0.03,
+        ge=0.0,
+        le=0.5,
+        description="Max funding cost (%) to accept. Skip if YOUR direction pays more than this.",
+    )
+    funding_rate_cache_seconds: int = Field(
+        default=300,
+        ge=60,
+        le=3600,
+        description="Cache funding rate for this many seconds (funding changes every 8h).",
+    )
+
+    # === CORRELATION FILTER ===
+    correlation_filter_enabled: bool = Field(
+        default=False,
+        description="Enable correlation filter to limit exposure to correlated assets.",
+    )
+    max_correlated_positions: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description="Maximum positions allowed per correlation group.",
+    )
+    correlation_groups: dict = Field(
+        default_factory=dict,
+        description="Dictionary of correlation groups. Keys are group names, values are lists of symbols.",
+    )
+
+    # === TRAILING STOP (Sprint 3 - Profit Lock) ===
+    trailing_stop_enabled: bool = Field(
+        default=False,
+        description="Enable trailing stop to lock profits when grid is winning.",
+    )
+    trailing_stop_activation_pct: float = Field(
+        default=2.0,
+        ge=0.5,
+        le=20.0,
+        description="PnL percentage to activate trailing stop (e.g., 2.0 = activate at +2% profit).",
+    )
+    trailing_stop_distance_pct: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=10.0,
+        description="Max distance from high water mark before stop triggers (e.g., 1.0 = stop if drops 1% from high).",
+    )
+
+    # === DYNAMIC TIMEOUT (Sprint 3 - Volatility-Based) ===
+    dynamic_timeout_enabled: bool = Field(
+        default=False,
+        description="Enable dynamic grid timeout based on volatility.",
+    )
+    base_grid_timeout_seconds: int = Field(
+        default=3600,
+        ge=300,
+        le=86400,
+        description="Base timeout in seconds (1 hour default).",
+    )
+    low_volatility_multiplier: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=5.0,
+        description="Multiply base timeout by this in low volatility (e.g., 2.0 = 2 hours).",
+    )
+    high_volatility_multiplier: float = Field(
+        default=0.5,
+        ge=0.1,
+        le=1.0,
+        description="Multiply base timeout by this in high volatility (e.g., 0.5 = 30 minutes).",
+    )
+    volatility_threshold_low: float = Field(
+        default=0.5,
+        ge=0.1,
+        le=2.0,
+        description="ATR % below this is considered low volatility.",
+    )
+    volatility_threshold_high: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=10.0,
+        description="ATR % above this is considered high volatility.",
+    )
+
     # === DYNAMIC FEATURE TOGGLES (for small accounts) ===
     use_dynamic_grid_sizer: bool = Field(
         default=True,

@@ -77,9 +77,14 @@ max_notional_exposure_pct: 150.0           # Max 150% van balance als notional
 - Betere risk-adjusted returns (Sharpe ratio)
 
 **Implementatie**:
-- [x] Per-trade: Config change only
-- [ ] Portfolio caps: Check in `_can_open_new_grid()` → tel open positions + total risk
-- [ ] Notional cap: Check current notional vs balance × max_notional_exposure_pct
+- [x] Per-trade: Config change only ✅ **DONE** (2.0% in YAML)
+- [x] Portfolio caps: Check in `_create_grid_action()` → `_check_portfolio_exposure_caps()` ✅ **DONE**
+- [x] Notional cap: Check current notional vs balance × max_notional_exposure_pct ✅ **DONE**
+
+**Files gewijzigd**:
+- `futures_bitget/config_schema.py` - Nieuwe fields toegevoegd
+- `futures_bitget/config/futures_grid_bitget.yaml` - Three-layer config
+- `futures_bitget/controller.py` - `_check_portfolio_exposure_caps()` method
 
 ---
 
@@ -124,18 +129,17 @@ def should_skip_for_funding(symbol: str, direction: str) -> bool:
     return False
 ```
 
-**Implementatie nodig**:
-- [ ] API call naar Bitget funding rate endpoint (`/api/mix/v1/market/current-fundRate`)
-- [ ] Cache mechanism (funding verandert max elke 8h)
-- [ ] Direction-aware check: LONG vs SHORT betaalt/ontvangt
-- [ ] Filter in `_can_open_new_grid()` method
-- [ ] Logging met `funding_side=pay/receive`
+**Implementatie**:
+- [x] API call naar Bitget funding rate endpoint (`/api/mix/v1/market/current-fundRate`) ✅ **DONE**
+- [x] Cache mechanism (funding verandert max elke 8h) ✅ **DONE**
+- [x] Direction-aware check: LONG vs SHORT betaalt/ontvangt ✅ **DONE**
+- [x] Filter in `_check_funding_rate_filter()` method ✅ **DONE**
+- [x] Logging met `funding_side=pay/receive` ✅ **DONE**
 
-**Code locatie**: `futures_bitget/controller.py` → `_can_open_new_grid()`
-
-**Geschatte tijd**: 2-3 uur
-
-**Waarom prioriteit?** Funding is "daily bleed" - het vreet elke dag aan je winst. Dit moet vóór correlatie filter (dat is tail risk, minder frequent).
+**Files gewijzigd**:
+- `futures_bitget/config_schema.py` - Funding filter config fields
+- `futures_bitget/config/futures_grid_bitget.yaml` - Funding rate config
+- `futures_bitget/controller.py` - `_check_funding_rate_filter()`, `_get_cached_funding_rate()`, `_update_funding_rate_cache()` methods
 
 ---
 
@@ -179,14 +183,16 @@ correlation_groups:
     - WLD-USDT
 ```
 
-**Implementatie nodig**:
-- [ ] Config schema update voor correlation_groups
-- [ ] Check in `_select_best_coins()` of correlatie groep al bezet is
-- [ ] Logging van skipped coins door correlatie
+**Implementatie**:
+- [x] Config schema update voor correlation_groups ✅ **DONE**
+- [x] Check in `_check_correlation_filter()` of correlatie groep al bezet is ✅ **DONE**
+- [x] `_get_correlation_group()` helper method ✅ **DONE**
+- [x] Logging van skipped coins door correlatie ✅ **DONE**
 
-**Code locatie**: `futures_bitget/controller.py` → `_select_best_coins()`
-
-**Geschatte tijd**: 1-2 uur
+**Files gewijzigd**:
+- `futures_bitget/config_schema.py` - `correlation_groups: dict` field
+- `futures_bitget/config/futures_grid_bitget.yaml` - Correlation groups config
+- `futures_bitget/controller.py` - `_check_correlation_filter()`, `_get_correlation_group()` methods
 
 ---
 
@@ -218,14 +224,17 @@ trailing_stop_distance_pct: 1.0     # Max 1% teruggeven van top
 8. TRAILING STOP TRIGGERED → close grid met +1.4% profit
 ```
 
-**Implementatie nodig**:
-- [ ] Track high water mark per grid
-- [ ] Check in `_get_executor_actions()` voor trailing stop trigger
-- [ ] Nieuwe exit reason: `TRAILING_STOP`
+**Implementatie**:
+- [x] Track high water mark per grid in `_trailing_stop_state` dict ✅ **DONE**
+- [x] Check in `determine_executor_actions()` voor trailing stop trigger ✅ **DONE**
+- [x] Nieuwe exit reason: `TRAILING_STOP` ✅ **DONE**
+- [x] `_check_trailing_stop()` method geïmplementeerd ✅ **DONE**
+- [x] `_reset_trailing_stop()` voor cleanup na close ✅ **DONE**
 
-**Code locatie**: `futures_bitget/controller.py` of nieuwe `trailing_stop.py`
-
-**Geschatte tijd**: 3-4 uur
+**Files gewijzigd**:
+- `futures_bitget/config_schema.py` - Trailing stop config fields
+- `futures_bitget/config/futures_grid_bitget.yaml` - Trailing stop config
+- `futures_bitget/controller.py` - `_check_trailing_stop()`, `_reset_trailing_stop()` methods
 
 ---
 
@@ -246,7 +255,15 @@ volatility_threshold_low: 0.5       # ATR < 0.5% = laag
 volatility_threshold_high: 2.0      # ATR > 2.0% = hoog
 ```
 
-**Geschatte tijd**: 2 uur
+**Implementatie**:
+- [x] `_get_dynamic_timeout()` method geïmplementeerd ✅ **DONE**
+- [x] Volatility-based timeout multiplier ✅ **DONE**
+- [x] Integration met `_create_grid_action()` ✅ **DONE**
+
+**Files gewijzigd**:
+- `futures_bitget/config_schema.py` - Dynamic timeout config fields
+- `futures_bitget/config/futures_grid_bitget.yaml` - Dynamic timeout config
+- `futures_bitget/controller.py` - `_get_dynamic_timeout()` method
 
 ---
 
@@ -364,19 +381,45 @@ multi_coin_grid_pro/
 
 ## 📅 Implementatie Roadmap
 
-### Sprint 1 (Deze week)
-- [ ] **Risk per trade** verlagen naar 2% (config change)
-- [ ] **Correlatie filter** implementeren
+### Sprint 1 (✅ COMPLETE - 7 feb 2026)
+- [x] **Risk per trade** verlagen naar 2% (config change) ✅
+- [x] **Portfolio exposure caps** implementeren (3 lagen) ✅
+- [x] **Config schema** uitgebreid met nieuwe parameters ✅
 
-### Sprint 2 (Volgende week)
-- [ ] **Funding rate filter** implementeren
-- [ ] **Trailing stop** basis versie
+### Sprint 2 (✅ COMPLETE - 7 feb 2026)
+- [x] **Funding rate filter** geïmplementeerd ✅
+  - API call naar Bitget funding rate endpoint
+  - Cache mechanism met 5 min expiry
+  - Direction-aware check (LONG betaalt bij positief, SHORT ontvangt)
+  - Integrated in `_create_grid_action()`
+- [x] **Correlatie filter** geïmplementeerd ✅
+  - Correlation groups in config schema (dict type)
+  - `_check_correlation_filter()` method
+  - `_get_correlation_group()` helper
+  - Max 1 positie per correlatie groep
 
-### Sprint 3 (Week 3)
-- [ ] **Dynamic timeout** op volatiliteit
-- [ ] **Testing & tuning** van nieuwe features
+### Sprint 3 (✅ COMPLETE - 7 feb 2026)
+- [x] **Trailing stop** geïmplementeerd ✅
+  - `_trailing_stop_state` dict voor high water mark tracking
+  - `_check_trailing_stop()` method met activation en distance logic
+  - Integrated in `determine_executor_actions()`
+  - `_reset_trailing_stop()` voor cleanup
+- [x] **Dynamic timeout** op volatiliteit ✅
+  - `_get_dynamic_timeout()` method
+  - Volatility-based multipliers (low/high)
+  - Integrated in `_create_grid_action()`
 
-### Backlog
+### 📝 Unit Tests (✅ COMPLETE)
+- [x] **32 unit tests** in `tests/unit/test_futures_sprint_features.py` ✅
+  - 5 tests voor Portfolio Exposure Caps
+  - 6 tests voor Funding Rate Filter
+  - 5 tests voor Correlation Filter
+  - 6 tests voor Trailing Stop
+  - 4 tests voor Dynamic Timeout
+  - 2 tests voor Integration
+  - 4 tests voor Config Schema
+
+### Backlog (Not Started)
 - Liquidation awareness (requires subscription)
 - Order flow analysis
 - Multi-exchange support

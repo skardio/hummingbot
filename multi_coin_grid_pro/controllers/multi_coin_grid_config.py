@@ -154,6 +154,41 @@ class MultiCoinGridConfig(ControllerConfigBase):
         description="Number of coins to trade simultaneously. Capital is divided equally among coins."
     )
 
+    # US-007: Dynamic Pair Manager (two-tier pair discovery)
+    use_dynamic_pair_manager: bool = Field(
+        default=False,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable dynamic pair discovery (REST API scans all pairs, selects best): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Enable two-tier pair discovery: scans ALL pairs via REST, selects best for WebSocket"
+    )
+
+    pair_scan_interval_seconds: int = Field(
+        default=300,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Interval for scanning all pairs (seconds): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        ge=60,
+        le=3600,
+        description="How often to scan all pairs for rotation (default: 300 = 5 min)"
+    )
+
+    max_spread_pct: float = Field(
+        default=0.5,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum bid-ask spread percentage for pair selection: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        ge=0.01,
+        le=5.0,
+        description="Pairs with spread above this are excluded (default: 0.5%)"
+    )
+
     switch_grace_period_seconds: int = Field(
         default=600,
         client_data=ClientFieldData(

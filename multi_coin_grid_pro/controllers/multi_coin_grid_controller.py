@@ -68,17 +68,32 @@ from multi_coin_grid_pro.observability.event_logger import EventLogger
 # Story 10: Cooldown Persistence
 from multi_coin_grid_pro.persistence.cooldown_store import CooldownStore
 from multi_coin_grid_pro.risk.pnl_tracker import RealtimePnLTracker
+
+# US-005: Professional Risk Management
+from multi_coin_grid_pro.risk.professional_risk_manager import PortfolioRisk, PositionRisk, ProfessionalRiskManager
 from multi_coin_grid_pro.risk.risk_guard import RiskGuardV2
 
 # Story D1: Adaptive Timeout based on volatility
 from multi_coin_grid_pro.utils.adaptive_timeout import AdaptiveTimeout, get_recommended_timeout
+
+# US-004: Budget Allocator for capital tracking
+from multi_coin_grid_pro.utils.budget_allocator import BudgetAllocator
 from multi_coin_grid_pro.utils.candle_indicators import CandleIndicatorsCalculator
 from multi_coin_grid_pro.utils.coin_discovery import CoinDiscovery
 from multi_coin_grid_pro.utils.decision_trace import PairDecisionTrace
 from multi_coin_grid_pro.utils.dynamic_grid_sizer import DynamicGridSizer
 
+# US-007: Dynamic Pair Manager for two-tier pair discovery
+from multi_coin_grid_pro.utils.dynamic_pair_manager import DynamicPairManager
+
 # Story C1: Log Throttling + Structured Logging
 from multi_coin_grid_pro.utils.log_throttle import StructuredLogger, should_log
+
+# US-006: Metrics Calculator for KPI tracking
+from multi_coin_grid_pro.utils.metrics_calculator import MetricsCalculator
+
+# US-003: Order Validation before exchange submission
+from multi_coin_grid_pro.utils.order_validator import OrderValidator
 from multi_coin_grid_pro.utils.trend_calculator import TrendCalculator, TrendStatus
 
 from .multi_coin_grid_config import MultiCoinGridConfig
@@ -174,6 +189,42 @@ class MultiCoinGridController(ControllerBase):
         # Max simultaneous coins from config (default 1 for backwards compatibility)
         self.max_simultaneous_coins: int = getattr(config, 'max_simultaneous_coins', 1)
 
+        # DYNAMIC ALLOCATION: Stores dynamically calculated grid count
+        # Set by calculate_optimal_allocation, used by _create_grid_action
+        self._dynamic_num_grids: Optional[int] = None
+
+        # US-004: Budget Allocator - tracks reserved capital to prevent over-allocation
+        self.budget_allocator = BudgetAllocator(
+            fee_buffer_pct=Decimal("0.002"),  # 0.2% for fees
+            quote_reserve_pct=Decimal("0.05"),  # Keep 5% reserve
+            logger=self.logger()
+        )
+
+        # US-003: Order Validator - pre-validates orders before exchange submission
+        self.order_validator: Optional[OrderValidator] = None  # Initialized when connector available
+
+        # US-005: Professional Risk Manager - institutional-grade risk controls
+        # NOTE: Config stores these as Decimal, but ProfessionalRiskManager expects float
+        self.professional_risk_manager = ProfessionalRiskManager(
+            max_daily_loss_pct=float(getattr(config, 'max_daily_loss_pct', 0.03)),
+            max_positions=getattr(config, 'max_simultaneous_coins', 6),
+            atr_stop_multiplier=float(getattr(config, 'atr_stop_multiplier', 2.0)),
+            min_stop_pct=float(getattr(config, 'min_stop_pct', 0.02)),
+            max_stop_pct=float(getattr(config, 'max_stop_pct', 0.08)),
+            time_based_stop_minutes=getattr(config, 'time_based_stop_minutes', 360),
+            min_win_rate=float(getattr(config, 'min_win_rate', 0.35)),
+        )
+
+        # US-006: Metrics Calculator - KPI tracking and export
+        from pathlib import Path
+        self.metrics_calculator = MetricsCalculator(audit_dir=Path("audits"))
+        self._last_metrics_calculation: float = 0.0
+        self._metrics_calculation_interval: int = 3600  # Calculate metrics hourly
+
+        # US-007: Dynamic Pair Manager - two-tier pair discovery (optional)
+        self.dynamic_pair_manager: Optional[DynamicPairManager] = None
+        self._use_dynamic_pair_manager: bool = getattr(config, 'use_dynamic_pair_manager', False)
+
         # NEW: Tracking voor coin rotation bij monitoring (without execution)
         self.monitoring_coin: Optional[str] = None  # Coin being monitored (maar niet geëxecuteerd)
         self.monitoring_start_time: float = 0  # When monitoring of this coin started
@@ -238,6 +289,10 @@ class MultiCoinGridController(ControllerBase):
         # Add quote_asset for correct currency symbol in logging
         if isinstance(dynamic_slots_cfg, dict):
             dynamic_slots_cfg['quote_asset'] = getattr(config, 'quote_asset', 'EUR')
+            # Add order size constraints for feasibility check
+            dynamic_slots_cfg['min_order_amount_quote'] = getattr(config, 'min_order_amount_quote', 5)
+            dynamic_slots_cfg['num_grids'] = getattr(config, 'num_grids', 8)
+            dynamic_slots_cfg['total_amount_quote'] = getattr(config, 'total_amount_quote', None)
         self.dynamic_slot_manager = DynamicSlotManager(
             config=dynamic_slots_cfg,
             logger=self.logger()
@@ -1389,6 +1444,28 @@ class MultiCoinGridController(ControllerBase):
                 exclude_expensive=self.config.exclude_expensive_coins
             )
 
+        # US-003: Initialize Order Validator (requires connector)
+        if not self.order_validator and self.connector:
+            self.order_validator = OrderValidator(
+                connector=self.connector,
+                min_notional_buffer_pct=0.10,  # 10% buffer above min notional
+                balance_reserve_pct=0.05,      # 5% reserve for fees/slippage
+                log_skipped_orders=True
+            )
+            self.logger().info("✅ US-003: OrderValidator initialized")
+
+        # US-007: Initialize Dynamic Pair Manager (optional, requires connector)
+        if self._use_dynamic_pair_manager and not self.dynamic_pair_manager and self.connector:
+            self.dynamic_pair_manager = DynamicPairManager(
+                connector=self.connector,
+                quote_asset=self.config.quote_asset,
+                max_active_pairs=getattr(self.config, 'max_coins_to_monitor', 25),
+                min_volume_24h=float(self.config.min_24h_volume_eur),
+                max_spread_pct=getattr(self.config, 'max_spread_pct', 0.5),
+                scan_interval_seconds=getattr(self.config, 'pair_scan_interval_seconds', 300),
+            )
+            self.logger().info("✅ US-007: DynamicPairManager initialized (two-tier pair discovery enabled)")
+
         # Initialize trend calculator
         if not self.trend_calculator:
             # Phase 2.5: Pass bot start time for warm-up mode
@@ -1455,7 +1532,369 @@ class MultiCoinGridController(ControllerBase):
             except Exception as e:
                 self.logger().error(f"❌ Story 10: Failed to load cooldowns: {e}")
 
+        # External Fill Reconciliation: Reset daily loss if suspiciously high
+        # This catches cases where bot missed fill events (network issues, restarts)
+        await self._reconcile_external_fills()
+
+        # Orphaned Position Recovery: Detect coins in wallet without active executor
+        # This catches cases where buy orders filled but sell orders were never placed
+        await self._detect_orphaned_positions()
+
         await super().on_start()
+
+    async def _reconcile_external_fills(self):
+        """
+        Reconcile tracked PnL with actual exchange fills.
+
+        Problem: Bot tracks fills via websocket. If a fill event is missed
+        (network issue, restart), the bot thinks it has unrealized losses
+        when actually the position was closed profitably.
+
+        Solution: On startup, check if daily loss is suspiciously high (>10%).
+        If so, query recent trades from exchange and verify. If actual trades
+        show profit (or smaller loss), reset the daily loss counter.
+        """
+        try:
+            # Check if we have a suspiciously high daily loss
+            tracked_loss_pct = float(self.risk_manager.daily_loss_pct)
+            tracked_loss_quote = float(self.risk_manager.cumulative_daily_loss_quote)
+
+            if tracked_loss_pct < 5.0:
+                # Loss is reasonable, no reconciliation needed
+                self.logger().debug(f"📊 Reconciliation: Daily loss {tracked_loss_pct:.2f}% is within normal range")
+                return
+
+            self.logger().warning(
+                f"🔍 RECONCILIATION: Detected high daily loss ({tracked_loss_pct:.2f}%, "
+                f"${tracked_loss_quote:.2f}). Checking for external fills..."
+            )
+
+            # Get recent trades from exchange (last 2 hours)
+            connector_name = self.config.connector_name
+            if connector_name not in self._strategy.connectors:
+                self.logger().warning("⚠️ Reconciliation: Connector not available")
+                return
+
+            connector = self._strategy.connectors[connector_name]
+
+            # Check balance discrepancy as a simpler reconciliation method
+            quote_asset = self.config.quote_asset
+            try:
+                available_balance = connector.get_available_balance(quote_asset)
+                total_balance = connector.get_balance(quote_asset)
+
+                self.logger().info(
+                    f"📊 Reconciliation: {quote_asset} available=${float(available_balance):.2f}, "
+                    f"total=${float(total_balance):.2f}"
+                )
+
+                # If we have more balance than expected after "losses",
+                # the losses were likely tracking errors
+                reference_balance = float(self.config.risk_reference_balance)
+
+                if float(total_balance) >= reference_balance * 0.95:
+                    # Balance is still ~95%+ of reference - losses are likely tracking errors
+                    self.logger().warning(
+                        f"✅ RECONCILIATION: Balance ${float(total_balance):.2f} is still >= 95% of "
+                        f"reference ${reference_balance:.2f}. Tracked losses appear to be "
+                        f"tracking errors (missed fill events). Resetting daily loss."
+                    )
+                    self.risk_manager.reset_daily_loss(reason="external_fill_reconciliation")
+                    return
+
+                # Calculate actual loss from balance
+                actual_loss_pct = ((reference_balance - float(total_balance)) / reference_balance) * 100
+
+                if actual_loss_pct < tracked_loss_pct * 0.5:
+                    # Actual loss is less than half of tracked loss - clear tracking error
+                    adjustment = Decimal(str(tracked_loss_quote - (reference_balance - float(total_balance))))
+                    self.logger().warning(
+                        f"✅ RECONCILIATION: Actual loss ~{actual_loss_pct:.2f}% << tracked {tracked_loss_pct:.2f}%. "
+                        f"Adjusting daily loss by ${float(adjustment):.2f}"
+                    )
+                    self.risk_manager.adjust_daily_loss(
+                        adjustment,
+                        reason=f"balance_reconciliation (actual={actual_loss_pct:.1f}%)"
+                    )
+                else:
+                    self.logger().info(
+                        f"📊 Reconciliation: Actual loss ~{actual_loss_pct:.2f}% is consistent with "
+                        f"tracked {tracked_loss_pct:.2f}%. No adjustment needed."
+                    )
+
+            except Exception as e:
+                self.logger().warning(f"⚠️ Reconciliation balance check failed: {e}")
+
+                # Fallback: If loss is extremely high (>15%) and we can't verify,
+                # assume it's a tracking error and reset
+                if tracked_loss_pct > 15.0:
+                    self.logger().warning(
+                        f"⚠️ RECONCILIATION FALLBACK: Loss {tracked_loss_pct:.2f}% is suspiciously high "
+                        f"and balance check failed. Resetting as likely tracking error."
+                    )
+                    self.risk_manager.reset_daily_loss(reason="high_loss_fallback_reconciliation")
+
+        except Exception as e:
+            self.logger().error(f"❌ Reconciliation failed: {e}")
+
+    async def _detect_orphaned_positions(self):
+        """
+        Detect orphaned positions: coins in wallet that have no active executor.
+
+        Problem: If bot restarts after buy orders filled but before sell orders
+        were placed, the coins remain in wallet without any tracking. This leads
+        to "stuck" positions that never get sold.
+
+        Solution: At startup, scan all non-zero base asset balances and check
+        if there's an active executor for each. Log warnings for orphaned positions
+        and optionally create sell orders to recover.
+
+        This is similar to futures' _place_tpsl_for_existing_positions().
+        """
+        import asyncio
+
+        try:
+            # Wait for connector to initialize balances
+            await asyncio.sleep(5)
+
+            if not self.connector:
+                self.logger().warning("⚠️ Orphan detection: No connector available")
+                return
+
+            quote_asset = self.config.quote_asset
+            min_notional = float(self.config.min_notional)
+            orphaned_positions = []
+
+            # Get all account balances
+            if not hasattr(self.connector, '_account_balances'):
+                self.logger().debug("ℹ️ Orphan detection: Connector doesn't support balance enumeration")
+                return
+
+            balances = self.connector._account_balances
+
+            # Get set of coins that have active executors
+            active_executor_coins = set()
+            if hasattr(self, 'executors_info') and self.executors_info:
+                for executor_info in self.executors_info:
+                    executor = executor_info.get('executor')
+                    if executor and hasattr(executor, 'trading_pair'):
+                        # Extract base asset from trading pair (e.g., "HYPE-USD" -> "HYPE")
+                        base_asset = executor.trading_pair.split('-')[0]
+                        active_executor_coins.add(base_asset)
+
+            # Also check active_coins dict
+            for coin in self.active_coins.keys():
+                base_asset = coin.split('-')[0]
+                active_executor_coins.add(base_asset)
+
+            # Get coins that are in the bot's market_list (configured trading pairs)
+            # Only check these - ignore manually bought coins not in market_list
+            bot_managed_coins = set()
+            if hasattr(self.config, 'market_list') and self.config.market_list:
+                for trading_pair in self.config.market_list:
+                    base_asset = trading_pair.split('-')[0]
+                    bot_managed_coins.add(base_asset)
+
+            self.logger().info(
+                f"🔍 Orphan detection: Checking balances "
+                f"(bot_managed: {len(bot_managed_coins)} coins, active_executors: {active_executor_coins})"
+            )
+
+            for asset, amount in balances.items():
+                # Skip quote asset
+                if asset == quote_asset:
+                    continue
+
+                # Skip coins NOT in market_list (manually bought, not bot-managed)
+                if bot_managed_coins and asset not in bot_managed_coins:
+                    continue
+
+                # Skip dust amounts
+                if amount < Decimal("0.0001"):
+                    continue
+
+                # Check if this asset has an active executor
+                if asset in active_executor_coins:
+                    continue
+
+                # Get trading pair and price
+                trading_pair = f"{asset}-{quote_asset}"
+
+                try:
+                    mid_price = self.connector.get_mid_price(trading_pair)
+                    if not mid_price or mid_price <= Decimal("0"):
+                        continue
+
+                    # Calculate notional value
+                    notional_value = float(amount * mid_price)
+
+                    # Skip if below min notional (dust)
+                    if notional_value < min_notional:
+                        continue
+
+                    # This is an orphaned position!
+                    orphaned_positions.append({
+                        'asset': asset,
+                        'trading_pair': trading_pair,
+                        'amount': float(amount),
+                        'price': float(mid_price),
+                        'notional': notional_value
+                    })
+
+                except Exception:
+                    # These are normal pairs without price data
+                    pass
+
+            # Log results
+            if orphaned_positions:
+                self.logger().warning(
+                    f"⚠️ ORPHANED POSITIONS DETECTED: Found {len(orphaned_positions)} coins "
+                    f"in wallet without active executors!"
+                )
+
+                total_value = Decimal("0")
+                for pos in orphaned_positions:
+                    self.logger().warning(
+                        f"   🔴 ORPHAN: {pos['asset']} | "
+                        f"Amount: {pos['amount']:.6f} | "
+                        f"Price: ${pos['price']:.4f} | "
+                        f"Value: ${pos['notional']:.2f}"
+                    )
+                    total_value += Decimal(str(pos['notional']))
+
+                self.logger().warning(
+                    f"💰 Total orphaned value: ${float(total_value):.2f} - "
+                    f"Consider manually selling on exchange or implementing auto-recovery"
+                )
+
+                # Send Telegram alert for orphaned positions
+                if hasattr(self, 'telegram_alerter') and self.telegram_alerter.enabled:
+                    orphan_lines = ["<b>🔴 ORPHANED POSITIONS DETECTED</b>\n"]
+                    for pos in orphaned_positions:
+                        orphan_lines.append(
+                            f"• <b>{pos['asset']}</b>: {pos['amount']:.6f} @ ${pos['price']:.4f} = ${pos['notional']:.2f}"
+                        )
+                    orphan_lines.append(f"\n<b>Total: ${float(total_value):.2f}</b>")
+                    orphan_lines.append("\n⚠️ Consider selling manually or restart with auto-recovery")
+                    self.telegram_alerter.warning("\n".join(orphan_lines))
+
+                # Store orphaned positions for potential recovery
+                self._orphaned_positions = orphaned_positions
+            else:
+                self.logger().info("✅ Orphan detection: No orphaned positions found")
+                self._orphaned_positions = []
+
+            # Also check for stale open orders (positions stuck in limit orders)
+            await self._cleanup_stale_orders()
+
+        except Exception as e:
+            self.logger().error(f"❌ Orphan detection failed: {e}")
+            import traceback
+            self.logger().error(traceback.format_exc())
+
+    async def _cleanup_stale_orders(self):
+        """
+        Detect and clean up stale open orders - orders for coins without active executors.
+
+        Problem: If TIME_STOP triggers but executor ID is not found in orchestrator,
+        the limit sell order remains open on the exchange indefinitely.
+
+        Solution: Check for open orders on trading pairs where:
+        1. We have no active executor
+        2. The order has been open longer than max_hold_time
+        3. The pair is in our market_list (ignore manual orders on other pairs)
+
+        Action: Alert via Telegram - manual intervention required.
+        """
+        import time as time_module
+
+        try:
+            if not self.connector:
+                return
+
+            # Get all open orders from connector
+            if not hasattr(self.connector, '_in_flight_orders'):
+                self.logger().debug("ℹ️ Stale order cleanup: Connector doesn't support in_flight_orders")
+                return
+
+            in_flight_orders = self.connector._in_flight_orders
+            if not in_flight_orders:
+                return
+
+            max_order_age_minutes = float(getattr(self.config, 'max_hold_time_minutes', 1440))  # Default 24h
+            stale_threshold_minutes = max_order_age_minutes + 60  # Give 1 hour buffer
+
+            # Get active executor trading pairs
+            active_executor_pairs = set(self.active_coins.keys())
+
+            # Safety: Only check pairs in market_list (ignore manual orders on other pairs)
+            market_list_pairs = set()
+            if hasattr(self.config, 'market_list') and self.config.market_list:
+                market_list_pairs = set(self.config.market_list)
+            elif hasattr(self.config, 'whitelisted_pairs') and self.config.whitelisted_pairs:
+                market_list_pairs = set(self.config.whitelisted_pairs)
+
+            stale_orders = []
+            current_time = time_module.time()
+
+            for order_id, order in in_flight_orders.items():
+                trading_pair = order.trading_pair
+
+                # Safety: Skip pairs NOT in market_list (these are manual orders)
+                if market_list_pairs and trading_pair not in market_list_pairs:
+                    continue
+
+                # Skip if we have an active executor for this pair
+                if trading_pair in active_executor_pairs:
+                    continue
+
+                # Skip buy orders (we only care about stuck sell orders)
+                if not order.is_sell:
+                    continue
+
+                # Check order age
+                order_age_minutes = (current_time - order.creation_timestamp) / 60
+
+                if order_age_minutes > stale_threshold_minutes:
+                    stale_orders.append({
+                        'order_id': order_id,
+                        'trading_pair': trading_pair,
+                        'amount': float(order.amount),
+                        'price': float(order.price) if order.price else 0,
+                        'age_minutes': order_age_minutes,
+                        'order': order
+                    })
+
+            if stale_orders:
+                self.logger().warning(
+                    f"⚠️ STALE ORDERS DETECTED: Found {len(stale_orders)} orphaned limit orders!"
+                )
+
+                for stale in stale_orders:
+                    self.logger().warning(
+                        f"   🔴 STALE ORDER: {stale['trading_pair']} | "
+                        f"Sell {stale['amount']:.6f} @ ${stale['price']:.6f} | "
+                        f"Age: {stale['age_minutes']:.0f} min"
+                    )
+
+                # Send Telegram alert
+                if hasattr(self, 'telegram_alerter') and self.telegram_alerter.enabled:
+                    stale_lines = ["<b>🔴 STALE LIMIT ORDERS DETECTED</b>\n"]
+                    for stale in stale_orders:
+                        stale_lines.append(
+                            f"• <b>{stale['trading_pair']}</b>: Sell {stale['amount']:.6f} @ ${stale['price']:.6f}"
+                        )
+                        stale_lines.append(f"  Age: {stale['age_minutes']:.0f} minutes")
+                    stale_lines.append("\n⚠️ These orders have no active executor - consider cancelling manually")
+                    self.telegram_alerter.warning("\n".join(stale_lines))
+
+                # Store for potential auto-cleanup (future enhancement)
+                self._stale_orders = stale_orders
+            else:
+                self._stale_orders = []
+
+        except Exception as e:
+            self.logger().debug(f"Stale order cleanup check failed: {e}")
 
     async def control_task(self):
         """Override to always update trends and determine actions, even if market_data_provider isn't ready"""
@@ -1498,6 +1937,33 @@ class MultiCoinGridController(ControllerBase):
                 self._last_cooldown_cleanup = current_time
             except Exception as e:
                 self.logger().error(f"❌ Story 10: Cooldown cleanup failed: {e}")
+
+        # US-006: Periodic metrics calculation (hourly)
+        if hasattr(self, 'metrics_calculator') and self.metrics_calculator:
+            if (current_time - self._last_metrics_calculation) >= self._metrics_calculation_interval:
+                try:
+                    metrics = self.metrics_calculator.calculate_period_metrics(days=1)
+                    if metrics and metrics.total_executions > 0:
+                        self.logger().info(
+                            f"📊 US-006 Metrics (24h): "
+                            f"Executions={metrics.total_executions}, "
+                            f"WinRate={metrics.win_rate:.1%}, "
+                            f"PnL={metrics.total_pnl_net}, "
+                            f"PnL/Hour={metrics.pnl_per_hour}"
+                        )
+                    self._last_metrics_calculation = current_time
+                except Exception as e:
+                    self.logger().debug(f"US-006: Metrics calculation skipped: {e}")
+                    self._last_metrics_calculation = current_time
+
+        # US-007: Dynamic Pair Manager periodic scan (if enabled)
+        if self._use_dynamic_pair_manager and self.dynamic_pair_manager:
+            if (current_time - self.dynamic_pair_manager.last_full_scan) >= self.dynamic_pair_manager.scan_interval_seconds:
+                try:
+                    # Run async scan in background
+                    asyncio.create_task(self._run_dynamic_pair_scan())
+                except Exception as e:
+                    self.logger().debug(f"US-007: Dynamic pair scan skipped: {e}")
 
         # Phase 6: Periodic memory cleanup (every 5 minutes) - PRODUCTION-GRADE MEMORY LEAK FIX
         if (current_time - getattr(self, '_last_memory_cleanup', 0)) >= 300:  # 5 minutes
@@ -2726,6 +3192,11 @@ class MultiCoinGridController(ControllerBase):
         actions = []
         self._sync_risk_state()
 
+        # US-005: Check professional exit signals (ATR-based stops, time stops, profit locks)
+        exit_actions = self._check_professional_exit_signals()
+        if exit_actions:
+            actions.extend(exit_actions)
+
         # ===== FEATURE 1.2: TIME-BASED FILTER CHECK =====
         if self.time_based_filter:
             time_decision = self.time_based_filter.check_trading_permission()
@@ -3696,11 +4167,58 @@ class MultiCoinGridController(ControllerBase):
 
             # Create new grid executor
             try:
-                # PHASE 1 FIX #4: Calculate volatility-adjusted position size
-                # MULTI-COIN: Divide capital by number of simultaneous coins
-                total_capital = self._next_allocation_quote if self._next_allocation_quote else Decimal(
-                    str(self.config.total_amount_quote))
-                per_coin_capital = total_capital / Decimal(str(self.max_simultaneous_coins))
+                # ============================================================
+                # FULLY DYNAMIC ALLOCATION - Works with any account size
+                # ============================================================
+                # Get actual AVAILABLE balance (not total - excludes locked funds in open orders)
+                try:
+                    available_balance = self.connector.get_available_balance(self.config.quote_asset)
+                    self.logger().debug(f"📊 Available balance for grid: {available_balance} {self.config.quote_asset}")
+                except Exception as e:
+                    self.logger().warning(f"Could not get available balance: {e}, using config")
+                    available_balance = Decimal(str(self.config.total_amount_quote))
+
+                # Get current regime for slot calculation
+                current_regime = "baseline"
+                try:
+                    if self.market_regime_filter:
+                        regime_state = self.market_regime_filter.get_market_regime_state()
+                        if regime_state:
+                            current_regime = "BULL" if regime_state.is_favorable else "BEAR"
+                except Exception:
+                    pass
+
+                # Use DynamicSlotManager to calculate optimal allocation
+                allocation = self.dynamic_slot_manager.calculate_optimal_allocation(
+                    available_balance=available_balance,
+                    min_order_amount=Decimal(str(self.config.min_order_amount_quote)),
+                    preferred_grids=self.config.num_grids,
+                    max_coins=self.max_simultaneous_coins,
+                    current_regime=current_regime
+                )
+
+                if not allocation.is_feasible:
+                    self.logger().error(
+                        f"❌ Cannot create grid: {allocation.reason}\n"
+                        f"   Available: €{available_balance:.2f}\n"
+                        f"   Need more capital or wait for positions to close"
+                    )
+                    return actions
+
+                # Use the dynamically calculated values
+                total_capital = allocation.available_capital
+                current_max_slots = allocation.num_coins
+                per_coin_capital = allocation.capital_per_coin
+                dynamic_num_grids = allocation.num_grids
+
+                self.logger().info(
+                    f"💰 DYNAMIC ALLOCATION: €{available_balance:.2f} → "
+                    f"{current_max_slots} coin(s) × {dynamic_num_grids} grids = "
+                    f"€{allocation.amount_per_grid_level:.2f}/level"
+                )
+
+                # Store dynamic grid count for _create_grid_action
+                self._dynamic_num_grids = dynamic_num_grids
 
                 # ===== FEATURE 1.2: APPLY TIME-BASED POSITION SIZE ADJUSTMENT =====
                 if self.time_based_filter:
@@ -3710,7 +4228,7 @@ class MultiCoinGridController(ControllerBase):
                     if time_decision.risk_multiplier != 1.0:
                         self.logger().info(
                             f"⏰ Feature 1.2: Position size adjusted by {time_decision.risk_multiplier}x "
-                            f"(€{total_capital / Decimal(str(self.max_simultaneous_coins)):.2f} → €{per_coin_capital:.2f})"  # noqa: E501
+                            f"(€{total_capital / Decimal(str(current_max_slots)):.2f} → €{per_coin_capital:.2f})"  # noqa: E501
                         )
 
                 adjusted_size = self._calculate_volatility_adjusted_position_size(best_coin, per_coin_capital)
@@ -3736,7 +4254,7 @@ class MultiCoinGridController(ControllerBase):
 
                 self.logger().info(
                     f"💰 Capital allocation: €{total_capital} / {
-                        self.max_simultaneous_coins} coins = €{
+                        current_max_slots} coins = €{
                         per_coin_capital:.2f} per coin")
 
                 # 🔧 RACE CONDITION GUARD: Final check before creating grid
@@ -3744,6 +4262,31 @@ class MultiCoinGridController(ControllerBase):
                 if best_coin in self.active_coins:
                     self.logger().warning(
                         f"⏭️  {best_coin} became active just now (race condition) - skipping create"
+                    )
+                    return actions
+
+                # US-005: Professional Risk Manager check before grid creation
+                # Check daily loss limit, max positions, rolling PnL
+                portfolio_risk = self._build_portfolio_risk()
+                can_open, risk_reason = self.professional_risk_manager.can_open_new_position(
+                    symbol=best_coin,
+                    confidence=0.7,  # Default confidence for grid entries
+                    portfolio_risk=portfolio_risk
+                )
+                if not can_open:
+                    self.logger().warning(f"🛡️  Risk Manager blocked {best_coin}: {risk_reason}")
+                    return actions
+
+                # US-004: Check budget availability BEFORE creating grid
+                # This prevents over-allocation when multiple grids are created in same cycle
+                budget_check = self.budget_allocator.check_budget(
+                    total_balance=available_balance,
+                    required_quote=adjusted_size,
+                    symbol=best_coin
+                )
+                if not budget_check.is_allowed:
+                    self.logger().warning(
+                        f"🚫 Budget check failed for {best_coin}: {budget_check.reason}"
                     )
                     return actions
 
@@ -3764,6 +4307,14 @@ class MultiCoinGridController(ControllerBase):
                     # MULTI-COIN: Track in active_coins dictionary
                     if grid_action.executor_config and grid_action.executor_config.id:
                         self.active_coins[best_coin] = grid_action.executor_config.id
+                        # US-004: Reserve budget for this executor
+                        self.budget_allocator.reserve(
+                            executor_id=grid_action.executor_config.id,
+                            symbol=best_coin,
+                            amount=applied_notional,
+                            grid_levels=self._dynamic_num_grids or self.config.num_grids,
+                            timestamp=time.time()
+                        )
                         self.logger().info(
                             f"📊 Active coins: {list(self.active_coins.keys())} ({len(self.active_coins)}/{self._get_current_max_slots()})")  # noqa: E501
                 else:
@@ -3854,9 +4405,31 @@ class MultiCoinGridController(ControllerBase):
                 self.logger().info(f"      ✅ All checks passed - creating executor for {candidate_coin}")
 
                 try:
-                    # Calculate per-coin capital (same as for first coin)
-                    total_capital = Decimal(str(self.config.total_amount_quote))
-                    per_coin_capital = total_capital / Decimal(str(self.max_simultaneous_coins))
+                    # ============================================================
+                    # FULLY DYNAMIC ALLOCATION (same logic as first coin)
+                    # ============================================================
+                    try:
+                        available_balance = self.connector.get_available_balance(self.config.quote_asset)
+                    except Exception:
+                        available_balance = Decimal(str(self.config.total_amount_quote))
+
+                    # Reuse the allocation from first coin (should still be valid)
+                    # The _dynamic_num_grids is already set
+                    allocation = self.dynamic_slot_manager.calculate_optimal_allocation(
+                        available_balance=available_balance,
+                        min_order_amount=Decimal(str(self.config.min_order_amount_quote)),
+                        preferred_grids=self.config.num_grids,
+                        max_coins=self.max_simultaneous_coins,
+                        current_regime=current_regime if 'current_regime' in dir() else "baseline"
+                    )
+
+                    if not allocation.is_feasible:
+                        self.logger().warning(
+                            f"      ❌ Not enough capital for {candidate_coin}: {allocation.reason}"
+                        )
+                        continue
+
+                    per_coin_capital = allocation.capital_per_coin
                     adjusted_size = self._calculate_volatility_adjusted_position_size(candidate_coin, per_coin_capital)
 
                     # Feature 1.2b: Apply liquidity-aware sizing cap (fallback path)
@@ -3880,6 +4453,30 @@ class MultiCoinGridController(ControllerBase):
                         f"      💰 Allocating €{per_coin_capital:.2f} (adjusted: €{adjusted_size:.2f})"
                     )
 
+                    # US-005: Professional Risk Manager check before grid creation
+                    portfolio_risk = self._build_portfolio_risk()
+                    can_open, risk_reason = self.professional_risk_manager.can_open_new_position(
+                        symbol=candidate_coin,
+                        confidence=0.7,
+                        portfolio_risk=portfolio_risk
+                    )
+                    if not can_open:
+                        self.logger().warning(f"      🛡️  Risk Manager blocked {candidate_coin}: {risk_reason}")
+                        continue
+
+                    # US-004: Check budget availability BEFORE creating grid
+                    # Account for already-reserved capital from previous coins in this cycle
+                    budget_check = self.budget_allocator.check_budget(
+                        total_balance=available_balance,
+                        required_quote=adjusted_size,
+                        symbol=candidate_coin
+                    )
+                    if not budget_check.is_allowed:
+                        self.logger().warning(
+                            f"      🚫 Budget check failed for {candidate_coin}: {budget_check.reason}"
+                        )
+                        continue
+
                     grid_action = self._create_grid_action(candidate_coin, adjusted_size)
                     if grid_action:
                         actions.append(grid_action)
@@ -3896,6 +4493,14 @@ class MultiCoinGridController(ControllerBase):
                         # Track in active_coins
                         if grid_action.executor_config and grid_action.executor_config.id:
                             self.active_coins[candidate_coin] = grid_action.executor_config.id
+                            # US-004: Reserve budget for this executor
+                            self.budget_allocator.reserve(
+                                executor_id=grid_action.executor_config.id,
+                                symbol=candidate_coin,
+                                amount=applied_notional,
+                                grid_levels=self._dynamic_num_grids or self.config.num_grids,
+                                timestamp=time.time()
+                            )
                             self.logger().info(
                                 f"      📊 Added {candidate_coin} to active coins: "
                                 f"{list(self.active_coins.keys())} ({len(self.active_coins)}/{max_slots_for_loop})"  # noqa: E501
@@ -4076,6 +4681,9 @@ class MultiCoinGridController(ControllerBase):
                 )
             # MULTI-COIN: Also remove from active_coins
             if self.active_coin and self.active_coin in self.active_coins:
+                # US-004: Release budget reservation for this executor
+                executor_id = self.active_coins[self.active_coin]
+                self.budget_allocator.release(executor_id)
                 del self.active_coins[self.active_coin]
                 self.logger().info(f"📊 Removed {self.active_coin} from active_coins: {list(self.active_coins.keys())}")
 
@@ -4457,6 +5065,9 @@ class MultiCoinGridController(ControllerBase):
                 trading_pair = getattr(getattr(executor, "config", None), "trading_pair", None)
                 if trading_pair and trading_pair in self.active_coins:
                     if self.active_coins[trading_pair] == executor.id:
+                        # Release budget reservation before removing from active_coins
+                        if hasattr(self, 'budget_allocator'):
+                            self.budget_allocator.release(executor.id)
                         del self.active_coins[trading_pair]
                         self.logger().info(
                             f"🧹 Cleanup: Removed {trading_pair} from active_coins (executor terminated)"
@@ -4519,6 +5130,23 @@ class MultiCoinGridController(ControllerBase):
                         except Exception as e:
                             self.logger().error(f"Story B2: Failed to write audit record for {trading_pair}: {e}")
                         # ==============================================================================
+
+                        # US-005: Record trade in ProfessionalRiskManager for win rate tracking
+                        if hasattr(self, 'professional_risk_manager'):
+                            try:
+                                pnl_pct = float(realised_pnl / Decimal(str(getattr(executor.config, "total_amount_quote", 50.0))))
+                                self.professional_risk_manager.recent_trades.append({
+                                    "symbol": trading_pair,
+                                    "pnl_pct": pnl_pct,
+                                    "pnl_quote": float(realised_pnl),
+                                    "timestamp": now,
+                                    "close_reason": close_reason,
+                                })
+                                # Keep only last 50 trades
+                                if len(self.professional_risk_manager.recent_trades) > 50:
+                                    self.professional_risk_manager.recent_trades = self.professional_risk_manager.recent_trades[-50:]
+                            except Exception as e:
+                                self.logger().debug(f"US-005: Failed to record trade in risk manager: {e}")
 
                         self.risk_manager.register_close_trade(
                             symbol=trading_pair,
@@ -4615,6 +5243,9 @@ class MultiCoinGridController(ControllerBase):
 
                     self._realised_executors_tracked[executor.id] = realised_pnl
 
+        # US-005: Check ATR-based exit signals for active positions
+        self._check_professional_exit_signals()
+
         # Update unrealised PnL snapshot for the active position (if any)
         if self.active_coin and self.active_executor_id:
             executor_info = next(
@@ -4626,6 +5257,165 @@ class MultiCoinGridController(ControllerBase):
                     symbol=self.active_coin,
                     unrealised_quote=Decimal(str(executor_info.net_pnl_quote)),
                 )
+
+    def _check_professional_exit_signals(self) -> List:
+        """
+        US-005: Check ATR-based exit signals for active positions.
+
+        Uses ProfessionalRiskManager.should_exit_position() to determine
+        if any active executor should be closed based on:
+        - ATR-based stop loss
+        - Time-based stop (stalled positions)
+        - Profit tier locks
+
+        Returns:
+            List of StopExecutorAction for positions that should exit
+        """
+        actions = []
+
+        if not hasattr(self, 'professional_risk_manager'):
+            return actions
+
+        now = self.market_data_provider.time()
+
+        # Initialize stale executor tracking if not exists
+        if not hasattr(self, '_stale_executor_counts'):
+            self._stale_executor_counts = {}
+
+        # Check each active executor
+        for trading_pair, executor_id in list(self.active_coins.items()):
+            try:
+                # Find the executor
+                executor = next(
+                    (e for e in self.executors_info if e.id == executor_id and e.is_active),
+                    None
+                )
+                if not executor:
+                    # Track stale executor references - executor in active_coins but not in executors_info
+                    stale_key = f"{trading_pair}_{executor_id}"
+                    self._stale_executor_counts[stale_key] = self._stale_executor_counts.get(stale_key, 0) + 1
+
+                    # After 10 consecutive checks (roughly 100 seconds), cleanup the stale reference
+                    if self._stale_executor_counts[stale_key] >= 10:
+                        self.logger().warning(
+                            f"🧹 Cleaning up stale executor reference: {trading_pair} "
+                            f"(executor {executor_id[:8]}... not found after {self._stale_executor_counts[stale_key]} checks)"
+                        )
+
+                        # Remove from active_coins
+                        if trading_pair in self.active_coins:
+                            del self.active_coins[trading_pair]
+
+                        # Clean up related tracking
+                        if trading_pair in self.entry_prices:
+                            del self.entry_prices[trading_pair]
+                        if executor_id in self._executor_creation_timestamps:
+                            del self._executor_creation_timestamps[executor_id]
+
+                        # Clear counter
+                        del self._stale_executor_counts[stale_key]
+
+                        # Send Telegram alert
+                        if hasattr(self, 'telegram_alerter') and self.telegram_alerter.enabled:
+                            self.telegram_alerter.warning(
+                                f"<b>🧹 STALE EXECUTOR CLEANED</b>\n\n"
+                                f"• Pair: <b>{trading_pair}</b>\n"
+                                f"• Executor: {executor_id[:16]}...\n"
+                                f"• Reason: Executor not found in orchestrator\n\n"
+                                f"⚠️ Check for orphaned open orders on exchange!"
+                            )
+                    continue
+
+                # Reset stale counter if executor is found (it was temporarily not visible)
+                stale_key = f"{trading_pair}_{executor_id}"
+                if stale_key in self._stale_executor_counts:
+                    del self._stale_executor_counts[stale_key]
+
+                # Get executor config
+                executor_config = getattr(executor, "config", None)
+                if not executor_config:
+                    continue
+
+                # Calculate position metrics
+                entry_price = self.entry_prices.get(trading_pair, Decimal("0"))
+                if entry_price <= 0:
+                    continue
+
+                # Get current price from trend calculator
+                trend = self.trend_calculator.get_trend(trading_pair) if self.trend_calculator else None
+                if not trend or not trend.current_price:
+                    continue
+
+                current_price = Decimal(str(trend.current_price))
+
+                # Calculate unrealized PnL %
+                pnl_pct = float((current_price - entry_price) / entry_price) if entry_price > 0 else 0.0
+
+                # Calculate time held
+                creation_time = self._executor_creation_timestamps.get(executor_id, now)
+                time_held_minutes = int((now - creation_time) / 60)
+
+                # Get ATR % (from trend or calculate)
+                atr_pct = getattr(trend, 'atr_pct', 0.02)  # Default 2% if not available
+                if hasattr(trend, 'atr_value') and trend.atr_value and trend.current_price:
+                    atr_pct = float(trend.atr_value / trend.current_price)
+
+                # Get max hold time from config
+                max_hold_minutes = int(getattr(self.config, 'max_hold_time_seconds', 21600) / 60)  # Default 6h
+
+                # Build PositionRisk object
+                position_risk = PositionRisk(
+                    symbol=trading_pair,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                    unrealized_pnl_pct=pnl_pct,
+                    time_held_minutes=time_held_minutes,
+                    atr_pct=atr_pct,
+                    initial_stop_pct=float(self.config.stop_loss_pct or Decimal("0.05")),
+                    current_stop_pct=float(self.config.stop_loss_pct or Decimal("0.05")),
+                    trailing_stop_distance_pct=0.0,
+                    max_hold_time_minutes=max_hold_minutes,
+                    is_time_expired=time_held_minutes >= max_hold_minutes,
+                    entry_confidence=0.7,
+                )
+
+                # Check for exit signal
+                action, reason = self.professional_risk_manager.should_exit_position(position_risk)
+
+                if action in ("STOP_LOSS", "TIME_STOP", "PROFIT_LOCK"):
+                    self.logger().warning(
+                        f"🛡️  US-005 Exit Signal for {trading_pair}: {action} - {reason}"
+                    )
+
+                    # Create stop action
+                    from hummingbot.strategy_v2.models.executor_actions import StopExecutorAction
+                    stop_action = StopExecutorAction(
+                        controller_id=self.config.id or "multi_coin_grid",
+                        executor_id=executor_id
+                    )
+                    actions.append(stop_action)
+
+                    # Emit event if event logger available
+                    if self.event_logger:
+                        from multi_coin_grid_pro.core.reason_codes import ReasonCode, Stage
+                        self.event_logger.emit_gate_denied(
+                            correlation_id=f"exit_{executor_id}_{int(time.time())}",
+                            symbol=trading_pair,
+                            stage=Stage.EXECUTION,
+                            reason_code=ReasonCode.TIME_STOP if action == "TIME_STOP" else ReasonCode.STOP_LOSS if action == "STOP_LOSS" else ReasonCode.PROFIT_LOCK,
+                            reason_msg=reason,
+                            metadata={
+                                "pnl_pct": pnl_pct,
+                                "time_held_minutes": time_held_minutes,
+                                "atr_pct": atr_pct,
+                                "action": action,
+                            }
+                        )
+
+            except Exception as e:
+                self.logger().debug(f"US-005: Error checking exit for {trading_pair}: {e}")
+
+        return actions
 
     @staticmethod
     def _compute_trend_strength(trend) -> float:
@@ -4829,6 +5619,103 @@ class MultiCoinGridController(ControllerBase):
             reason_msg=reason_msg,
             metadata=metadata
         )
+
+    def _build_portfolio_risk(self) -> PortfolioRisk:
+        """
+        US-005: Build PortfolioRisk object for ProfessionalRiskManager.
+
+        Aggregates current portfolio state for risk checks.
+        """
+        try:
+            # Get total equity
+            total_equity = Decimal("0")
+            if self.connector:
+                quote_asset = self.config.quote_asset
+                total_equity = Decimal(str(self.connector.get_balance(quote_asset)))
+
+            # Calculate daily PnL
+            daily_pnl = Decimal("0")
+            daily_pnl_pct = 0.0
+            if hasattr(self, 'risk_manager') and self.risk_manager:
+                daily_pnl = self.risk_manager.daily_realised_pnl
+                if total_equity > 0:
+                    daily_pnl_pct = float(daily_pnl / total_equity)
+
+            # Count recent wins/losses from professional risk manager
+            recent_trades = self.professional_risk_manager.recent_trades
+            recent_wins = sum(1 for t in recent_trades[-20:] if t.get("pnl_pct", 0) > 0)
+            recent_losses = sum(1 for t in recent_trades[-20:] if t.get("pnl_pct", 0) <= 0)
+            win_rate = recent_wins / max(1, recent_wins + recent_losses)
+
+            return PortfolioRisk(
+                total_equity=total_equity,
+                daily_pnl=daily_pnl,
+                daily_pnl_pct=daily_pnl_pct,
+                max_daily_loss_pct=self.professional_risk_manager.max_daily_loss_pct,
+                open_positions=len(self.active_coins),
+                max_positions=self.professional_risk_manager.max_positions,
+                recent_wins=recent_wins,
+                recent_losses=recent_losses,
+                win_rate=win_rate,
+                highly_correlated_positions=[],  # TODO: implement correlation tracking
+                correlation_risk_score=0.0,
+            )
+        except Exception as e:
+            self.logger().error(f"Error building portfolio risk: {e}")
+            # Return safe defaults
+            return PortfolioRisk(
+                total_equity=Decimal("0"),
+                daily_pnl=Decimal("0"),
+                daily_pnl_pct=0.0,
+                max_daily_loss_pct=0.03,
+                open_positions=len(self.active_coins),
+                max_positions=6,
+                recent_wins=0,
+                recent_losses=0,
+                win_rate=0.5,
+                highly_correlated_positions=[],
+                correlation_risk_score=0.0,
+            )
+
+    async def _run_dynamic_pair_scan(self) -> None:
+        """
+        US-007: Run dynamic pair manager scan.
+
+        Scans all available pairs and updates the active pair pool
+        based on volume, spread, and trend scores.
+        """
+        if not self.dynamic_pair_manager:
+            return
+
+        try:
+            self.logger().info("🔍 US-007: Starting dynamic pair scan...")
+            scanned_count = await self.dynamic_pair_manager.full_scan()
+
+            if scanned_count > 0:
+                # Get top pairs
+                active_pairs = self.dynamic_pair_manager._select_best_pairs(
+                    self.config.max_coins_to_monitor
+                )
+
+                # Update monitored coins if significantly different
+                current_monitored = set(self.monitored_coins)
+                new_pairs = active_pairs - current_monitored
+                dropped_pairs = current_monitored - active_pairs
+
+                if new_pairs or dropped_pairs:
+                    self.logger().info(
+                        f"📊 US-007: Pair rotation - "
+                        f"New: {list(new_pairs)[:5]}, "
+                        f"Dropped: {list(dropped_pairs)[:5]}"
+                    )
+
+                    # Update monitored coins (preserving active coins)
+                    self.monitored_coins = list(active_pairs | set(self.active_coins.keys()))
+
+            self.logger().info(f"✅ US-007: Scanned {scanned_count} pairs")
+
+        except Exception as e:
+            self.logger().warning(f"⚠️  US-007: Dynamic pair scan failed: {e}")
 
     def _update_exposure_tracking(self, symbol: str, amount: Decimal) -> None:
         """
@@ -6879,6 +7766,15 @@ class MultiCoinGridController(ControllerBase):
         # Phase 4.2: Volatility-Based Grid Count
         num_grids = self._calculate_volatility_based_grid_count(symbol, trend)
 
+        # DYNAMIC ALLOCATION OVERRIDE: Use dynamically calculated grid count if set
+        # This ensures we don't exceed the minimum order size constraint
+        if hasattr(self, '_dynamic_num_grids') and self._dynamic_num_grids is not None:
+            if num_grids > self._dynamic_num_grids:
+                self.logger().info(
+                    f"📊 Grid levels capped by capital constraint: {num_grids} → {self._dynamic_num_grids}"
+                )
+                num_grids = self._dynamic_num_grids
+
         # Validate num_grids is positive
         if num_grids <= 0:
             self.logger().error(
@@ -7056,11 +7952,35 @@ class MultiCoinGridController(ControllerBase):
             str(self.config.total_amount_quote))
 
         # ============================================================
-        # CRITICAL VALIDATION: Check if trade_amount meets minimum
+        # AUTO-ADJUST GRID LEVELS TO MEET MINIMUM ORDER SIZE
         # ============================================================
         min_order = Decimal(str(self.config.min_order_amount_quote))
+        original_num_grids = num_grids
         per_level_amount = trade_amount_quote / Decimal(str(num_grids))
 
+        # Auto-reduce grid levels if per-level amount is too small
+        if per_level_amount < min_order:
+            # Calculate max feasible grid levels: trade_amount / min_order
+            max_feasible_grids = int(trade_amount_quote / min_order)
+
+            if max_feasible_grids >= 1:
+                num_grids = max_feasible_grids
+                per_level_amount = trade_amount_quote / Decimal(str(num_grids))
+                self.logger().warning(
+                    f"⚠️ {symbol}: Auto-reduced grid levels {original_num_grids} → {num_grids} "
+                    f"(per-level: €{per_level_amount:.2f} >= min €{min_order})"
+                )
+            else:
+                # Even 1 grid level is not enough - reject
+                self.logger().error(
+                    f"❌ {symbol} LONG grid REJECTED: trade amount €{trade_amount_quote:.2f} "
+                    f"< min_order_amount €{min_order}!\n"
+                    f"   📊 Breakdown: total={trade_amount_quote}, min_order={min_order}\n"
+                    f"   🔧 FIX: Increase 'total_amount_quote' or reduce 'max_simultaneous_coins'"
+                )
+                return None
+
+        # Legacy validation (should not trigger anymore due to auto-adjust above)
         if per_level_amount < min_order:
             self.logger().error(
                 f"❌ {symbol} LONG grid REJECTED: per-level amount €{per_level_amount:.2f} "
@@ -7121,6 +8041,24 @@ class MultiCoinGridController(ControllerBase):
             )
 
         # 🔧 CRITICAL FIX: Create triple_barrier_config with dynamic stop-loss
+
+        # US-003: Pre-validate order parameters before creating GridExecutor
+        if self.order_validator:
+            # Validate a representative order (first grid level buy)
+            validation_result = self.order_validator.validate_order(
+                trading_pair=symbol,
+                side="BUY",
+                amount=per_level_amount / current_price,  # Convert quote to base
+                price=start_price,
+                check_balance=False  # Balance already checked at higher level
+            )
+            if not validation_result.is_valid:
+                self.logger().warning(
+                    f"⚠️  US-003 OrderValidator rejected {symbol}: "
+                    f"{validation_result.skip_reason.value} - {validation_result.message}"
+                )
+                # Log but don't block - let GridExecutor handle it
+                # (could return None here to fully block)
 
         # 🔧 FIX: Bitget doesn't support LIMIT_MAKER, use LIMIT for all
         order_type = OrderType.LIMIT
@@ -7245,6 +8183,9 @@ class MultiCoinGridController(ControllerBase):
             # Clear state since executor doesn't exist
             # MULTI-COIN: Also remove from active_coins
             if self.active_coin and self.active_coin in self.active_coins:
+                # US-004: Release budget reservation for this executor
+                executor_id = self.active_coins[self.active_coin]
+                self.budget_allocator.release(executor_id)
                 del self.active_coins[self.active_coin]
                 self.logger().info(f"📊 Removed {self.active_coin} from active_coins: {list(self.active_coins.keys())}")
                 # MEMORY LEAK FIX: Clean up price history for this coin
