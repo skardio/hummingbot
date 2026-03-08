@@ -24,6 +24,21 @@ You implement features/fixes in a crypto trading bot.
 - All order actions must be **idempotent** and resilient to retries.
 - Never use `time.time()` directly: use injectable clock for testability.
 
+## Code quality (flake8)
+- All code **must** pass `flake8` before commit (pre-commit hook enforced).
+- **F401**: Remove unused imports (or `# noqa: F401` only for intentional re-exports).
+- **F841**: Remove unused local variables (prefix with `_` if intentionally ignored).
+- **F541**: No f-strings without placeholders — use a plain string.
+- **E402**: Imports at top of file — `# noqa: E402` only after necessary `sys.path` manipulation.
+- Run `flake8 <changed_files>` before considering any task complete.
+
+## Dual-file sync
+The controller exists in **two locations** that must stay in sync:
+- `multi_coin_grid_pro/controllers/multi_coin_grid_controller.py` (development)
+- `hummingbot/multi_coin_grid_controllers/multi_coin_grid_controller.py` (deployed)
+
+Every change to one **must** be applied to the other. Verify with `diff` after edits.
+
 ## Code standards
 - Python 3.11+, type hints everywhere.
 - Use dataclasses or pydantic for configs (prefer immutable where possible).
@@ -105,8 +120,34 @@ You implement features/fixes in a crypto trading bot.
 - Integration tests:
   - mock exchange adapter (deterministic)
   - uses injectable clock, no `time.time()`
+- For critical alerting (Telegram), include **real integration tests** that send actual messages (tagged `@pytest.mark.integration`).
 - Add a dry-run simulation path whenever possible.
 - Ensure tests support deterministic replay.
+- All test files must pass `flake8` (no unused imports, no unused variables).
+
+## Telegram alerting
+- Every significant state change must send a Telegram alert via `TelegramAlerter` (`multi_coin_grid_pro/alerts/telegram_alerter.py`).
+- Required alerts: orphaned positions, stale orders, risk manager blocks, kill switch triggers, startup reconciliation results.
+- Use HTML formatting: `<b>bold</b>` for emphasis, emoji prefixes for severity (🔴 critical, ⚠️ warning, ✅ info).
+- Always check `if hasattr(self, 'telegram_alerter') and self.telegram_alerter.enabled:` before sending.
+
+## market_list safety filter
+- When scanning orders, positions, or executors: **only operate on pairs in the configured `market_list`**.
+- Never cancel, modify, or close orders on pairs outside `market_list` — they may be manual trades.
+- Pattern: `if market_list_pairs and trading_pair not in market_list_pairs: continue`
+
+## Decimal precision
+- Use `Decimal` for **all** financial calculations (balances, notionals, prices, quantities).
+- Add tolerance when comparing available vs required balances: `tolerance = Decimal("0.01")`.
+- Never compare floats for equality in financial logic.
+- Round to exchange tick_size/step_size **after** all calculations.
+
+## Startup state reconciliation
+On startup, detect and handle:
+- **Orphaned positions**: balances without matching executors (from fills during downtime).
+- **Stale limit orders**: open orders on exchange without active executors.
+- **Stale executor references**: executor IDs in `active_coins` that no longer exist in the framework.
+- For each: log clearly, send Telegram alert, and take safe corrective action (never auto-trade, only clean up state).
 
 ## Observability
 - Log structured events (json-friendly dicts):

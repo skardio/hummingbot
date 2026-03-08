@@ -16,6 +16,14 @@
 - Use structured logging (log dict-like payloads).
 - Keep strategy logic pure (no exchange calls in strategy module).
 
+## Code quality (flake8)
+- All code MUST pass `flake8` before commit (enforced by pre-commit hook).
+- **F401**: No unused imports — remove or use `# noqa: F401` only when the import is intentional (re-exports, type stubs).
+- **F841**: No unused local variables — delete or prefix with `_` if intentionally ignored.
+- **F541**: No f-strings without placeholders — use a plain string instead.
+- **E402**: Module-level imports must be at top of file — use `# noqa: E402` only after necessary `sys.path` manipulation.
+- Run `flake8 <file>` to verify before committing.
+
 ## Trading invariants
 - Every order must be validated against:
   - min_notional

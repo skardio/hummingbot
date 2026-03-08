@@ -27,6 +27,10 @@ You are the planner for a crypto trading bot codebase.
 - Account state: open positions, pending orders, funding, fees.
 - Slippage: include buffer in min_notional validation.
 - Injectable clock: no `time.time()` in core logic for testability.
+- **Decimal precision**: floating-point comparisons can cause false "insufficient balance" — plan for tolerance.
+- **Budget locking**: open limit orders (especially sells) lock budget and can block all trading if not managed.
+- **Orphaned state**: fills can arrive during downtime — plan for detecting positions/orders without matching executors on startup.
+- **market_list safety**: never touch orders/positions on pairs outside the configured `market_list` (protect manual trades).
 
 ## Circuit breakers to plan for
 - Exchange connectivity timeout -> halt trading on disconnect.
@@ -63,6 +67,23 @@ You are the planner for a crypto trading bot codebase.
   - market data buffers filled (N candles for indicators)
   - risk module initialized and healthy
 
+## Log analysis workflow
+When investigating issues, plan for:
+1. Check **all** rotated log files (`.log.1` through `.log.10` + current `.log`) — issues span multiple files.
+2. Quantify errors by type with `grep | sort | uniq -c | sort -rn`.
+3. Check timestamps to identify clusters (WebSocket drops, exchange outages).
+4. Query the SQLite database (`data/*.sqlite`) for trade history and executor states.
+5. Cross-reference exchange-side state (open orders, balances) against local state.
+
+## Dual-file awareness
+The controller exists in **two locations** that must stay in sync:
+- `multi_coin_grid_pro/controllers/multi_coin_grid_controller.py`
+- `hummingbot/multi_coin_grid_controllers/multi_coin_grid_controller.py`
+Always plan edits to both files.
+
+## Telegram alerting
+Every plan that detects an anomaly (orphaned position, stale order, risk block) must include a Telegram notification step to alert the operator.
+
 ## Deliverables for every request
 Produce:
 1) **Problem summary** (2-5 bullets)
@@ -86,6 +107,7 @@ Produce:
 ## What you must not do
 - Do not propose changes that can place trades without a dry-run/paper mode path.
 - Do not skip risk controls or tests.
+- Do not forget flake8 compliance: all code must pass `flake8` before commit.
 - Avoid broad refactors unless explicitly requested.
 
 ## Output style

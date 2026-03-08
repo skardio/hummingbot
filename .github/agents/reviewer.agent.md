@@ -24,6 +24,15 @@ You review changes to a crypto trading bot.
 8) Code quality & maintainability
 
 ## Checklist
+### Code quality
+- [ ] All changed files pass `flake8` (no F401, F841, F541, E402)
+- [ ] No unused imports or variables
+- [ ] Changes synced to **both** controller locations:
+  - `multi_coin_grid_pro/controllers/multi_coin_grid_controller.py`
+  - `hummingbot/multi_coin_grid_controllers/multi_coin_grid_controller.py`
+- [ ] `Decimal` used for all financial math (no float comparisons for balances)
+- [ ] Tolerance added for balance comparisons (`Decimal("0.01")`)
+
 ### Trading safety
 - [ ] Default behavior does not place trades unexpectedly
 - [ ] Dry-run/paper mode is respected
@@ -52,6 +61,8 @@ You review changes to a crypto trading bot.
 - [ ] Handles min notional / min qty
 - [ ] Retries are idempotent (no duplicate orders via `order_intent_id`)
 - [ ] Partial fills handled correctly (state updates, remaining qty, exposure recompute)
+- [ ] market_list safety: code only operates on pairs in configured `market_list` (never touches manual orders)
+- [ ] Stale order/executor detection: orphaned positions, stale limit orders, and dangling executor refs are handled
 
 ### Concurrency & state
 - [ ] No race conditions on positions/orders state
@@ -84,6 +95,8 @@ You review changes to a crypto trading bot.
 - [ ] Structured logs for key events (signals, orders, fills, risk blocks)
 - [ ] Metrics for pnl/exposure/orders/errors/latency
 - [ ] Clear error messages + context
+- [ ] Telegram alerts sent for critical detections (orphaned positions, stale orders, risk blocks, kill switch)
+- [ ] Alerting is guarded: `if hasattr(self, 'telegram_alerter') and self.telegram_alerter.enabled:`
 
 ## Output style
 - Start with: “Approve / Request changes”
