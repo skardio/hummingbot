@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.models import CandleIndicators  # noqa: E402
 from core.reason_codes import ReasonCode, Stage  # noqa: E402
 from utils.decision_trace import PairDecisionTrace, trace_percentage_check, trace_range_check  # noqa: E402
+from utils.log_throttle import should_log  # noqa: E402
 
 
 @dataclass
@@ -275,7 +276,8 @@ class SmartEntryFilter:
             bids, asks, mid_price = get_orderbook_snapshot(self.exchange_connector, symbol)
 
             if not bids or not asks or not mid_price:
-                self.logger.warning(f"[DEPTH] {symbol} - No orderbook data available")
+                if should_log(f"depth_no_ob_{symbol}", interval_sec=300):
+                    self.logger.warning(f"[DEPTH] {symbol} - No orderbook data available")
                 # Emit event voor tracking (critical: dit is de root cause van 99.9% loss)
                 if self.event_logger:
                     try:

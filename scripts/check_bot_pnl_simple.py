@@ -2,6 +2,7 @@
 """
 Simple P&L checker - reads from logs and shows executor status
 """
+import glob
 import re
 import sys
 from pathlib import Path
@@ -13,7 +14,10 @@ print("  BOT P&L CHECKER (Simple)")
 print("=" * 80)
 print()
 
-log_file = Path(__file__).parent.parent / "logs" / "logs_multi_coin_grid_v2.log"
+# Auto-detect newest log file (supports all bot variants)
+log_dir = Path(__file__).parent.parent / "logs"
+candidates = sorted(glob.glob(str(log_dir / "logs_*.log")), key=lambda f: Path(f).stat().st_mtime, reverse=True)
+log_file = Path(candidates[0]) if candidates else log_dir / "logs_multi_coin_grid_v2.log"
 
 if not log_file.exists():
     print(f"❌ Log file not found: {log_file}")

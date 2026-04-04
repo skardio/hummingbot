@@ -35,7 +35,6 @@ from hummingbot.client.settings import (
 from hummingbot.client.ui import login_prompt
 from hummingbot.client.ui.style import load_style
 from hummingbot.core.event.events import HummingbotUIEvent
-from hummingbot.core.management.console import start_management_console
 from hummingbot.core.utils.async_utils import safe_gather
 
 
@@ -104,9 +103,8 @@ async def quick_start(args: argparse.Namespace, secrets_manager: BaseSecretsMana
     init_logging("hummingbot_logs.yml", client_config_map)
     await read_system_configs_from_yml()
 
-    # Automatically enable MQTT autostart for headless mode
-    if args.headless:
-        client_config_map.mqtt_bridge.mqtt_autostart = True
+    # Do NOT force MQTT autostart — strategy runs autonomously via clock
+    # MQTT is only needed if you want remote control via MQTT broker
 
     AllConnectorSettings.initialize_paper_trade_settings(client_config_map.paper_trade.paper_trade_exchanges)
 
@@ -173,7 +171,7 @@ async def load_and_start_strategy(hb: HummingbotApplication, args: argparse.Name
             success = await hb.trading_core.start_strategy(
                 strategy_name,
                 strategy_config_file,  # Pass config file path if provided
-                hb.strategy_file_name + (".yml" if strategy_config_file else ".py")  # Full file name for strategy
+                hb.strategy_file_name + ".yml" if strategy_config_file else strategy_name  # Only use .yml suffix for separate config
             )
             if not success:
                 logging.getLogger().error("Failed to start strategy")
@@ -247,6 +245,7 @@ async def run_application(hb: HummingbotApplication, args: argparse.Namespace, c
 
         tasks: List[Coroutine] = [hb.run()]
         if client_config_map.debug_console:
+            from hummingbot.core.management.console import start_management_console
             management_port: int = detect_available_port(8211)
             tasks.append(start_management_console(locals(), host="localhost", port=management_port))
 

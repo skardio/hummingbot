@@ -382,10 +382,14 @@ class TradingCore:
             Tuple of (strategy_class, config_object)
         """
         config = None
-        module = sys.modules.get(f"{SCRIPT_STRATEGIES_MODULE}.{script_name}")
+        module_key = f"{SCRIPT_STRATEGIES_MODULE}.{script_name}"
+        module = sys.modules.get(module_key)
 
         if module is not None:
-            script_module = importlib.reload(module)
+            # Module already loaded — reuse it instead of reload
+            # Reload resets class-level attributes (like markets) and can cause
+            # issues when the event loop is already running
+            script_module = module
         else:
             script_module = importlib.import_module(f".{script_name}", package=SCRIPT_STRATEGIES_MODULE)
 

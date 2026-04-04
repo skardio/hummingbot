@@ -68,7 +68,7 @@ risk_reference_balance_quote: 1500   # Jouw Bitget account balans (~€1500 gezi
 risk_max_balance_per_trade_pct: 2.0     # 2% = max 30 USDT risk per trade (was 5%!)
 
 # Daily loss limit
-risk_max_daily_loss_pct: 30.0            # TIJDELIJK: Verhoogd naar 30% vanwege PnL tracking bug (20250214)
+risk_max_daily_loss_pct: 3.0              # T0-Q7: Was 30% "TIJDELIJK" (13 maanden!) → 3%
 
 # LAAG 2: Portfolio position caps
 max_open_positions: 4                    # Max 4 grids tegelijk
@@ -238,7 +238,7 @@ correlation_groups:
 #
 # BELANGRIJK: Grid-aware - let op dat dit mean-reversion niet killt!
 # Zet distance hoog genoeg zodat normale grid bounces niet triggeren.
-trailing_stop_enabled: false                 # Aan zetten na testing
+trailing_stop_enabled: true                  # Activated for profit locking
 trailing_stop_activation_pct: 2.0            # Activeer na +2% profit
 trailing_stop_distance_pct: 1.0              # Max 1% teruggeven van top
 
@@ -268,7 +268,7 @@ order_frequency: 30
 max_entry_spread_pct: 0.5            # reject if spread > 0.5%
 
 # PHASE 1: Drawdown & Loss Limits (Fix #2 & #3)
-max_daily_loss_pct: 30.0             # TIJDELIJK: Verhoogd naar 30% vanwege PnL tracking bug (20250214)
+max_daily_loss_pct: 3.0              # T0-Q7: Was 30% "TIJDELIJK" (13 maanden!) → 3%
 max_weekly_loss_pct: 10.0
 max_monthly_loss_pct: 15.0
 max_daily_loss_eur: 50.0             # USDT for futures
@@ -445,3 +445,18 @@ risk_guard_atr_explosion_multiplier: 2.2     # Stop als ATR > 2.2x baseline
 # MEER INFO:
 # Lees RISK_MANAGEMENT.md voor volledige uitleg van alle parameters!
 # ============================================================
+
+# ==============================================================================
+# GRID SUITABILITY SCORER (Per-Coin Mean-Reversion Fitness)
+# ==============================================================================
+# ⚠️  NIET AANZETTEN voor futures! Deze scorer is ontworpen voor spot grids
+# (mean-reversion). Futures handelt long/short op trend — daar wil je juist
+# trending coins, het tegenovergestelde van wat de scorer hoog scoort.
+# Staat hier alleen voor logging/observatie als je de data wilt zien.
+
+grid_suitability:
+  enabled: false                 # ⚠️ NIET aanzetten — ongeschikt voor futures!
+  logging_only: true
+  min_grid_score: 0.30
+  lookback_candles: 48
+  range_efficiency_max: 0.70

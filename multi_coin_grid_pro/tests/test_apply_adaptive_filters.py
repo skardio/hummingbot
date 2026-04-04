@@ -127,19 +127,29 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    def test_ignore_non_smartentry_filters(self):
-        """Test that grid_spacing_mult and max_active_grids are ignored"""
+    def test_non_smartentry_filters_applied_to_controller(self):
+        """Test that grid_spacing_mult, max_active_grids, and entry_confidence_min are
+        applied to controller-level attributes (not SmartEntry config)."""
+        # Set up controller attributes that the method writes to
+        self.controller._regime_max_active_grids = None
+        self.controller._regime_grid_spacing_mult = 1.0
+        self.controller._regime_entry_confidence_min = None
+        self.controller.grid_suitability_scorer = None
+
         filters = {
             'rsi_buy_max': 85.0,
             'grid_spacing_mult': 1.5,
             'max_active_grids': 3,
+            'entry_confidence_min': 0.70,
         }
 
         MultiCoinGridController._apply_adaptive_filters(self.controller, filters)
 
         self.assertEqual(self.base_cfg.rsi_buy_max, 85.0)
-        self.assertFalse(hasattr(self.base_cfg, 'grid_spacing_mult'))
-        self.assertFalse(hasattr(self.base_cfg, 'max_active_grids'))
+        # Non-SmartEntry filters stored on controller
+        self.assertEqual(self.controller._regime_max_active_grids, 3)
+        self.assertEqual(self.controller._regime_grid_spacing_mult, 1.5)
+        self.assertEqual(self.controller._regime_entry_confidence_min, 0.70)
 
     def test_key_mapping_rsi_buy_min(self):
         """Test that rsi_buy_min correctly maps to rsi_extreme_low"""

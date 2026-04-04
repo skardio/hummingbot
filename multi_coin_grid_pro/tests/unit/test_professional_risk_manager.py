@@ -484,6 +484,178 @@ class TestProfessionalRiskManager(unittest.TestCase):
         # High water mark should be cleaned up
         self.assertNotIn(symbol, self.risk_mgr.position_high_water_marks)
 
+    def _make_portfolio_risk(self, **kwargs):
+        """Helper to create PortfolioRisk with sensible defaults"""
+        defaults = dict(
+            total_equity=Decimal("1000.00"),
+            daily_pnl=Decimal("-5.00"),
+            daily_pnl_pct=-0.005,
+            max_daily_loss_pct=0.03,
+            open_positions=0,
+            max_positions=6,
+            recent_wins=3,
+            recent_losses=7,
+            win_rate=0.30,
+            highly_correlated_positions=[],
+            correlation_risk_score=0.0,
+        )
+        defaults.update(kwargs)
+        return PortfolioRisk(**defaults)
+
+    def _seed_losing_trades(self, count=15, pnl=-0.005):
+        """Seed the risk manager with losing trades"""
+        for i in range(count):
+            self.risk_mgr.record_trade_result(
+                symbol=f"COIN-{i}",
+                pnl_pct=pnl,
+                close_reason="STOP_LOSS",
+                hold_time_minutes=60,
+            )
+
+    def test_pause_deadlock_force_resume_after_max_extensions(self):
+        """Test that pause deadlock is broken after max_pause_extensions"""
+        from datetime import datetime, timedelta
+
+        self.risk_mgr.max_pause_extensions = 2
+        self.risk_mgr.pause_cooldown_minutes = 120
+
+        # Seed losing trades (PnL -0.5% each → avg -0.50%)
+        self._seed_losing_trades(15, pnl=-0.005)
+
+        portfolio = self._make_portfolio_risk()
+
+        # Trigger initial pause (rolling PnL < 0 + win rate < 35%)
+        can_open, reason = self.risk_mgr.can_open_new_position(
+            symbol="TEST-USD", confidence=0.7, portfolio_risk=portfolio
+        )
+        self.assertFalse(can_open)
+        self.assertIsNotNone(self.risk_mgr.pause_until)
+        self.assertEqual(self.risk_mgr._pause_extensions, 0)
+
+        # Extension 1: expire cooldown, conditions unchanged → extends
+        self.risk_mgr.pause_until = datetime.now() - timedelta(seconds=1)
+        can_open, reason = self.risk_mgr.can_open_new_position(
+            symbol="TEST-USD", confidence=0.7, portfolio_risk=portfolio
+        )
+        self.assertFalse(can_open)
+        self.assertIn("Pause extended (1/2)", reason)
+        self.assertEqual(self.risk_mgr._pause_extensions, 1)
+
+        # Extension 2: expire again → hits max_pause_extensions, force resume
+        # Clears stale trades so step 3 won't re-trigger
+        self.risk_mgr.pause_until = datetime.now() - timedelta(seconds=1)
+        can_open, reason = self.risk_mgr.can_open_new_position(
+            symbol="TEST-USD", confidence=0.7, portfolio_risk=portfolio
+        )
+        # After force-resume: stale trades cleared, pause_until=None
+        # Step 3 won't trigger because len(recent_trades) < 10
+        self.assertTrue(can_open, "Should resume after max extensions (deadlock broken)")
+        self.assertEqual(reason, "OK")
+        self.assertEqual(len(self.risk_mgr.recent_trades), 0)
+        self.assertIsNone(self.risk_mgr.pause_until)
+
+    def test_pause_extensions_reset_on_new_trigger(self):
+        """Test that _pause_extensions resets when a fresh pause is triggered"""
+        self.risk_mgr._pause_extensions = 5
+        self.risk_mgr._trigger_pause("Test reason")
+        self.assertEqual(self.risk_mgr._pause_extensions, 0)
+        self.assertIsNotNone(self.risk_mgr.pause_until)
+
+    def test_pause_extensions_reset_on_resume(self):
+        """Test that _pause_extensions resets when conditions improve"""
+        from datetime import datetime, timedelta
+
+        # Seed winning trades (PnL +2% each)
+        for i in range(15):
+            self.risk_mgr.record_trade_result(
+                symbol=f"WIN-{i}", pnl_pct=0.02,
+                close_reason="PROFIT_LOCK", hold_time_minutes=60
+            )
+
+        self.risk_mgr.pause_until = datetime.now() - timedelta(seconds=1)
+        self.risk_mgr.pause_reason = "test"
+        self.risk_mgr._pause_extensions = 1
+
+        portfolio = self._make_portfolio_risk(win_rate=0.80)
+        can_open, reason = self.risk_mgr.can_open_new_position(
+            symbol="TEST-USD", confidence=0.7, portfolio_risk=portfolio
+        )
+        self.assertTrue(can_open)
+        self.assertEqual(reason, "OK")
+        self.assertEqual(self.risk_mgr._pause_extensions, 0)
+        self.assertIsNone(self.risk_mgr.pause_until)
+
+    def test_max_pause_extensions_configurable(self):
+        """Test max_pause_extensions is configurable"""
+        rm = ProfessionalRiskManager(max_pause_extensions=5)
+        self.assertEqual(rm.max_pause_extensions, 5)
+        self.assertEqual(rm._pause_extensions, 0)
+
+    # --- Breakeven exclusion from win rate ---
+
+    def test_breakeven_excluded_from_win_rate(self):
+        """Breakeven trades (pnl_pct=0) must not affect win rate calculation"""
+        # Record 3 wins, 5 breakevens, 2 losses — the scenario that caused the bug
+        for _ in range(3):
+            self.risk_mgr.record_trade_result(
+                symbol="WIN-USD", pnl_pct=0.01,
+                close_reason="PROFIT_LOCK", hold_time_minutes=60
+            )
+        for _ in range(5):
+            self.risk_mgr.record_trade_result(
+                symbol="BE-USD", pnl_pct=0.0,
+                close_reason="GRID_COMPLETE", hold_time_minutes=30
+            )
+        for _ in range(2):
+            self.risk_mgr.record_trade_result(
+                symbol="LOSS-USD", pnl_pct=-0.01,
+                close_reason="EARLY_STOP", hold_time_minutes=90
+            )
+
+        # Win rate should be 3 wins / 5 decisive = 60%, NOT 3/10 = 30%
+        decisive = [t for t in self.risk_mgr.recent_trades if t["pnl_pct"] != 0]
+        wins = sum(1 for t in decisive if t["is_win"])
+        win_rate = wins / len(decisive)
+        self.assertAlmostEqual(win_rate, 0.6)
+
+    def test_breakeven_only_trades_default_win_rate(self):
+        """If all trades are breakeven, win rate should default to 0.5 (neutral)"""
+        for _ in range(10):
+            self.risk_mgr.record_trade_result(
+                symbol="BE-USD", pnl_pct=0.0,
+                close_reason="GRID_COMPLETE", hold_time_minutes=30
+            )
+        decisive = [t for t in self.risk_mgr.recent_trades if t["pnl_pct"] != 0]
+        win_rate = sum(1 for t in decisive if t["is_win"]) / len(decisive) if decisive else 0.5
+        self.assertAlmostEqual(win_rate, 0.5)
+
+    def test_no_pause_with_breakeven_excluded(self):
+        """The exact bug scenario: 3 wins + 5 breakeven + 2 losses should NOT pause"""
+        # Reproduce the exact scenario
+        for _ in range(3):
+            self.risk_mgr.record_trade_result(
+                symbol="WIN-USD", pnl_pct=0.01,
+                close_reason="PROFIT_LOCK", hold_time_minutes=60
+            )
+        for _ in range(5):
+            self.risk_mgr.record_trade_result(
+                symbol="BE-USD", pnl_pct=0.0,
+                close_reason="GRID_COMPLETE", hold_time_minutes=30
+            )
+        for _ in range(2):
+            self.risk_mgr.record_trade_result(
+                symbol="LOSS-USD", pnl_pct=-0.005,
+                close_reason="EARLY_STOP", hold_time_minutes=90
+            )
+
+        # Build portfolio risk with the correct (breakeven-excluded) win rate
+        # 3 decisive wins / 5 decisive trades = 60%
+        portfolio = self._make_portfolio_risk(win_rate=0.60)
+        can_open, reason = self.risk_mgr.can_open_new_position(
+            symbol="TEST-USD", confidence=0.7, portfolio_risk=portfolio
+        )
+        self.assertTrue(can_open, f"Should NOT pause with 60% WR, but got: {reason}")
+
 
 if __name__ == "__main__":
     unittest.main()

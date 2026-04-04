@@ -83,6 +83,11 @@ class ReasonCode(str, Enum):
     ORDERBOOK_ERROR = "ORDERBOOK_ERROR"
     INSUFFICIENT_BUDGET = "INSUFFICIENT_BUDGET"  # US-004: Not enough free capital
 
+    # ===== EXIT (3 codes) =====
+    STOP_LOSS = "STOP_LOSS"          # US-005: Stop-loss triggered
+    TIME_STOP = "TIME_STOP"          # US-005: Max hold time exceeded
+    PROFIT_LOCK = "PROFIT_LOCK"      # US-005: Profit lock triggered (drawdown from peak)
+
     # ===== REGIME (2 codes) =====
     REGIME_BTC_DUMP = "REGIME_BTC_DUMP"
     REGIME_DUMP_COOLDOWN = "REGIME_DUMP_COOLDOWN"

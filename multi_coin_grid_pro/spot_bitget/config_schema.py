@@ -66,13 +66,20 @@ class SpotGridBitgetConfig(MultiCoinGridConfig):
         Must use OrderType.LIMIT for all order types.
         """
         from hummingbot.core.data_type.common import OrderType
-        from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
+        from hummingbot.strategy_v2.executors.position_executor.data_types import TrailingStop, TripleBarrierConfig
+
+        trailing_stop = None
+        if self.trailing_stop_activation_pct and self.trailing_stop_delta_pct:
+            trailing_stop = TrailingStop(
+                activation_price=self.trailing_stop_activation_pct,
+                trailing_delta=self.trailing_stop_delta_pct,
+            )
 
         return TripleBarrierConfig(
             stop_loss=self.stop_loss_pct,
             take_profit=self.take_profit_pct,
             time_limit=None,
-            trailing_stop=None,
+            trailing_stop=trailing_stop,
             open_order_type=OrderType.LIMIT,  # Bitget: Use LIMIT, not LIMIT_MAKER
             take_profit_order_type=OrderType.LIMIT,  # Bitget: Use LIMIT, not LIMIT_MAKER
             stop_loss_order_type=OrderType.MARKET,

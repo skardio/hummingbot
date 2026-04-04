@@ -64,6 +64,9 @@ blacklist:
   - M-EUR
   - Q-EUR          # Kraken blokkeert Q-EUR trading voor NL accounts
   - STBL-EUR       # Kraken blokkeert STBL-EUR trading voor NL accounts
+  # Poor performers (2026-04-02 session review)
+  - VVV-EUR              # illiquid, gap-prone, poor grid performance
+  - PTB-EUR              # illiquid, poor margins for grid trading
   # NOTE: ORA-EUR and OPEN-EUR are now auto-detected and excluded by WebSocket validation
   # No need to manually blacklist pairs that fail WS subscription anymore!
 
@@ -93,58 +96,72 @@ adaptive_regime_detection:
   log_filter_updates: true
 
 adaptive_filters:
-  # Baseline filters (OPTIMIZED for Kraken EUR bull market)
+  # Baseline filters (OPTIMIZED for Kraken EUR)
   baseline:
     rsi_buy_min: 25.0
-    rsi_buy_max: 68.0               # 🛡️ Baseline: 68 (voorkom late pumps)
+    rsi_buy_max: 72.0               # T3-F3: 68→72 (was #1 reject reason)
     rsi_extreme_min: 18.0           # 🚀 20→18 (catch oversold)
-    vwap_max_deviation_pct: 30.0    # 🚀 18→30 (RENDER 24.96% was blocked!)
-    max_up_accel_pct: 4.0           # 🚀 2.5→4 (strong momentum)
-    max_down_accel_pct: -8.0        # 🚀 -4→-8 (SUI -7.47% was blocked!)
-    atr_min_pct: 0.08               # 🚀 0.10→0.08 (more coins qualify)
+    vwap_max_deviation_pct: 12.0    # 🔧 TUNED 2026-04-03: 30→12 (stop adverse selection: coins te ver van VWAP zijn extended)
+    max_up_accel_pct: 5.0           # T3-F3: 4→5 (align met smart_entry_filter)
+    max_down_accel_pct: -6.0        # T3-F3: -8→-6 (align met smart_entry_filter)
+    atr_min_pct: 0.15               # 🔧 HF-01 2026-04-04: 1.5→0.15 (1.5% filterde ALLE coins, typische ATR 0.05-0.5%)
     atr_max_pct: 7.0                # 🚀 6→7 (allow more volatile coins)
     spike_5m_max_pct: 4.0           # 🚀 3.0→4.0 (bigger moves OK)
     wick_ratio_min: 0.0
     grid_spacing_mult: 1.0
     max_active_grids: 4             # 🚀 TASK 1.2: 2→4 (was 2)
-    entry_confidence_min: 0.65      # 🚀 0.70→0.65 (lower bar)
+    entry_confidence_min: 0.60      # T3-F3: 0.65→0.60 (minder restrictief)
 
   # BULL regime: relaxed filters
   BULL:
-    rsi_buy_max: 72.0               # 🛡️ Bull: 72 (iets ruimer voor momentum)
-    vwap_max_deviation_pct: 20.0    # 🔧 FIX: 7.0→20.0 (allow entries in strong uptrends)
-    max_up_accel_pct: 3.0
+    rsi_buy_max: 76.0               # T3-F3: 72→76 (bull regime ruimer)
+    vwap_max_deviation_pct: 15.0    # 🔧 TUNED 2026-04-03: 20→15 (bull mag iets ruimer, maar niet 20%)
+    max_up_accel_pct: 5.0           # T3-F3: 3→5
     max_down_accel_pct: -4.0
     atr_min_pct: 0.08
     spike_5m_max_pct: 3.5
     grid_spacing_mult: 1.2
     max_active_grids: 6             # 🚀 TASK 1.2: 3→6 (was 3)
-    entry_confidence_min: 0.60
+    entry_confidence_min: 0.55      # T3-F3: 0.60→0.55
 
-  # CHOP regime: strict filters
+  # CHOP regime: moderate filters
   CHOP:
-    rsi_buy_max: 68.0               # 🛡️ Chop: 68 (gelijk aan baseline)
-    vwap_max_deviation_pct: 10.0    # 🔧 FIX: 4.5→10.0 (allow altcoin pumps in chop)
-    max_up_accel_pct: 1.8           # 🔧 FIX: 1.2→1.8 (allow some momentum)
-    max_down_accel_pct: -2.5        # 🔧 FIX: -2.0→-2.5 (allow pullbacks)
+    rsi_buy_max: 72.0               # T3-F3: 68→72 (was te restrictief)
+    vwap_max_deviation_pct: 12.0    # T3-F3: 10→12 (iets ruimer)
+    max_up_accel_pct: 2.5           # T3-F3: 1.8→2.5
+    max_down_accel_pct: -3.0        # T3-F3: -2.5→-3.0 (iets ruimer)
     atr_min_pct: 0.10               # 🔧 FIX: 0.15→0.10 (Kraken EUR pairs)
     spike_5m_max_pct: 2.5           # 🔧 FIX: 2.0→2.5
     grid_spacing_mult: 0.8
     max_active_grids: 3             # 🚀 TASK 1.2: 1→3 (was 1)
-    entry_confidence_min: 0.75
+    entry_confidence_min: 0.65      # T3-F3: 0.75→0.65
 
   # BEAR regime: Minimal trading (1 grid for mean-reversion opportunities)
   BEAR:
-    rsi_buy_max: 62.0               # 🛡️ Bear: 62 (strengst)
-    vwap_max_deviation_pct: 8.0
-    max_up_accel_pct: 1.5
-    max_down_accel_pct: -2.0
+    rsi_buy_max: 66.0               # T3-F3: 62→66 (iets ruimer voor mean-reversion)
+    vwap_max_deviation_pct: 10.0    # T3-F3: 8→10
+    max_up_accel_pct: 2.0           # T3-F3: 1.5→2.0
+    max_down_accel_pct: -3.0        # T3-F3: -2.0→-3.0 (ruimer voor dips)
     atr_min_pct: 0.15
     spike_5m_max_pct: 2.0
     grid_spacing_mult: 1.5
     max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid for mean-reversion)
-    entry_confidence_min: 0.90
-    bear_allow_meanrev: false       # 🔧 INVENTORY FIX: No trading in bear!
+    entry_confidence_min: 0.80      # T3-F3: 0.90→0.80
+    bear_allow_meanrev: true        # 🔧 HF-01 2026-04-04: false→true (99% BEAR regime blokkeerde 1284 entries)
+
+# ==============================================================================
+# GRID SUITABILITY SCORER (Per-Coin Mean-Reversion Fitness)
+# ==============================================================================
+# Scores each coin on how well it suits grid (mean-reversion) trading.
+# Trending coins score low, choppy/bouncy coins score high.
+# Modes: logging_only=true (log but don't filter) or false (actively filter).
+
+grid_suitability:
+  enabled: true
+  logging_only: false            # ACTIVE mode — filters coins below threshold
+  min_grid_score: 0.50           # 0-1 threshold (was 0.30, raised after 13h data)
+  lookback_candles: 48           # 48 × 5min = 4 hours of data
+  range_efficiency_max: 0.70     # Max acceptable range efficiency
 
 # ==============================================================================
 # COIN PROFILES & SMART ENTRY
@@ -181,8 +198,8 @@ manual_trading_pairs: []  # null = dynamic discovery mode
 # ==============================================================================
 
 use_multi_timeframe_buy: true      # ENABLE multi-timeframe checks voor entries
-mtf_1h_min_pct: 0.0                # 🔧 TIGHTENED: 1h must be positive (stop buying downtrends!)
-mtf_4h_min_pct: 0.0                # 🔧 TIGHTENED: 4h must be positive (inventory fix!)
+mtf_1h_min_pct: -2.0               # 🔧 TUNED 2026-04-03: 0→-2.0 (allow -2% pullback, was te restrictief)
+mtf_4h_min_pct: -1.5               # 🔧 TUNED 2026-04-03: 0→-1.5 (allow -1.5% pullback, was te restrictief)
 mtf_24h_min_pct: -2.5              # 🔧 RELAXED: 24h mag -2.5% pullback (STBL-EUR fix: -2.55% was blocked)
 mtf_declining_1h_max: -4.0         # Als 1h < -4% EN 4h < -2% → REJECT (crash protection)
 mtf_declining_4h_max: -2.0         # (prevents trading during severe crashes)
@@ -192,8 +209,9 @@ mtf_declining_4h_max: -2.0         # (prevents trading during severe crashes)
 # ==============================================================================
 
 warmup_override_enabled: true
-warmup_4h_strong_min: 0.5          # 4H moet duidelijk bullish zijn
+warmup_4h_strong_min: -0.5          # 4H hoeft niet sterk bullish te zijn
 warmup_1h_min_if_4h_strong: -1.5   # 🔧 FIX: -0.3→-1.5 (allow deeper pullbacks in strong 4H trends)
+warmup_max_minutes: 120
 
 # ==============================================================================
 # FEATURE 1.1: MARKET REGIME FILTER - BTC Trend Following (v3.3)
@@ -361,31 +379,29 @@ orderbook_prefetch:
 use_smart_entry_filter: true       # BELANGRIJK: AAN
 
 smart_entry_filter:
-  # RSI - Use adaptive regime filters instead of static values
-  # These are fallback values when adaptive regime detection is disabled
-  rsi_buy_max: 68.0                # 🛡️ Fallback: 68 (voorkom late pumps)
+  rsi_buy_max: 72.0                # T3-F3: 68→72 (42% rejects waren RSI overbought)
   rsi_extreme_low: 18.0            # 🚀 25→18 (catch deeper oversold)
   rsi_block_min: 85.0              # 🚀 80→85 (higher ceiling)
 
   # VWAP / candles
-  vwap_max_deviation_pct: 18.0     # 🚀 12→18 (allow bull market entries)
+  vwap_max_deviation_pct: 12.0     # 🔧 TUNED 2026-04-03: 18→12 (align met adaptive baseline, stop adverse selection)
   min_wick_ratio: 0.0              # Keep 0 (body-dominant OK)
 
   # Volatiliteit / ATR – geschikt voor grids
   max_atr_pct_for_grid: 7.0        # 🚀 6→7 (allow more volatile coins)
-  min_atr_pct_for_grid: 0.08       # 🚀 0.10→0.08 (more coins qualify)
+  min_atr_pct_for_grid: 0.15       # 🔧 HF-01 2026-04-04: 1.5→0.15 (sync met baseline, 1.5% was 5-15x te hoog)
 
   # Short-term spikes
   max_5m_spike_pct: 4.0            # 🚀 3.0→4.0 (bigger moves OK)
-  max_down_accel_pct: -8.0         # 🚀 -5→-8 (SUI -7.47% was blocked!)
-  max_up_accel_pct: 4.0            # 🚀 2.5→4.0 (allow strong momentum)
+  max_down_accel_pct: -6.0         # T3-F3: -8→-6 (iets strikter falling knife)
+  max_up_accel_pct: 5.0            # T3-F3: 4→5 (12% rejects waren blow-off accel)
 
   # 24h trend bounds (geen extreme parabolische coins)
-  max_trend_24h_pct: 35.0          # 🚀 10.0→35.0 (allow bull market trends)
+  max_trend_24h_pct: 15.0          # 🔧 TUNED 2026-04-03: 35→15 (stop trend-chasing: coins +25% in 24h zijn geen grid-candidates)
   min_trend_24h_pct: -10.0         # -8 → -10: allow normale correcties
 
   # Slippage Protection (Phase 2 - NEW)
-  max_entry_spread_pct: 0.3        # Reject entry if bid-ask spread > 0.5%
+  max_entry_spread_pct: 0.5        # T3-F3: 0.3→0.5 (25% rejects, Kraken spreads 0.3-0.6%)
   slippage_check_enabled: true     # Enable spread validation
 
   # Order Book Depth Protection (Phase 2 - NEW)
@@ -625,7 +641,7 @@ trend_lookback_short_minutes: 60
 trend_lookback_mid_minutes: 240
 trend_lookback_long_minutes: 1440
 
-switch_threshold_percent: 3.0
+switch_threshold_percent: 5.0         # 🔧 TUNED 2026-04-03: 3→5 (hogere bar voor switch, kosten moeten het waard zijn)
 exit_short_threshold: -4.0          # 🔧 FIX: -1.5→-4.0 (was TE gevoelig, premature exits!)
 exit_mid_threshold: -3.0            # 🔧 FIX: -1.2→-3.0 (was TE gevoelig, premature exits!)
 
@@ -644,7 +660,7 @@ max_price_age_ms: 35000             # 35 sec (trend refresh=30s + buffer)
 max_orderbook_age_ms: 60000         # 60 sec orderbook freshness
 
 # MAX MONITORING TIME: Als geen coin voldoet, roteer na X seconden
-max_coin_monitoring_seconds: 180   # 🚀 FIX: 300→120 (2 min - faster timeout)
+max_coin_monitoring_seconds: 600    # T0-Q11: Was 180 (3 min) → 600 (10 min)
 session_blacklist_duration_seconds: 7200  # 2 uur blacklist, dan weer proberen
 
 # PERIODIC COIN DISCOVERY: Auto-refresh coin pool during runtime
@@ -661,7 +677,7 @@ total_amount_quote: 280            # 🚀 200→280 (€93 per coin with 3 slots
 min_order_amount_quote: 15         # 🚀 10→15 (larger orders)
 
 risk_reference_balance_quote: 350  # 🚀 250→350 (higher reference)
-risk_max_daily_loss_pct: 30         # 30% daily loss limit (matches max_daily_loss_pct)
+risk_max_daily_loss_pct: 3           # T0-Q7: Was 30% ("TIJDELIJK" since 2025-02-14) → 3% real limit
 risk_max_balance_per_trade_pct: 60  # 🚀 TASK 1.2: 80%→60% (safer with 4-6 grids, was 80)
 risk_max_total_open_risk_pct: 75   # 🚀 TASK 1.2: Total exposure cap (was 80)
 
@@ -671,7 +687,7 @@ max_exposure_per_coin_pct: 80      # Each coin: max 80%
 max_total_exposure_pct: 80        # Totaal: 80% van €250 = €200
 
 # Grace period: Give positions time to develop before switching (professional practice)
-switch_grace_period_seconds: 180   # 🚀 TASK 1.1: 7min→3min (faster rotations, was 420)
+switch_grace_period_seconds: 600    # 🔧 TUNED 2026-04-03: 180→600 (10 min grace, positie moet zich ontwikkelen)
 
 # ==============================================================================
 # PROFESSIONAL RISK MANAGEMENT (Grid-Aware v2)
@@ -680,15 +696,24 @@ switch_grace_period_seconds: 180   # 🚀 TASK 1.1: 7min→3min (faster rotation
 
 use_professional_risk_mgmt: true
 
-# STOP-LOSS UITGESCHAKELD - Grid krijgt ruimte voor DCA/mean-reversion
-# Bescherming via: trend exit, emergency exit, time-based exit
-stop_loss_pct: null
+# T0-Q8: Stop-loss enabled (was null, unbounded losses until -12% emergency)
+stop_loss_pct: 0.05                  # 5% stop-loss per positie
 atr_stop_multiplier: 2.0           # 2×ATR dynamic stop
 min_stop_pct: 0.02                 # Min -2% (never too tight for BTC)
 max_stop_pct: 0.05                 # Max -5% (conservative cap for grid trading)
 # Examples: BTC 1.2% ATR → -2.4%, RENDER 3.5% ATR → -7%, 10% ATR → capped to -8%
 
 take_profit_pct: 0.05              # 5% TP (realistisch voor huidige markt)
+
+# Trailing TP: lock in profit when price rises past activation, exit if it drops back by delta
+trailing_stop_activation_pct: 0.02   # 🔧 TUNED 2026-04-02: 0.015→0.02 (trail only after 2%, more room to run)
+trailing_stop_delta_pct: 0.005       # 🔧 TUNED 2026-04-02: 0.007→0.005 (tighter trail, lock in gains faster)
+
+# Dynamic TP: scale take-profit with ATR (volatile coins get wider TP, quiet coins get tighter)
+dynamic_tp_enabled: true
+dynamic_tp_atr_multiplier: 0.35     # TP = ATR% × multiplier (e.g., 4% ATR × 0.35 = 1.4%)
+dynamic_tp_min_pct: 0.020           # 🔧 TUNED 2026-04-03: 0.012→0.020 (floor 2.0%, net ~1.48% after 0.52% RT fees)
+dynamic_tp_max_pct: 0.04            # 🔧 TUNED 2026-04-03: 0.03→0.04 (cap 4.0%, capture bigger moves in volatile coins)
 
 # Context-Aware Time Exits (stall + no fills check)
 time_based_stop_minutes: 360       # 6 hours (grids need time!)
@@ -705,20 +730,20 @@ min_minutes_since_last_fill: 45    # Dead liquidity: no fills > 45min = exit
 # PnL-Driven Pauses (equity-based with cooldown)
 min_rolling_pnl_pct: -0.02         # Pause if rolling 20-trade PnL < -2%
 min_win_rate_threshold: 0.35       # 35% WR acceptable for grids
-pause_cooldown_minutes: 120        # 2-hour pause after trigger
+pause_cooldown_minutes: 30         # 🔧 TUNED 2026-04-03: 120→30 (2h te lang; veroorzaakte death spiral met herhaalde blocks)
 resume_min_pnl_pct: 0.0            # Resume only if last 10 trades >= 0%
 
-min_grid_profit_pct: 2.0           # 1.5 → 2.0 voor fee overhead (€0.04/trade)
+min_grid_profit_pct: 2.0           # 🔧 TUNED 2026-04-03: 1.2→2.0 (must exceed 0.52% RT fees + slippage + margin)
 
 # 🛡️ CRASH PROTECTION - Alleen bij flash crash / exchange fuck-up / news-nuke
-emergency_exit_pct: -12.0         # 🛡️ Was -4%, nu -12% - alleen bij echte crash
-hard_stop_pct: -15.0               # 🛡️ Was -5%, nu -15% - ultiem vangnet
+emergency_exit_pct: -5.0          # T0-Q9: Was -12%, nu -5%
+hard_stop_pct: -8.0                # T0-Q9: Was -15%, nu -8%
 
 # ==============================================================================
 # DRAWDOWN / KILL SWITCH - CRASH PROTECTION (Grid-Aware)
 # ==============================================================================
 
-max_daily_loss_pct: 30.0     # TIJDELIJK: Verhoogd naar 30% vanwege PnL tracking bug (20250214)
+max_daily_loss_pct: 3.0      # T0-Q7: Was 30% "TIJDELIJK" (13 maanden!) → 3%
 max_daily_loss_eur: 100.0    # TIJDELIJK: Verhoogd naar €100
 max_weekly_loss_pct: 7.0     # 🛡️ 7% weekly (stricter than 8%)
 max_monthly_loss_pct: 10.0   # 🛡️ 10% monthly (stricter than 12%)
@@ -738,8 +763,8 @@ telegram:
 max_open_orders: 30               # Increased for 10 grids × 2 coins
 order_frequency: 3
 
-min_switch_interval_seconds: 600    # 🚀 FIX: 1800→600 (10 min - faster switching)
-min_hold_time_seconds: 7200        # 🔧 FIX: 1800→7200 (2 hours - give grid time to recover/DCA!)
+min_switch_interval_seconds: 1800   # 🔧 TUNED 2026-04-03: 600→1800 (30 min cooldown, voorkom rapid-fire switches)
+min_hold_time_seconds: 7200        # 2 uur - grid heeft tijd nodig voor fills
 max_hold_time_seconds: 14400      # ✅ DEPRECATED: Use hard_hold_time_seconds instead
 
 # ==============================================================================
@@ -753,7 +778,7 @@ max_hold_time_seconds: 14400      # ✅ DEPRECATED: Use hard_hold_time_seconds i
 soft_hold_time_seconds: 7200       # ⏰ 2 uur - trend-aware exit kicks in
 hard_hold_time_seconds: 21600      # ⏰ 6 uur - always exit (bag-holder prevention)
 soft_exit_min_trend_pct: 0.3       # 📈 Trend must be > 0.3% to extend hold
-soft_exit_max_loss_pct: -1.5       # 📉 Exit even with good trend if loss > 1.5%
+soft_exit_max_loss_pct: -1.0       # 🔧 TUNED 2026-04-02: -1.5→-1.0 (exit sooner when losing)
 soft_exit_extend_seconds: 1800     # ⏳ Extend by 30 min if trend bullish
 
 # ==============================================================================
@@ -766,16 +791,16 @@ soft_exit_extend_seconds: 1800     # ⏳ Extend by 30 min if trend bullish
 #   3. max_hold_time_seconds: Hard cap → forced rotation
 # ==============================================================================
 
-no_fill_timeout_sec: 1200         # ⏰ 20 min - no fills → cancel + close (no inventory)
-no_progress_timeout_sec: 5400     # ⏰ 1.5 uur - meer ruimte voor herstel
-no_progress_min_loss_pct: 2.5     # 🎯 PRO: Only trigger timeout if unrealized loss > 2.5%
+no_fill_timeout_sec: 3600          # T0-Q10: Was 1200 (20 min) → 3600 (60 min)
+no_progress_timeout_sec: 3600     # 🔧 TUNED 2026-04-02: 5400→3600 (1 uur, cut stalled positions faster)
+no_progress_min_loss_pct: 0.5     # 🔧 TUNED 2026-04-03: 1.0→0.5 (cut stalled bags eerder, halveert NO_PROGRESS verliezen)
 no_progress_atr_multiplier: 1.5   # 🎯 PRO: Require adverse move > 1.5×ATR (0=disabled, 1.5=test, 2.0=conservative)
 close_grace_sec: 120              # ⏰ 2 min - graceful close window (maker → market fallback)
 
 min_startup_wait_seconds: 60       # 🚀 FIX: 90→60 (1 min startup delay)
 
 smart_switch_k: 2.0
-switch_cost_multiplier: 2.5
+switch_cost_multiplier: 3.5          # 🔧 TUNED 2026-04-03: 2.5→3.5 (straf switching zwaarder af, fees + spread zijn reëel)
 
 # ==============================================================================
 # DEBUG TRACE SYSTEM (Decision Transparency)

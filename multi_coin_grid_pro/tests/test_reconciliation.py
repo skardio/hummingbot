@@ -48,7 +48,7 @@ class TestResetDailyLoss(unittest.TestCase):
 
         # Verify loss is tracked
         self.assertEqual(self.manager._daily_loss_quote, Decimal("50.0"))
-        self.assertEqual(self.manager._consecutive_losses, 1)
+        self.assertEqual(self.manager._consecutive_losses.get("BTC-EUR", 0), 1)
 
         # Reset
         self.manager.reset_daily_loss(reason="test_reconciliation")
@@ -56,8 +56,8 @@ class TestResetDailyLoss(unittest.TestCase):
         # Verify cleared
         self.assertEqual(self.manager._daily_loss_quote, Decimal("0"))
         self.assertEqual(self.manager._daily_realised_pnl_quote, Decimal("0"))
-        self.assertEqual(self.manager._consecutive_losses, 0)
-        self.assertIsNone(self.manager._last_loss_time)
+        self.assertEqual(self.manager._consecutive_losses, {})
+        self.assertEqual(self.manager._last_loss_time, {})
 
     def test_reset_daily_loss_unblocks_trading(self):
         """After reset, trading should be allowed again"""

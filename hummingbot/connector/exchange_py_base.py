@@ -453,6 +453,22 @@ class ExchangePyBase(ExchangeBase, ABC):
             await self._place_order_and_process_update(order=order, **kwargs,)
 
         except asyncio.CancelledError:
+            self.logger().warning(
+                f"Order {order_id} ({trading_pair}) was cancelled before the exchange confirmed it. "
+                f"Marking as failed to avoid ghost orders."
+            )
+            self._on_order_failure(
+                order_id=order_id,
+                trading_pair=trading_pair,
+                amount=quantized_amount,
+                trade_type=trade_type,
+                order_type=order_type,
+                price=price,
+                exception=asyncio.CancelledError(
+                    f"Order placement task cancelled (network issue or shutdown) for {trading_pair}"
+                ),
+                **kwargs,
+            )
             raise
         except Exception as ex:
             self._on_order_failure(

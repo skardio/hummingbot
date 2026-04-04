@@ -5,6 +5,8 @@ Simple web dashboard showing bot status, events, and P&L charts.
 Runs on localhost:5000 by default.
 """
 
+from datetime import datetime
+
 from flask import Flask, jsonify, render_template_string
 
 from .config import MonitoringConfig
@@ -79,6 +81,34 @@ def api_pnl_chart():
     }
 
     return jsonify(chart_data)
+
+
+@app.route('/health')
+def health():
+    """Health check endpoint for external monitoring (systemd, uptime tools)."""
+    if not db:
+        return jsonify({"status": "unhealthy", "reason": "database not initialized"}), 503
+
+    status = db.get_latest_status()
+    if not status:
+        return jsonify({"status": "unhealthy", "reason": "no status rows"}), 503
+
+    # Check staleness: if last status is older than 120s, bot is likely stuck
+    max_age_seconds = 120
+    try:
+        ts = datetime.fromisoformat(status["timestamp"])
+        # Timestamps from add_status() are naive local time
+        age = (datetime.now() - ts).total_seconds()
+    except (ValueError, KeyError):
+        age = float("inf")
+
+    healthy = age <= max_age_seconds
+    return jsonify({
+        "status": "healthy" if healthy else "unhealthy",
+        "last_update_age_s": round(age, 1),
+        "mode": status.get("mode", "unknown"),
+        "connection": status.get("connection_status", "unknown"),
+    }), 200 if healthy else 503
 
 
 def run_dashboard(host: str = None, port: int = None, debug: bool = False):

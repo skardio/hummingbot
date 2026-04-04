@@ -220,7 +220,8 @@ class TrendCalculator:
         lookback_minutes: int = 30,
         bot_start_time: Optional[float] = None,
         base_connector: Optional[ConnectorBase] = None,
-        data_freshness_callback: Optional[callable] = None
+        data_freshness_callback: Optional[callable] = None,
+        warmup_max_minutes: int = 120
     ):
         """
         Initialize trend calculator
@@ -231,6 +232,7 @@ class TrendCalculator:
             bot_start_time: Unix timestamp of bot startup (for warm-up mode detection)
             base_connector: Base connector for price fetching in paper trading mode (optional)
             data_freshness_callback: Optional callback to mark data as fresh (Task 2.1.1)
+            warmup_max_minutes: Maximum warm-up period in minutes (default 120 = 2 hours)
         """
         self.connector = connector
         self.base_connector = base_connector  # Base connector for price fetching in paper trading
@@ -244,6 +246,7 @@ class TrendCalculator:
         self.trends: Dict[str, CoinTrend] = {}
         # Phase 2.5: Multi-timeframe support
         self.bot_start_time = bot_start_time if bot_start_time else time.time()
+        self.warmup_max_minutes = warmup_max_minutes
         self.trend_lookback_short_minutes = 60  # 1 hour
         self.trend_lookback_mid_minutes = 240  # 4 hours
         self.trend_lookback_long_minutes = 1440  # 24 hours
@@ -1265,9 +1268,14 @@ class TrendCalculator:
 
     def get_top_n_coins(self, n: int, min_trend_pct: float, exclude_coins: Optional[List[str]] = None,
                         orderbook_config: Optional[dict] = None,
-                        trade_direction: str = "long") -> List[str]:
+                        trade_direction: str = "long",
+                        grid_scorer=None) -> List[str]:
         """
-        Find top N coins with best trends, filtered by orderbook depth.
+        Find top N coins, optionally ranked by grid suitability.
+
+        When grid_scorer is provided and enabled, coins are ranked by their
+        grid suitability score (mean-reversion fitness) instead of trend
+        strength. Trend serves only as a minimum-activity pre-filter.
 
         Supports LONG, SHORT, and AUTO trade directions:
         - LONG: Returns coins with highest positive trends (>= min_trend_pct)
@@ -1286,6 +1294,9 @@ class TrendCalculator:
                 - min_depth_multiplier: float (default 5.0)
                 - order_size: Decimal (required if enabled)
             trade_direction: "long", "short", or "auto" (default "long")
+            grid_scorer: Optional GridSuitabilityScorer instance. When
+                         provided and enabled, coins are ranked by grid
+                         suitability instead of trend strength.
 
         Returns:
             List of symbols for top N coins, or empty list if no coins meet criteria
@@ -1437,18 +1448,70 @@ class TrendCalculator:
             if passes:
                 qualifying_coins.append((symbol, trend_value))
 
-        # Sort by trend strength based on direction
-        # LONG: highest positive first
-        # SHORT: most negative first (lowest value)
-        # AUTO: strongest absolute trend first
+        # ===== RANKING STRATEGY =====
+        # When grid_scorer is provided and enabled, rank by grid suitability
+        # (mean-reversion fitness) instead of trend strength.
+        # Trend is still used as minimum-activity pre-filter above.
+        use_grid_ranking = (
+            grid_scorer is not None
+            and getattr(grid_scorer, 'enabled', False)
+            and not getattr(grid_scorer, 'logging_only', True)
+        )
+
+        if use_grid_ranking and qualifying_coins:
+            # Score each qualifying coin on grid suitability
+            scored_coins = []
+            for symbol, trend_value in qualifying_coins:
+                trend_obj = self.trends.get(symbol)
+                candles = trend_obj.candles if trend_obj and hasattr(trend_obj, 'candles') else []
+                gs = grid_scorer.score_coin(symbol, candles)
+                if gs:
+                    scored_coins.append((symbol, trend_value, gs.score))
+                    logger.info(
+                        f"📐 GridRank {symbol}: grid={gs.score:.2f} trend={trend_value:+.2f}% "
+                        f"(RE={gs.range_efficiency:.2f} MR={gs.mean_reversion:.2f} "
+                        f"BR={gs.bounce_rate:.2f} AC={gs.atr_consistency:.2f}) "
+                        f"{'✅' if gs.score >= grid_scorer.min_grid_score else '❌'} "
+                        f"{gs.reason}"
+                    )
+                else:
+                    # No candle data — use trend-based fallback (score 0 = lowest priority)
+                    scored_coins.append((symbol, trend_value, 0.0))
+                    logger.debug(f"📐 GridRank {symbol}: N/A (no candles) — fallback to trend")
+
+            # Filter out coins below min_grid_score threshold
+            min_score = grid_scorer.min_grid_score
+            passing = [(s, tv, gs) for s, tv, gs in scored_coins if gs >= min_score or gs == 0.0]
+            blocked = [(s, tv, gs) for s, tv, gs in scored_coins if gs < min_score and gs != 0.0]
+            for s, tv, gs in blocked:
+                logger.warning(
+                    f"🚫 GridRank {s}: {gs:.2f} < {min_score} — "
+                    f"not suitable for grid trading (trend was {tv:+.2f}%)"
+                )
+
+            # Sort by grid score descending (best mean-reverting coins first)
+            passing.sort(key=lambda x: x[2], reverse=True)
+            qualifying_coins = [(s, tv) for s, tv, _ in passing]
+
+            logger.info(
+                f"📊 GridRank mode: {len(passing)} coins pass, "
+                f"{len(blocked)} filtered (threshold={min_score})"
+            )
+        else:
+            # Legacy: Sort by trend strength based on direction
+            if trade_direction == "short":
+                qualifying_coins.sort(key=lambda x: x[1], reverse=False)
+            elif trade_direction == "auto":
+                qualifying_coins.sort(key=lambda x: abs(x[1]), reverse=True)
+            else:  # long
+                qualifying_coins.sort(key=lambda x: x[1], reverse=True)
+
+        # Sort all_coins by trend for fallback/debug (always trend-based)
         if trade_direction == "short":
-            qualifying_coins.sort(key=lambda x: x[1], reverse=False)  # Most negative first
             all_coins.sort(key=lambda x: x[1], reverse=False)
         elif trade_direction == "auto":
-            qualifying_coins.sort(key=lambda x: abs(x[1]), reverse=True)  # Strongest absolute first
             all_coins.sort(key=lambda x: abs(x[1]), reverse=True)
-        else:  # long
-            qualifying_coins.sort(key=lambda x: x[1], reverse=True)  # Most positive first
+        else:
             all_coins.sort(key=lambda x: x[1], reverse=True)
 
         top_n = qualifying_coins[:n]
@@ -1877,8 +1940,7 @@ class TrendCalculator:
 
             # 1440m (24 hours) - with warm-up mode support
             time_since_bot_start = current_time - self.bot_start_time
-            # BUGFIX: Reduce warm-up from 24h to 6h - with 360+ candles we have enough data
-            warmup_period_seconds = min(self.trend_lookback_long_minutes * 60, 360 * 60)  # Max 6 hours
+            warmup_period_seconds = min(self.trend_lookback_long_minutes * 60, self.warmup_max_minutes * 60)  # Configurable
 
             if time_since_bot_start < warmup_period_seconds:
                 # BUGFIX: In warm-up mode, use conservative averaging instead of aggressive extrapolation

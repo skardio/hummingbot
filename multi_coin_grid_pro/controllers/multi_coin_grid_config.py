@@ -378,6 +378,42 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    downtrend_gate_enabled: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable downtrend gate for new entries? (default True): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    downtrend_gate_1h_min: float = Field(
+        default=-1.0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Downtrend gate 1h minimum (default -1.0%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    downtrend_gate_4h_min: float = Field(
+        default=-0.75,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Downtrend gate 4h minimum (default -0.75%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    downtrend_gate_24h_min: float = Field(
+        default=-0.5,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Downtrend gate 24h minimum (default -0.5%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     # PRO EXIT SYSTEM - Layer 3: Price-Based Emergency Exits
     emergency_exit_pct: float = Field(
         default=-2.0,  # Exit immediately if price drops 2.0% below entry (prevents crash losses)
@@ -392,6 +428,24 @@ class MultiCoinGridConfig(ControllerConfigBase):
         default=-3.0,  # Fail-safe exit if price drops 3.0% below entry (last resort protection)
         client_data=ClientFieldData(
             prompt=lambda mi: "Hard stop percentage (default -4.0%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    no_loss_exit_enabled: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable no-loss exit on trend weakness? (default True): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    no_loss_exit_min_net_pct: float = Field(
+        default=0.0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum net % (after fees) for no-loss exit (default 0.0%): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
@@ -850,6 +904,42 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # Trailing stop: lock in profit once TP activation is reached
+    trailing_stop_activation_pct: Optional[Decimal] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Trailing stop activation (e.g., 0.01 for +1%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+    trailing_stop_delta_pct: Optional[Decimal] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Trailing stop delta (e.g., 0.005 for 0.5% drawback): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Dynamic TP: scale take-profit per-coin using ATR
+    dynamic_tp_enabled: bool = Field(
+        default=False,
+        json_schema_extra={"is_updatable": True}
+    )
+    dynamic_tp_atr_multiplier: Decimal = Field(
+        default=Decimal("0.5"),
+        json_schema_extra={"is_updatable": True}
+    )
+    dynamic_tp_min_pct: Decimal = Field(
+        default=Decimal("0.008"),
+        json_schema_extra={"is_updatable": True}
+    )
+    dynamic_tp_max_pct: Decimal = Field(
+        default=Decimal("0.025"),
+        json_schema_extra={"is_updatable": True}
+    )
+
     # PROFESSIONAL RISK MANAGEMENT (Grid-Aware)
     use_professional_risk_mgmt: bool = Field(
         default=True,
@@ -860,14 +950,8 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
-    max_daily_loss_pct: Decimal = Field(
-        default=Decimal("0.03"),  # -3% daily loss limit (HARD)
-        client_data=ClientFieldData(
-            prompt=lambda mi: "Maximum daily loss percentage (e.g., 0.03 for -3% stop trading for day): ",
-            prompt_on_new=False,
-        ),
-        json_schema_extra={"is_updatable": True}
-    )
+    # T0-Q2: Removed duplicate max_daily_loss_pct (was Decimal("0.03") here, shadowed by float(5.0) at PHASE 1 section)
+    # The active definition is in the "PHASE 1: Drawdown & Loss Limits" section below
 
     atr_stop_multiplier: Decimal = Field(
         default=Decimal("2.0"),  # Stop at 2×ATR (grid-aware)
@@ -963,6 +1047,15 @@ class MultiCoinGridConfig(ControllerConfigBase):
         default=Decimal("0.0"),  # Resume only if last 10 trades >= 0%
         client_data=ClientFieldData(
             prompt=lambda mi: "Minimum last 10 trades PnL to resume after pause (e.g., 0.0 = breakeven): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    max_pause_extensions: int = Field(
+        default=2,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Max times pause can extend before forced resume (prevents deadlock): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
@@ -1109,6 +1202,16 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True},
     )
 
+    # Orphan recovery
+    auto_sell_orphaned_positions: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Auto-sell orphaned positions at startup? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+
     # Trend strength controls
     trend_min_entry_strength: float = Field(
         default=0.10,  # LOWERED from 0.7 - allow entries in weaker trends (crypto rarely has +70% strength)
@@ -1164,6 +1267,16 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": True},
         description="Minimum 1H trend allowed when 4H override is active (negative = pullback zone)"
+    )
+
+    warmup_max_minutes: int = Field(
+        default=120,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Warmup period max duration in minutes (default 120): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="Maximum warm-up period in minutes after bot start (default 120 = 2 hours)"
     )
 
     # Phase 1.2: Circuit Breaker
@@ -1357,6 +1470,17 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": False},
         description="Filter parameters per regime (BULL/CHOP/BEAR)"
+    )
+
+    # ===== GRID SUITABILITY SCORER (Per-Coin Mean-Reversion Fitness) =====
+    grid_suitability: Optional[dict] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Grid suitability scorer config (leave empty for disabled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False},
+        description="Per-coin grid suitability scoring (mean-reversion fitness)"
     )
 
     # ===== MULTI-TIMEFRAME BUY PROTECTION =====

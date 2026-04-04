@@ -54,6 +54,7 @@ class ExecutorInfo(BaseModel):
     def to_dict(self):
         base_dict = self.model_dump()
         base_dict["side"] = self.side
+        base_dict["trading_pair"] = self.config.trading_pair
         return base_dict
 
 

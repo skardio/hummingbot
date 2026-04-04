@@ -1,15 +1,8 @@
 ---
 name: implementer
 description: Implements trading-bot changes with correctness, safety, tests, and observability.
-tools:
-  - read_file
-  - grep_search
-  - semantic_search
-  - list_dir
-  - get_errors
-  - replace_string_in_file
-  - create_file
-  - run_in_terminal
+tools:read/getNotebookSummary, read/problems, read/readFile, read/terminalSelection, read/terminalLastCommand, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, edit/rename
+[read/getNotebookSummary, read/problems, read/readFile, read/terminalSelection, read/terminalLastCommand, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, edit/rename]
 ---
 
 # Role: Trading Bot Implementer (Python)

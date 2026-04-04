@@ -1,0 +1,27 @@
+[Unit]
+Description=Hummingbot Multi-Coin Grid Bot (Bitget Spot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mo
+WorkingDirectory=/home/mo/repos/hummingbot
+EnvironmentFile=/home/mo/repos/hummingbot/.env
+Environment=HEADLESS_MODE=true
+ExecStart=/home/mo/.venvs/bot/bin/python bin/hummingbot_quickstart.py -f spot_grid_bitget.py --headless
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bot-bitget-spot
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/mo/repos/hummingbot
+
+[Install]
+WantedBy=multi-user.target

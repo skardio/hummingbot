@@ -1,5 +1,16 @@
 # Copilot Instructions — Trading Bot Repo
 
+## Project context
+- **This is a serious trading project, not a hobby.** Target capital: €25,000+ across multiple exchanges.
+- Current €300 deployment is the development/validation phase — not the end state.
+- All engineering decisions (architecture, risk, AI, infra) must be evaluated against the target scale.
+- Master implementation plan: `docs/phases/MASTER_IMPLEMENTATION_PLAN.md` (74 items, 11 tiers, proof gates per tier).
+- **Shared exchange accounts**: The operator holds **investment coins** (long-term holds) on the same Kraken account the bots trade on. Bot code must NEVER sell, move, or interfere with coins it didn't buy. Any feature that touches wallet balances (orphan detection, auto-sell, rebalancing, cleanup) must be scoped strictly to the bot's own tracked positions.
+
+## Development environment
+- **Always activate the venv before running Python or pytest**: `source ~/.venvs/bot/bin/activate`
+- Never use system Python or install packages globally — all deps are in `~/.venvs/bot/`.
+
 ## Related documents
 - **Analysis context**: See `.github/analysis-context.md` for log paths, database locations, and analysis commands.
 - **Agents**: See `.github/agents/` for specialized planner, implementer, and reviewer agents.

@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, MutableMapping, Optional
 
+from multi_coin_grid_pro.utils.log_throttle import should_log
+
 DecimalZero = Decimal("0")
 DecimalHundred = Decimal("100")
 
@@ -76,8 +78,8 @@ class GlobalRiskManager:
         # Cooldown tracking
         self._last_exit_time: Dict[str, float] = {}
         self._last_switch_time: float = 0.0
-        self._last_loss_time: Optional[float] = None
-        self._consecutive_losses: int = 0
+        self._last_loss_time: Dict[str, float] = {}       # per-coin
+        self._consecutive_losses: Dict[str, int] = {}     # per-coin
 
     # ------------------------------------------------------------------#
     # Helpers
@@ -88,8 +90,8 @@ class GlobalRiskManager:
             self._daily_loss_quote = DecimalZero
             self._daily_realised_pnl_quote = DecimalZero
             self._last_reset_date = current_date
-            self._consecutive_losses = 0
-            self._last_loss_time = None
+            self._consecutive_losses.clear()
+            self._last_loss_time.clear()
 
     def _max_trade_notional(self) -> Decimal:
         per_trade_cap = (
@@ -138,11 +140,13 @@ class GlobalRiskManager:
                             self._limits.max_daily_loss_pct}%")
                 return None
 
-        # Cooldown following consecutive losses
-        if self._last_loss_time is not None and self._consecutive_losses > 0:
-            elapsed = now - self._last_loss_time
+        # Cooldown following consecutive losses (per-coin)
+        symbol_loss_time = self._last_loss_time.get(symbol)
+        symbol_consec = self._consecutive_losses.get(symbol, 0)
+        if symbol_loss_time is not None and symbol_consec > 0:
+            elapsed = now - symbol_loss_time
             if elapsed < self._limits.consecutive_loss_cooldown_seconds:
-                if logger:
+                if logger and should_log(f"risk_blocked_loss_{symbol}", interval_sec=300):
                     logger.info(
                         f"🛑 RISK BLOCKED {symbol}: consecutive loss cooldown ({elapsed:.0f}s / {self._limits.consecutive_loss_cooldown_seconds}s)")  # noqa: E501
                 return None
@@ -152,14 +156,14 @@ class GlobalRiskManager:
         if last_exit is not None:
             elapsed = now - last_exit
             if elapsed < self._limits.exit_cooldown_seconds:
-                if logger:
+                if logger and should_log(f"risk_blocked_exit_{symbol}", interval_sec=300):
                     logger.info(
                         f"🛑 RISK BLOCKED {symbol}: exit cooldown ({elapsed:.0f}s / {self._limits.exit_cooldown_seconds}s)")  # noqa: E501
                 return None
 
         # Switch cooldown (global)
         if self._last_switch_time > 0 and (now - self._last_switch_time) < self._limits.symbol_switch_cooldown_seconds:
-            if logger:
+            if logger and should_log(f"risk_blocked_switch_{symbol}", interval_sec=300):
                 logger.info(
                     f"🛑 RISK BLOCKED {symbol}: switch cooldown "
                     f"({(now - self._last_switch_time):.0f}s / {self._limits.symbol_switch_cooldown_seconds}s)"
@@ -226,11 +230,11 @@ class GlobalRiskManager:
         self._daily_realised_pnl_quote += realised_pnl_quote
         if realised_pnl_quote < DecimalZero:
             self._daily_loss_quote += abs(realised_pnl_quote)
-            self._consecutive_losses += 1
-            self._last_loss_time = now
+            self._consecutive_losses[symbol] = self._consecutive_losses.get(symbol, 0) + 1
+            self._last_loss_time[symbol] = now
         else:
-            self._consecutive_losses = 0
-            self._last_loss_time = None
+            self._consecutive_losses.pop(symbol, None)
+            self._last_loss_time.pop(symbol, None)
 
     def update_unrealised(self, *, symbol: str, unrealised_quote: Decimal) -> None:
         """
@@ -325,8 +329,8 @@ class GlobalRiskManager:
         old_loss = self._daily_loss_quote
         self._daily_loss_quote = DecimalZero
         self._daily_realised_pnl_quote = DecimalZero
-        self._consecutive_losses = 0
-        self._last_loss_time = None
+        self._consecutive_losses.clear()
+        self._last_loss_time.clear()
         # Log for audit trail
         import logging
         logger = logging.getLogger(__name__)

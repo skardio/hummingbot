@@ -45,6 +45,7 @@ class CooldownStore:
         # Connect and create table
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Enable dict-like access
+        self.conn.execute("PRAGMA journal_mode=WAL")
         self._create_table()
 
         self.logger.info(f"Initialized cooldown store at {self.db_path}")

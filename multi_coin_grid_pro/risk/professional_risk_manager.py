@@ -111,6 +111,7 @@ class ProfessionalRiskManager:
         min_win_rate: float = 0.35,  # Grid bots can be 35% win rate and profitable
         pause_cooldown_minutes: int = 120,  # 2-hour pause after trigger
         resume_min_pnl_pct: float = 0.0,  # Resume only if last 10 trades >= 0%
+        max_pause_extensions: int = 2,  # Max times pause can extend before forced resume
         max_correlation: float = 0.7,  # Max correlation between open positions
     ):
         self.max_daily_loss_pct = max_daily_loss_pct
@@ -131,6 +132,7 @@ class ProfessionalRiskManager:
         self.min_win_rate = min_win_rate
         self.pause_cooldown_minutes = pause_cooldown_minutes
         self.resume_min_pnl_pct = resume_min_pnl_pct
+        self.max_pause_extensions = max_pause_extensions
         self.max_correlation = max_correlation
 
         # Tracking
@@ -141,6 +143,7 @@ class ProfessionalRiskManager:
         self.position_last_fill_time: Dict[str, datetime] = {}  # For dead liquidity detection
         self.pause_until: Optional[datetime] = None  # Cooldown tracking
         self.pause_reason: Optional[str] = None
+        self._pause_extensions: int = 0  # Number of times pause has been extended
 
         logger.info("=" * 80)
         logger.info("🛡️  Professional Risk Manager initialized (GRID-AWARE v2)")
@@ -174,13 +177,28 @@ class ProfessionalRiskManager:
             if len(self.recent_trades) >= 10:
                 last_10_pnl = sum(t["pnl_pct"] for t in self.recent_trades[-10:]) / 10
                 if last_10_pnl < self.resume_min_pnl_pct:
-                    # Extend pause
-                    self.pause_until = datetime.now() + timedelta(minutes=self.pause_cooldown_minutes)
-                    return False, f"⏸️  Pause extended (last 10 trades PnL: {last_10_pnl:.2%} < {self.resume_min_pnl_pct:.1%})"
+                    self._pause_extensions += 1
+                    if self._pause_extensions >= self.max_pause_extensions:
+                        # Force resume: stale data can't improve without new trades
+                        # Clear stale trades so step 3 won't immediately re-trigger
+                        logger.warning(
+                            f"▶️  Force-resuming after {self._pause_extensions} extensions "
+                            f"({self._pause_extensions * self.pause_cooldown_minutes} min total) — "
+                            f"clearing stale trade history to break deadlock"
+                        )
+                        self.recent_trades.clear()
+                    else:
+                        # Extend pause
+                        self.pause_until = datetime.now() + timedelta(minutes=self.pause_cooldown_minutes)
+                        return False, (
+                            f"⏸️  Pause extended ({self._pause_extensions}/{self.max_pause_extensions}) "
+                            f"(last 10 trades PnL: {last_10_pnl:.2%} < {self.resume_min_pnl_pct:.1%})"
+                        )
             # Resume OK
             logger.info("▶️  Resume trading after pause (conditions improved)")
             self.pause_until = None
             self.pause_reason = None
+            self._pause_extensions = 0
 
         # 1. Check daily loss limit (equity-based)
         if portfolio_risk.daily_pnl_pct <= -self.max_daily_loss_pct:
@@ -344,6 +362,7 @@ class ProfessionalRiskManager:
         """Trigger pause cooldown"""
         self.pause_until = datetime.now() + timedelta(minutes=self.pause_cooldown_minutes)
         self.pause_reason = reason
+        self._pause_extensions = 0
         logger.warning(f"⏸️  PAUSE TRIGGERED: {reason} (cooldown: {self.pause_cooldown_minutes} min)")
 
     def record_fill(
@@ -387,15 +406,17 @@ class ProfessionalRiskManager:
         if len(self.recent_trades) > 20:
             self.recent_trades.pop(0)
 
-        # Calculate current win rate
-        wins = sum(1 for t in self.recent_trades if t["is_win"])
-        win_rate = wins / len(self.recent_trades) if self.recent_trades else 0.5
+        # Calculate current win rate (exclude breakeven — they don't signal strategy failure)
+        decisive = [t for t in self.recent_trades if t["pnl_pct"] != 0]
+        wins = sum(1 for t in decisive if t["is_win"])
+        win_rate = wins / len(decisive) if decisive else 0.5
 
         logger.info(
             f"📊 Trade closed: {symbol} | "
             f"PnL: {pnl_pct:+.2f}% | "
             f"Reason: {close_reason} | "
-            f"Win Rate: {win_rate:.1%} ({wins}/{len(self.recent_trades)})"
+            f"Win Rate: {win_rate:.1%} ({wins}/{len(decisive)} decisive, "
+            f"{len(self.recent_trades) - len(decisive)} breakeven excluded)"
         )
 
         # Cleanup tracking data

@@ -43,6 +43,7 @@ class MonitoringDatabase:
         """Initialize database tables and indexes"""
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Return rows as dict-like objects
+        self.conn.execute("PRAGMA journal_mode=WAL")
 
         cursor = self.conn.cursor()
 
@@ -116,6 +117,9 @@ class MonitoringDatabase:
         """)
 
         self.conn.commit()
+
+        # Auto-prune old data on startup
+        self.prune_old_data()
 
     def add_event(
         self,
@@ -267,6 +271,40 @@ class MonitoringDatabase:
             ORDER BY timestamp ASC
         """, (hours,))
         return [dict(row) for row in cursor.fetchall()]
+
+    def prune_old_data(
+        self,
+        status_days: int = 7,
+        events_days: int = 30,
+        trades_days: int = 90,
+    ) -> Dict[str, int]:
+        """
+        Delete old rows to prevent unbounded DB growth.
+
+        Args:
+            status_days: Keep bot_status rows for this many days (default 7)
+            events_days: Keep bot_events rows for this many days (default 30)
+            trades_days: Keep trades rows for this many days (default 90)
+
+        Returns:
+            Dict with deleted row counts per table
+        """
+        cursor = self.conn.cursor()
+        deleted = {}
+
+        for table, days in [
+            ("bot_status", status_days),
+            ("bot_events", events_days),
+            ("trades", trades_days),
+        ]:
+            cursor.execute(
+                f"DELETE FROM {table} WHERE timestamp < datetime('now', ?)",
+                (f"-{days} days",),
+            )
+            deleted[table] = cursor.rowcount
+
+        self.conn.commit()
+        return deleted
 
     def close(self):
         """Close database connection"""

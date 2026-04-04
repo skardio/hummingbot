@@ -129,10 +129,12 @@ class DynamicPairManager:
                 logger.info(f"📊 Fetching all {self.quote_asset} pairs from exchange...")
 
                 # Get trading pair map
+                # bidict: keys = exchange native format (e.g. "ADAEUR"),
+                #         values = hummingbot format (e.g. "ADA-EUR")
                 trading_pair_map = await self.connector.trading_pair_symbol_map()
-                all_symbols = list(trading_pair_map.keys())
+                all_symbols = list(trading_pair_map.values())
 
-                # Filter to quote asset pairs
+                # Filter to quote asset pairs (values are already in "BASE-QUOTE" format)
                 quote_pairs = [
                     p for p in all_symbols
                     if p.endswith(f"-{self.quote_asset}") or p.endswith(f"/{self.quote_asset}")

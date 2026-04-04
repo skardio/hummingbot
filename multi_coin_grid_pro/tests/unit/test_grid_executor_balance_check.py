@@ -43,6 +43,7 @@ class TestGridExecutorBalanceCheck:
         connector = MagicMock()
         connector.name = "kraken"
         connector.get_available_balance = Mock(return_value=Decimal("100.0"))
+        connector.get_balance = Mock(return_value=Decimal("100.0"))
         connector.get_price = Mock(return_value=Decimal("1.5"))
         connector.trading_rules = {
             "XRP-EUR": TradingRule(
@@ -99,129 +100,60 @@ class TestGridExecutorBalanceCheck:
             return executor
 
     async def test_balance_check_sufficient_balance(self, executor, mock_connector):
-        """Test that order is placed when balance is sufficient"""
-        # Setup: sufficient balance
-        mock_connector.get_available_balance.return_value = Decimal("100.0")
+        """Test that order is placed using position_size_base (not available_balance)"""
+        mock_connector.get_balance.return_value = Decimal("100.0")
         executor.position_size_base = Decimal("50.0")
 
         # Mock place_order
         executor.place_order = Mock(return_value="order_123")
         executor.cancel_open_orders = Mock()
 
-        # Call place_close_order_and_cancel_open_orders
         executor.place_close_order_and_cancel_open_orders(
             close_type=CloseType.EARLY_STOP,
             price=Decimal("1.55")
         )
 
-        # Verify balance was checked
-        mock_connector.get_available_balance.assert_called_once_with("XRP")
+        # Verify get_balance called for monitoring
+        mock_connector.get_balance.assert_called_once_with("XRP")
 
-        # Verify order was placed with correct amount
+        # Verify order was placed with full position_size_base (not capped by balance)
         executor.place_order.assert_called_once()
         call_args = executor.place_order.call_args
         assert call_args[1]['amount'] == Decimal("50.0"), "Should use full position size"
 
-    async def test_balance_check_insufficient_balance_adjusts_amount(self, executor, mock_connector):
-        """Test that order amount is adjusted when balance is insufficient"""
-        # Setup: insufficient balance but above minimum
-        mock_connector.get_available_balance.return_value = Decimal("30.0")  # Less than position
+    async def test_low_balance_uses_position_size_not_available(self, executor, mock_connector):
+        """Test that order uses position_size_base even when wallet balance is lower.
+
+        This is the FIX for the RIVER/QNT bug: available_balance can be stale
+        or reduced by pending cancels, so we use position_size_base directly.
+        """
+        mock_connector.get_balance.return_value = Decimal("30.0")  # Less than position
         executor.position_size_base = Decimal("50.0")
         executor.trading_rules.min_order_size = Decimal("10.0")
 
-        # Mock place_order
         executor.place_order = Mock(return_value="order_123")
         executor.cancel_open_orders = Mock()
 
-        # Call place_close_order_and_cancel_open_orders
         executor.place_close_order_and_cancel_open_orders(
             close_type=CloseType.EARLY_STOP,
             price=Decimal("1.55")
         )
 
-        # Verify order was placed with adjusted amount
+        # Verify order was placed with full position_size_base (NOT capped to 30.0)
         executor.place_order.assert_called_once()
         call_args = executor.place_order.call_args
-        assert call_args[1]['amount'] == Decimal("30.0"), "Should use available balance"
+        assert call_args[1]['amount'] == Decimal("50.0"), \
+            "Should use position_size_base, not wallet balance"
 
-    async def test_balance_check_insufficient_balance_below_minimum(self, executor, mock_connector):
-        """Test that order is not placed when balance is below minimum order size"""
-        # Setup: balance below minimum order size
-        mock_connector.get_available_balance.return_value = Decimal("5.0")  # Below minimum
-        executor.position_size_base = Decimal("50.0")
+    async def test_dust_position_below_minimum_skips_close(self, executor, mock_connector):
+        """Test that order is not placed when position_size_base is below minimum"""
+        mock_connector.get_balance.return_value = Decimal("5.0")
+        executor.position_size_base = Decimal("5.0")  # Below min_order_size
         executor.trading_rules.min_order_size = Decimal("10.0")
 
-        # Mock place_order
         executor.place_order = Mock(return_value="order_123")
         executor.cancel_open_orders = Mock()
 
-        # Call place_close_order_and_cancel_open_orders
-        executor.place_close_order_and_cancel_open_orders(
-            close_type=CloseType.EARLY_STOP,
-            price=Decimal("1.55")
-        )
-
-        # Verify order was NOT placed
-        executor.place_order.assert_not_called()
-
-    async def test_balance_check_handles_exception(self, executor, mock_connector):
-        """Test that balance check handles exceptions gracefully"""
-        # Setup: balance check raises exception
-        mock_connector.get_available_balance.side_effect = Exception("Connection error")
-        executor.position_size_base = Decimal("50.0")
-
-        # Mock place_order
-        executor.place_order = Mock(return_value="order_123")
-        executor.cancel_open_orders = Mock()
-
-        # Call place_close_order_and_cancel_open_orders
-        # Should not crash, should proceed with original amount
-        executor.place_close_order_and_cancel_open_orders(
-            close_type=CloseType.EARLY_STOP,
-            price=Decimal("1.55")
-        )
-
-        # Verify order was still placed (with original amount as fallback)
-        executor.place_order.assert_called_once()
-        call_args = executor.place_order.call_args
-        assert call_args[1]['amount'] == Decimal("50.0"), "Should use original amount on error"
-
-    async def test_balance_check_logs_warning_on_adjustment(self, executor, mock_connector):
-        """Test that balance check logs info when using min(position, balance)"""
-        # Setup: insufficient balance (Phase 3.5: uses min(position_size, available_balance))
-        mock_connector.get_available_balance.return_value = Decimal("30.0")
-        executor.position_size_base = Decimal("50.0")
-        executor.trading_rules.min_order_size = Decimal("10.0")
-
-        # Mock place_order and logger
-        executor.place_order = Mock(return_value="order_123")
-        executor.cancel_open_orders = Mock()
-
-        # Capture log output (Phase 3.5: logs info with production format)
-        with patch.object(executor.logger(), 'info') as mock_info:
-            executor.place_close_order_and_cancel_open_orders(
-                close_type=CloseType.EARLY_STOP,
-                price=Decimal("1.55")
-            )
-
-            # Verify info was logged with Phase 3.5 format
-            assert mock_info.called, "Should log info with close amount calculation"
-            info_calls = [str(call) for call in mock_info.call_args_list]
-            assert any("Close amount calculation" in str(call) or "executor_position" in str(call)
-                       for call in info_calls), "Should log Phase 3.5 close amount calculation"
-
-    async def test_balance_check_logs_error_on_insufficient(self, executor, mock_connector):
-        """Test that balance check terminates with TERMINATED status when balance is dust"""
-        # Setup: balance below minimum (Phase 3.5: terminates with TERMINATED status)
-        mock_connector.get_available_balance.return_value = Decimal("5.0")
-        executor.position_size_base = Decimal("50.0")
-        executor.trading_rules.min_order_size = Decimal("10.0")
-
-        # Mock place_order
-        executor.place_order = Mock(return_value="order_123")
-        executor.cancel_open_orders = Mock()
-
-        # Call place_close_order_and_cancel_open_orders
         executor.place_close_order_and_cancel_open_orders(
             close_type=CloseType.EARLY_STOP,
             price=Decimal("1.55")
@@ -230,7 +162,62 @@ class TestGridExecutorBalanceCheck:
         # Verify order was NOT placed (dust handling)
         executor.place_order.assert_not_called()
 
-        # Verify executor status is TERMINATED (Phase 3.5: CLOSED_WITH_DUST)
+    async def test_balance_monitoring_handles_exception(self, executor, mock_connector):
+        """Test that balance monitoring exception doesn't block close order"""
+        mock_connector.get_balance.side_effect = Exception("Connection error")
+        executor.position_size_base = Decimal("50.0")
+
+        executor.place_order = Mock(return_value="order_123")
+        executor.cancel_open_orders = Mock()
+
+        executor.place_close_order_and_cancel_open_orders(
+            close_type=CloseType.EARLY_STOP,
+            price=Decimal("1.55")
+        )
+
+        # Verify order was still placed with position_size_base
+        executor.place_order.assert_called_once()
+        call_args = executor.place_order.call_args
+        assert call_args[1]['amount'] == Decimal("50.0"), "Should use position_size_base"
+
+    async def test_balance_check_logs_close_amount(self, executor, mock_connector):
+        """Test that close amount info is logged with wallet balance"""
+        mock_connector.get_balance.return_value = Decimal("30.0")
+        executor.position_size_base = Decimal("50.0")
+        executor.trading_rules.min_order_size = Decimal("10.0")
+
+        executor.place_order = Mock(return_value="order_123")
+        executor.cancel_open_orders = Mock()
+
+        with patch.object(executor.logger(), 'info') as mock_info:
+            executor.place_close_order_and_cancel_open_orders(
+                close_type=CloseType.EARLY_STOP,
+                price=Decimal("1.55")
+            )
+
+            assert mock_info.called, "Should log close amount info"
+            info_calls = [str(call) for call in mock_info.call_args_list]
+            assert any("Close amount" in str(call) or "wallet_total" in str(call)
+                       for call in info_calls), "Should log close amount with wallet info"
+
+    async def test_dust_position_sets_terminated_status(self, executor, mock_connector):
+        """Test that dust position (<min_order_size) terminates executor correctly"""
+        mock_connector.get_balance.return_value = Decimal("5.0")
+        executor.position_size_base = Decimal("5.0")  # Below min_order_size
+        executor.trading_rules.min_order_size = Decimal("10.0")
+
+        executor.place_order = Mock(return_value="order_123")
+        executor.cancel_open_orders = Mock()
+
+        executor.place_close_order_and_cancel_open_orders(
+            close_type=CloseType.EARLY_STOP,
+            price=Decimal("1.55")
+        )
+
+        # Verify order was NOT placed (dust handling)
+        executor.place_order.assert_not_called()
+
+        # Verify executor status is TERMINATED
         from hummingbot.strategy_v2.models.base import RunnableStatus
         assert executor._status == RunnableStatus.TERMINATED, "Should be TERMINATED when dust"
         assert executor._closing_in_progress is False, "Should reset closing guard"

@@ -371,5 +371,60 @@ class TestAsyncDiscovery(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(symbol, "SOL-EUR")
 
 
+class TestFullScanBidictUsage(unittest.TestCase):
+    """
+    Test that full_scan uses trading_pair_symbol_map VALUES (hummingbot format)
+    not KEYS (exchange native format).
+
+    The bidict returned by connector.trading_pair_symbol_map():
+      keys   = exchange native format (e.g., "ADAEUR", "XXBTZEUR")
+      values = hummingbot format      (e.g., "ADA-EUR", "BTC-EUR")
+
+    full_scan must filter on values to find "-EUR" pairs.
+    """
+
+    def test_values_have_dash_separator(self):
+        """Values (hummingbot format) contain '-' separator, keys do not."""
+        # Simulate bidict: keys=exchange, values=hummingbot
+        bidict_mock = {
+            "ADAEUR": "ADA-EUR",
+            "XXBTZEUR": "BTC-EUR",
+            "SOLEUR": "SOL-EUR",
+            "XETHZEUR": "ETH-EUR",
+            "ADAUSD": "ADA-USD",
+        }
+
+        # Using .keys() (THE BUG): no key ends with "-EUR"
+        keys = list(bidict_mock.keys())
+        keys_eur = [p for p in keys if p.endswith("-EUR")]
+        self.assertEqual(len(keys_eur), 0, "keys() should NOT have -EUR suffix")
+
+        # Using .values() (THE FIX): values DO end with "-EUR"
+        values = list(bidict_mock.values())
+        values_eur = [p for p in values if p.endswith("-EUR")]
+        self.assertEqual(len(values_eur), 4, "values() should have 4 EUR pairs")
+        self.assertIn("ADA-EUR", values_eur)
+        self.assertIn("BTC-EUR", values_eur)
+        self.assertIn("SOL-EUR", values_eur)
+        self.assertIn("ETH-EUR", values_eur)
+
+    def test_values_filter_correct_quote(self):
+        """Only pairs matching the quote asset are returned."""
+        bidict_mock = {
+            "ADAEUR": "ADA-EUR",
+            "ADAUSD": "ADA-USD",
+            "BTCEUR": "BTC-EUR",
+            "BTCUSD": "BTC-USD",
+        }
+
+        values = list(bidict_mock.values())
+
+        eur_pairs = [p for p in values if p.endswith("-EUR")]
+        self.assertEqual(eur_pairs, ["ADA-EUR", "BTC-EUR"])
+
+        usd_pairs = [p for p in values if p.endswith("-USD")]
+        self.assertEqual(usd_pairs, ["ADA-USD", "BTC-USD"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -458,7 +458,7 @@ class StrategyV2Base(ScriptStrategyBase):
                 executors_df = self.executors_info_to_df(recent_executors)
                 if not executors_df.empty:
                     executors_df["age"] = self.current_timestamp - executors_df["timestamp"]
-                    executor_columns = ["type", "side", "status", "net_pnl_pct", "net_pnl_quote",
+                    executor_columns = ["type", "trading_pair", "side", "status", "net_pnl_pct", "net_pnl_quote",
                                         "filled_amount_quote", "is_trading", "close_type", "age"]
                     available_columns = [col for col in executor_columns if col in executors_df.columns]
                     lines.append(format_df_for_printout(executors_df[available_columns],

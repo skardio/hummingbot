@@ -1,0 +1,27 @@
+[Unit]
+Description=Hummingbot Multi-Coin Grid Bot (Kraken USD)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mo
+WorkingDirectory=/home/mo/repos/hummingbot
+EnvironmentFile=/home/mo/repos/hummingbot/.env
+Environment=HEADLESS_MODE=true
+ExecStart=/home/mo/.venvs/bot/bin/python bin/hummingbot_quickstart.py -f multi_coin_grid_v2_usd.py --headless
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bot-kraken-usd
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/mo/repos/hummingbot
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,0 @@
-2025-12-14 13:51:23,693 - root - INFO - ✅ Telegram bot initialized
-2025-12-14 13:51:23,693 - __main__ - INFO - 📍 Starting from end of log file (position: 8565513)
-2025-12-14 13:51:23,693 - __main__ - INFO - 🚀 Starting data collector (interval: 10s)
-2025-12-14 13:51:23,693 - __main__ - INFO - 📁 Monitoring log file: /home/mo/repos/hummingbot/logs/logs_multi_coin_grid_v2_2025-12-14-12-50-10.log
-2025-12-14 14:29:19,549 - __main__ - WARNING - ⚠️  Event detected: error - 2025-12-14 14:29:09,762 - 107405 - hummingbot.client.hummingbot_application - ERROR - MQTT is alread
-2025-12-14 14:29:22,653 - multi_coin_grid_pro.monitoring.telegram_bot - ERROR - Failed to send Telegram message: ('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))

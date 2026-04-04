@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import Dict, Optional, Tuple
 
 from multi_coin_grid_pro.filters.parabolic_blacklist import ParabolicBlacklist
+from multi_coin_grid_pro.utils.log_throttle import should_log
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +195,8 @@ class SmartEntryFilter:
             order_book = self.exchange.get_order_book(self.connector_name, symbol)
 
             if not order_book or 'bids' not in order_book or 'asks' not in order_book:
-                logger.warning(f"[DEPTH] {symbol} - No order book data available")
+                if should_log(f"depth_no_ob_{symbol}", interval_sec=300):
+                    logger.warning(f"[DEPTH] {symbol} - No order book data available")
                 return True, "No order book data (skipping check)"
 
             # Sum BID side (people willing to buy from us = we sell)

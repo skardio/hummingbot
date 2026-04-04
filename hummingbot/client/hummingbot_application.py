@@ -218,23 +218,10 @@ class HummingbotApplication(*commands):
             await self.app.run()
 
     async def run_headless(self):
-        """Run in headless mode - just keep alive for MQTT/strategy execution."""
+        """Run in headless mode - strategy runs via clock, keep alive for execution."""
         try:
             self.logger().info("Starting Hummingbot in headless mode...")
-
-            # Validate MQTT is enabled for headless mode
-            if not self.client_config_map.mqtt_bridge.mqtt_autostart:
-                error_msg = (
-                    "ERROR: MQTT must be enabled for headless mode!\n"
-                    "Without MQTT, there would be no way to control the bot.\n"
-                    "Please enable MQTT by setting 'mqtt_autostart: true' in your config file.\n"
-                    "You can also start it manually with 'mqtt start' before switching to headless mode."
-                )
-                self.logger().error(error_msg)
-                raise RuntimeError("MQTT is required for headless mode")
-
-            self.logger().info("MQTT enabled - waiting for MQTT commands...")
-            self.logger().info("Bot is ready to receive commands via MQTT")
+            self.logger().info("Strategy is running via clock - no MQTT required")
 
             # Keep running until shutdown
             while True:
