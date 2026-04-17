@@ -10,6 +10,7 @@ from .gateway_lp_command import GatewayLPCommand
 from .gateway_pool_command import GatewayPoolCommand
 from .gateway_swap_command import GatewaySwapCommand
 from .gateway_token_command import GatewayTokenCommand
+from .graceful_stop_command import GracefulStopCommand
 from .help_command import HelpCommand
 from .history_command import HistoryCommand
 from .import_command import ImportCommand
@@ -35,6 +36,7 @@ __all__ = [
     GatewayPoolCommand,
     GatewaySwapCommand,
     GatewayTokenCommand,
+    GracefulStopCommand,
     HelpCommand,
     HistoryCommand,
     ImportCommand,

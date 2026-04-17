@@ -178,14 +178,20 @@ class GlobalRiskManager:
                         self._max_trade_notional()})")
             return None
 
-        projected_total = self._total_open_notional + \
-            (capped_notional if symbol not in self._open_allocations else DecimalZero)
-        if projected_total > self._max_total_notional():
-            if logger:
-                logger.info(
-                    f"🛑 RISK BLOCKED {symbol}: projected total {projected_total} > max {
-                        self._max_total_notional()}")
-            return None
+        if symbol not in self._open_allocations:
+            remaining = self._max_total_notional() - self._total_open_notional
+            if remaining <= DecimalZero:
+                if logger:
+                    logger.info(
+                        f"🛑 RISK BLOCKED {symbol}: no room left "
+                        f"(open={self._total_open_notional}, max={self._max_total_notional()})")
+                return None
+            if capped_notional > remaining:
+                if logger:
+                    logger.info(
+                        f"📉 RISK CAPPED {symbol}: €{capped_notional} → €{remaining} "
+                        f"(open={self._total_open_notional}, max={self._max_total_notional()})")
+                capped_notional = remaining
 
         if logger:
             logger.info(f"✅ RISK APPROVED {symbol}: notional €{capped_notional}")

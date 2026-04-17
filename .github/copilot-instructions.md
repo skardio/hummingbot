@@ -5,7 +5,7 @@
 - Current €300 deployment is the development/validation phase — not the end state.
 - All engineering decisions (architecture, risk, AI, infra) must be evaluated against the target scale.
 - Master implementation plan: `docs/phases/MASTER_IMPLEMENTATION_PLAN.md` (74 items, 11 tiers, proof gates per tier).
-- **Shared exchange accounts**: The operator holds **investment coins** (long-term holds) on the same Kraken account the bots trade on. Bot code must NEVER sell, move, or interfere with coins it didn't buy. Any feature that touches wallet balances (orphan detection, auto-sell, rebalancing, cleanup) must be scoped strictly to the bot's own tracked positions.
+- **Dedicated exchange accounts**: Kraken accounts hold **only bot trading capital** (no investment coins). Portfolio value calculation uses executor-tracked positions only (`custom_info.realized_buy_size_quote/realized_sell_size_quote`), not account-wide balances. Any feature that touches wallet balances (orphan detection, auto-sell, rebalancing, cleanup) must still be scoped strictly to the bot's own tracked positions.
 
 ## Development environment
 - **Always activate the venv before running Python or pytest**: `source ~/.venvs/bot/bin/activate`

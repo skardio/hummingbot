@@ -856,7 +856,44 @@ class TestMultiCoinGridController:
         assert should_reject, "Should reject coin with declining trends"
 
     # ===========================================================================
-    # _build_executor_custom_info() Tests - Critical Config → Executor Pipeline
+    # custom_info Config → Executor Pipeline (inline dict)
+    # ===========================================================================
+
+    async def test_custom_info_contains_no_progress_params(self, controller, mock_connector):
+        """Regression: no_progress_min_loss_pct MUST reach the executor.
+
+        Bug: config had 0.5% but executor used default 1.5% because
+        the controller never put it in custom_info.
+        """
+        # Set non-default config values to detect defaults leaking through
+        controller.config.no_progress_min_loss_pct = 0.5
+        controller.config.no_progress_atr_multiplier = 1.5
+        controller.config.no_progress_timeout_sec = 3600
+
+        # Provide a valid trend so _create_grid_action actually builds the config
+        mock_trend = MagicMock()
+        mock_trend.current_price = Decimal("1.50")
+        mock_trend.volatility = Decimal("0.02")
+        mock_trend.has_sufficient_data = True
+        mock_trend.consensus_trend_pct = Decimal("2.0")
+        controller.trend_calculator = MagicMock()
+        controller.trend_calculator.get_trend = Mock(return_value=mock_trend)
+        controller.config.id = "test-controller"
+
+        action = controller._create_grid_action("XRP-EUR")
+        if action is None:
+            pytest.skip("Grid action not created (other validation failed)")
+
+        ci = action.executor_config.custom_info
+        assert ci["no_progress_min_loss_pct"] == 0.5, \
+            f"BUG: Expected 0.5 from config, got {ci.get('no_progress_min_loss_pct')} (executor will use wrong threshold)"
+        assert ci["no_progress_atr_multiplier"] == 1.5, \
+            f"BUG: Expected 1.5 from config, got {ci.get('no_progress_atr_multiplier')}"
+        assert ci["no_progress_max_extension_sec"] == 3600 * 2, \
+            f"Expected 2x timeout, got {ci.get('no_progress_max_extension_sec')}"
+
+    # ===========================================================================
+    # _build_executor_custom_info() Tests (LEGACY - method removed, tests skipped)
     # ===========================================================================
 
     @pytest.mark.skip(reason="Method _build_executor_custom_info was refactored - custom_info is now built inline")

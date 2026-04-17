@@ -62,6 +62,11 @@ class MultiCoinGridStrategyV2USD(StrategyV2Base):
     Start with: start --script multi_coin_grid_v2_usd.py
     """
 
+    # ST-06b: Lower buffer so executors are stored to DB more frequently.
+    # Framework default=100 but our bot never reaches that threshold,
+    # causing the executors table to be empty.
+    closed_executors_buffer: int = 5
+
     # ============ CRITICAL: USD CONFIG ============
     CONFIG_NAME = "spot_grid_kraken_usd"  # USD config!
     # ==============================================

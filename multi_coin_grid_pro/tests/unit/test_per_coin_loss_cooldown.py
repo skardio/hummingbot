@@ -5,11 +5,13 @@ Bug: Loss cooldown was GLOBAL — one coin's loss blocked ALL coins from trading
 Fix: _consecutive_losses and _last_loss_time are now Dict[str, ...] keyed by symbol.
 """
 
-import time
 import unittest
 from decimal import Decimal
 
 from multi_coin_grid_pro.core.global_risk_manager import GlobalRiskManager, RiskLimits
+
+# Fixed noon-UTC timestamp to avoid midnight-crossing flakiness
+_NOON_UTC = 1_718_452_800.0  # 2024-06-15 12:00:00 UTC
 
 
 class TestPerCoinLossCooldown(unittest.TestCase):
@@ -32,7 +34,7 @@ class TestPerCoinLossCooldown(unittest.TestCase):
 
     def test_loss_on_coin_a_does_not_block_coin_b(self):
         """A loss on LINK should NOT block HYPE from trading."""
-        now = time.time()
+        now = _NOON_UTC
 
         # LINK loses
         self.manager.register_open_trade(symbol="LINK-USD", notional=Decimal("100"), now=now)
@@ -56,7 +58,7 @@ class TestPerCoinLossCooldown(unittest.TestCase):
 
     def test_loss_cooldown_expires_per_coin(self):
         """After cooldown expires, the same coin can trade again."""
-        now = time.time()
+        now = _NOON_UTC
 
         self.manager.register_open_trade(symbol="DOGE-USD", notional=Decimal("50"), now=now)
         self.manager.register_close_trade(
@@ -77,7 +79,7 @@ class TestPerCoinLossCooldown(unittest.TestCase):
 
     def test_consecutive_losses_tracked_per_coin(self):
         """Each coin tracks its own consecutive loss count."""
-        now = time.time()
+        now = _NOON_UTC
 
         # LINK loses twice
         self.manager.register_open_trade(symbol="LINK-USD", notional=Decimal("100"), now=now)
@@ -100,7 +102,7 @@ class TestPerCoinLossCooldown(unittest.TestCase):
 
     def test_win_resets_loss_streak_per_coin(self):
         """A win on one coin resets only THAT coin's streak."""
-        now = time.time()
+        now = _NOON_UTC
 
         # Both coins lose
         self.manager.register_open_trade(symbol="FET-USD", notional=Decimal("80"), now=now)
@@ -127,7 +129,7 @@ class TestPerCoinLossCooldown(unittest.TestCase):
 
     def test_reset_daily_loss_clears_all_coin_cooldowns(self):
         """reset_daily_loss() must clear per-coin dicts too."""
-        now = time.time()
+        now = _NOON_UTC
 
         self.manager.register_open_trade(symbol="LINK-USD", notional=Decimal("100"), now=now)
         self.manager.register_close_trade(
@@ -145,7 +147,7 @@ class TestPerCoinLossCooldown(unittest.TestCase):
 
     def test_new_day_resets_per_coin_cooldowns(self):
         """_reset_if_new_day() clears per-coin dicts."""
-        now = time.time()
+        now = _NOON_UTC
 
         self.manager.register_open_trade(symbol="LINK-USD", notional=Decimal("100"), now=now)
         self.manager.register_close_trade(
@@ -163,7 +165,7 @@ class TestPerCoinLossCooldown(unittest.TestCase):
 
     def test_multiple_coins_independent_cooldowns(self):
         """Three coins losing at different times have independent cooldowns."""
-        now = time.time()
+        now = _NOON_UTC
 
         # LINK loses at t=0
         self.manager.register_open_trade(symbol="LINK-USD", notional=Decimal("100"), now=now)

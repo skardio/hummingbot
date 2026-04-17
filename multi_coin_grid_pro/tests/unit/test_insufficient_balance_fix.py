@@ -802,6 +802,7 @@ class TestCloseOrderRaceCondition:
         mock_conn.get_available_balance.return_value = Decimal("30")
         mock_conn.get_balance.return_value = Decimal("30")
         ex.place_order = Mock(return_value="order_aggr_456")
+        ex.get_price = Mock(return_value=Decimal("1.50"))
         ex._refresh_connector_balances = AsyncMock()
         ex._sleep = AsyncMock()
         ex._coerce_to_decimal = lambda v: Decimal(str(v))

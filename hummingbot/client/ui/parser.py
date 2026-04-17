@@ -79,6 +79,11 @@ def load_parser(hummingbot: "HummingbotApplication", command_tabs) -> ThrowingAr
     stop_parser = subparsers.add_parser('stop', help="Stop the current bot")
     stop_parser.set_defaults(func=hummingbot.stop)
 
+    graceful_stop_parser = subparsers.add_parser(
+        'graceful_stop', help="Stop accepting new trades; shut down after active executors finish"
+    )
+    graceful_stop_parser.set_defaults(func=hummingbot.graceful_stop)
+
     status_parser = subparsers.add_parser("status", help="Get the market status of the current bot")
     status_parser.add_argument("--live", default=False, action="store_true", dest="live", help="Show status updates")
     status_parser.set_defaults(func=hummingbot.status)

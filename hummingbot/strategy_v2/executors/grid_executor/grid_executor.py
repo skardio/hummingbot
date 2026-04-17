@@ -101,11 +101,11 @@ class GridExecutor(ExecutorBase):
         self._current_retries = 0
         self._max_retries = max_retries
         self._close_balance_retry_interval = 1.0  # seconds between balance refresh attempts
-        self._close_balance_max_retries = 5  # how many times we wait for locked balances
+        self._close_balance_max_retries = 10  # how many times we wait for locked balances (Kraken is slow)
 
         # Insufficient funds retry tracking (prevents infinite loops)
         self._insufficient_funds_retries = 0
-        self._max_insufficient_funds_retries = 3  # After 3 attempts, mark executor as failed
+        self._max_insufficient_funds_retries = 5  # After 5 attempts, mark executor as failed
 
         # Exchange min sell price enforcement (Bitget error 41117)
         # When exchange rejects a sell with "selling price cannot be lower than X",
@@ -165,6 +165,10 @@ class GridExecutor(ExecutorBase):
         self._graceful_close_orders = set()  # Track graceful close order IDs
         self._aggressive_close_orders = set()  # Track aggressive close order IDs
         self._stale_close_cancel_count = 0  # Track how many times a stale close order was cancelled
+        # Cancel-settle delay: After cancelling grid orders, Kraken needs ~3-5s
+        # to free locked base tokens.  The sell is deferred until this timestamp.
+        self._graceful_sell_earliest_ts: float = 0.0
+        self._cancel_settle_delay: float = 10.0  # seconds to wait after cancel (Kraken needs 5-15s)
         # ==============================================================================
 
         # ==============================================================================
@@ -855,7 +859,8 @@ class GridExecutor(ExecutorBase):
                     atr_pct = custom_info.get('atr_pct', 0.0)  # Should be set by controller
                     if atr_pct > 0:
                         # Check if price moved adversely > k × ATR from avg entry
-                        avg_entry = self.average_entry
+                        avg_entry = (self.position_size_quote / self.position_size_base
+                                     if self.position_size_base > Decimal("0") else None)
                         current_price = self.mid_price
                         if avg_entry and current_price:
                             move_pct = abs((current_price - avg_entry) / avg_entry) * Decimal("100")
@@ -889,8 +894,23 @@ class GridExecutor(ExecutorBase):
                 self.start_forced_close(CloseType.NO_PROGRESS_TIMEOUT)
                 return True
             else:
-                # Time elapsed but NOT adverse - log and continue
-                # Use separate rate limiter (the summary log at 30s would suppress this)
+                # Time elapsed but NOT adverse — check extension cap.
+                # Default max extension = 2x the timeout (e.g. 60m timeout → 120m extension → 180m total)
+                max_extension_sec = custom_info.get('no_progress_max_extension_sec', no_progress_timeout * 2)
+                extension_sec = since_last_progress - no_progress_timeout
+                if max_extension_sec > 0 and extension_sec >= max_extension_sec:
+                    self.logger().warning(
+                        f"⏰ NO_PROGRESS_TIMEOUT triggered (MAX_EXTENSION): {self.config.trading_pair} | "
+                        f"extension={extension_sec / 60:.1f}m >= max={max_extension_sec / 60:.1f}m | "
+                        f"unrealized_pnl={float(unrealized_pnl_pct):.2f}% | "
+                        f"Position was OK but extension limit reached - forcing unwind"
+                    )
+                    self._timeout_close_triggered = True
+                    self._timeout_close_type = CloseType.NO_PROGRESS_TIMEOUT
+                    self.start_forced_close(CloseType.NO_PROGRESS_TIMEOUT)
+                    return True
+
+                # Log and continue
                 if now - getattr(self, '_last_no_progress_log', 0) >= 60:
                     reason = []
                     if not has_adverse_pnl:
@@ -902,6 +922,7 @@ class GridExecutor(ExecutorBase):
                         f"⏳ NO_PROGRESS_TIMEOUT time elapsed but position OK: {self.config.trading_pair} | "
                         f"since_progress={since_last_progress / 60:.1f}m >= {no_progress_timeout / 60:.1f}m | "
                         f"Reasons: {' AND '.join(reason)} | "
+                        f"Extension: {extension_sec / 60:.0f}m/{max_extension_sec / 60:.0f}m | "
                         f"Allowing more time for grid to work"
                     )
                     self._last_no_progress_log = now
@@ -1055,6 +1076,10 @@ class GridExecutor(ExecutorBase):
         # Step 2: Start graceful phase
         self._unwind_phase = "GRACEFUL"
 
+        # Reset insufficient-funds counter — previous retries were from the
+        # cancel-settle race, not genuine balance problems.
+        self._insufficient_funds_retries = 0
+
         # 🔧 FIX: Always try to close inventory if any exists
         # Let the exchange reject if it's too small - don't skip preemptively
         if remaining_inventory <= Decimal("0"):
@@ -1065,8 +1090,16 @@ class GridExecutor(ExecutorBase):
             self._unwind_phase = "DONE"
             return
 
-        # Step 3: Place graceful close orders (maker/limit) - try regardless of size
-        self._place_graceful_close_orders(remaining_inventory)
+        # Step 3: Defer the sell order to let cancel settle on the exchange.
+        # The GRACEFUL_RETRY block in control_task will place the sell after
+        # _cancel_settle_delay seconds have elapsed.
+        self._graceful_sell_earliest_ts = (
+            self._strategy.current_timestamp + self._cancel_settle_delay
+        )
+        self.logger().info(
+            f"⏳ Cancel-settle delay: deferring graceful sell by "
+            f"{self._cancel_settle_delay:.0f}s for {self.config.trading_pair}"
+        )
 
         # Step 4: Transition to CLOSING status
         if self._status != RunnableStatus.CLOSING:
@@ -1339,14 +1372,10 @@ class GridExecutor(ExecutorBase):
             order_value = quantized_amount * current_price
 
             if close_method == "MARKET":
-                # Place market order (no price needed for market orders, but some exchanges require it)
-                self.logger().warning(
-                    f"🚨 Story B1: Placing MARKET close order | "
-                    f"side={self.close_order_side.name} amount={float(quantized_amount):.6f} "
-                    f"value=€{float(order_value):.2f}"
-                )
-
-                # Get current price for market order (some exchanges need it even for market orders)
+                # Place market-equivalent order with slippage guard.
+                # Instead of a raw MARKET order (no price protection), we use a
+                # LIMIT order priced aggressively with slippage_guard_pct as a
+                # safety ceiling.  This ensures the fill never exceeds the guard.
                 try:
                     current_price = self.get_price(
                         self.config.connector_name,
@@ -1356,14 +1385,52 @@ class GridExecutor(ExecutorBase):
                 except Exception:
                     current_price = self.mid_price if self.mid_price else Decimal("0")
 
-                order_id = self.place_order(
-                    connector_name=self.config.connector_name,
-                    trading_pair=self.config.trading_pair,
-                    order_type=OrderType.MARKET,
-                    side=self.close_order_side,
-                    amount=quantized_amount,
-                    price=current_price  # Ignored by market orders but required by some connectors
-                )
+                # Apply slippage guard as price ceiling/floor
+                if current_price and current_price > Decimal("0"):
+                    slippage_mult = (
+                        (Decimal("1") - slippage_guard_pct / Decimal("100"))
+                        if self.close_order_side == TradeType.SELL
+                        else (Decimal("1") + slippage_guard_pct / Decimal("100"))
+                    )
+                    guarded_price = current_price * slippage_mult
+
+                    # Quantize price to exchange precision
+                    guarded_price = self.connectors[self.config.connector_name].quantize_order_price(
+                        self.config.trading_pair, guarded_price
+                    )
+
+                    self.logger().warning(
+                        f"🚨 Story B1: Placing MARKET close order (slippage-guarded) | "
+                        f"side={self.close_order_side.name} amount={float(quantized_amount):.6f} "
+                        f"value=€{float(order_value):.2f} "
+                        f"price={float(guarded_price):.6f} "
+                        f"(mid={float(current_price):.6f}, guard={float(slippage_guard_pct):.2f}%)"
+                    )
+
+                    order_id = self.place_order(
+                        connector_name=self.config.connector_name,
+                        trading_pair=self.config.trading_pair,
+                        order_type=OrderType.LIMIT,
+                        side=self.close_order_side,
+                        amount=quantized_amount,
+                        price=guarded_price,
+                    )
+                else:
+                    # Fallback: no valid price, use raw MARKET as last resort
+                    self.logger().warning(
+                        f"🚨 Story B1: Placing raw MARKET close order (no price available) | "
+                        f"side={self.close_order_side.name} amount={float(quantized_amount):.6f} "
+                        f"value=€{float(order_value):.2f}"
+                    )
+
+                    order_id = self.place_order(
+                        connector_name=self.config.connector_name,
+                        trading_pair=self.config.trading_pair,
+                        order_type=OrderType.MARKET,
+                        side=self.close_order_side,
+                        amount=quantized_amount,
+                        price=current_price,
+                    )
 
             else:  # TAKER_LIMIT_IOC
                 # Place IOC limit order with slippage guard
@@ -1619,9 +1686,56 @@ class GridExecutor(ExecutorBase):
                     f"⏳ Close order placed (id={self._close_order_id}) awaiting exchange confirmation"
                 )
             elif self._closing_in_progress or self._unwind_phase in ("GRACEFUL", "AGGRESSIVE"):
+                # GRACEFUL RETRY: If in GRACEFUL phase with no active close order,
+                # re-place the order (cancel may have settled since first attempt)
+                if (self._unwind_phase == "GRACEFUL"
+                        and not self._closing_in_progress
+                        and not self._close_order_id):
+                    # Respect cancel-settle delay before placing the sell
+                    now = self._strategy.current_timestamp
+                    if now < self._graceful_sell_earliest_ts:
+                        wait_left = self._graceful_sell_earliest_ts - now
+                        self.logger().debug(
+                            f"⏳ Cancel-settle wait: {self.config.trading_pair} "
+                            f"| {wait_left:.1f}s remaining before SELL"
+                        )
+                        return
+                    self.update_position_metrics()
+                    remaining = self.position_size_base
+                    if remaining > Decimal("0"):
+                        # FIX: If we had insufficient-funds failures, cap to available
+                        # balance so the retry doesn't fail with the same amount.
+                        if self._insufficient_funds_retries > 0:
+                            remaining = self._cap_sell_to_available(remaining)
+                        self.logger().info(
+                            f"🔄 GRACEFUL_RETRY: {self.config.trading_pair} | "
+                            f"Phase=GRACEFUL but no close order active | "
+                            f"Re-placing graceful close for {float(remaining):.6f}"
+                        )
+                        if remaining > Decimal("0"):
+                            self._place_graceful_close_orders(remaining)
+                        else:
+                            self.logger().warning(
+                                f"⚠️  GRACEFUL_RETRY: Available balance is 0 for "
+                                f"{self.config.trading_pair} — escalating to AGGRESSIVE"
+                            )
+                            # Force transition to aggressive phase immediately
+                            self._unwind_phase = "AGGRESSIVE"
+                            self._unwind_started_ts = (
+                                self._strategy.current_timestamp
+                                - (self.config.custom_info or {}).get('close_grace_sec', 120)
+                            )
+                    else:
+                        self.logger().info(
+                            f"✅ Position fully closed for {self.config.trading_pair} "
+                            f"- transitioning to SHUTTING_DOWN"
+                        )
+                        self._status = RunnableStatus.SHUTTING_DOWN
+                        self._unwind_phase = "DONE"
+                        self._closing_in_progress = False
                 # AGGRESSIVE RETRY: If in AGGRESSIVE phase with no active close order,
                 # re-place the order (e.g., after stale close cancel or failed placement)
-                if (self._unwind_phase == "AGGRESSIVE"
+                elif (self._unwind_phase == "AGGRESSIVE"
                         and not self._closing_in_progress
                         and not self._close_order_id):
                     self.update_position_metrics()
@@ -1861,6 +1975,24 @@ class GridExecutor(ExecutorBase):
                 # Regular shutdown process for non-held positions
                 order_execution_completed = self.position_size_base == Decimal("0")
 
+                # FIX: If close order is filled but position_size_base has dust
+                # (rounding difference between buy amounts and sell executed),
+                # treat it as completed.  This prevents the executor from looping
+                # forever in SHUTTING_DOWN when the sell fully filled but the
+                # remaining base is < min_order_size (e.g. 0.00000004 FET).
+                if (not order_execution_completed
+                        and self._close_order is not None
+                        and self._close_order.order is not None
+                        and self._close_order.order.is_filled):
+                    min_order_size = getattr(self.trading_rules, 'min_order_size', Decimal("1"))
+                    if self.position_size_base < min_order_size:
+                        self.logger().info(
+                            f"✅ Close order filled with dust remaining "
+                            f"({float(self.position_size_base):.10f} < min {float(min_order_size)}) "
+                            f"— treating as complete"
+                        )
+                        order_execution_completed = True
+
                 # FIX: Also check actual exchange balance to detect externally sold positions
                 # This prevents infinite retry loops when coins were sold outside the bot
                 #
@@ -1891,6 +2023,14 @@ class GridExecutor(ExecutorBase):
                             )
                             order_execution_completed = True
                             self.close_type = CloseType.FAILED  # Mark as failed since we didn't close it ourselves
+                            # FIX: Reset position to zero since coins are confirmed gone on exchange.
+                            # Without this, position_pnl_quote is calculated with stale position_size
+                            # and possibly zero mid_price, causing catastrophic PnL miscalculation
+                            # (e.g., ALGO-USD reported -$68 when actual loss was ~$1).
+                            self.position_size_base = Decimal("0")
+                            self.position_size_quote = Decimal("0")
+                            self.position_pnl_quote = Decimal("0")
+                            self.position_fees_quote = Decimal("0")
                     except Exception as e:
                         self.logger().debug(f"Could not verify actual balance: {e}")
                 elif has_pending_close_order:
@@ -1942,15 +2082,36 @@ class GridExecutor(ExecutorBase):
                                                        self._close_order.order_id) if not self._close_order.order else self._close_order.order
             if in_flight_order:
                 self._close_order.order = in_flight_order
-                # Story C1: Throttle this log to max 1 per 60s per executor
-                if HAS_LOG_THROTTLE and should_log(f"close_wait_{self.config.id}", interval_sec=60):
-                    self.logger().info("Waiting for close order to be filled")
-                elif not HAS_LOG_THROTTLE:
-                    self.logger().debug("Waiting for close order to be filled")  # Downgrade to debug if no throttle
+
+                # FIX: Detect PARTIAL close — close order filled but position still remains.
+                # Without this, the executor loops forever waiting on an already-filled order
+                # while the remaining position is never sold (ALGO-USD -$68 catastrophe).
+                if in_flight_order.is_done:
+                    self.update_position_metrics()
+                    min_order_size = getattr(self.trading_rules, 'min_order_size', Decimal("0"))
+                    if self.position_size_base >= min_order_size:
+                        self.logger().warning(
+                            f"⚠️  Close order filled but position still has "
+                            f"{float(self.position_size_base):.6f} {self.config.trading_pair.split('-')[0]} remaining. "
+                            f"Archiving partial close and placing new close order."
+                        )
+                        # Archive the filled close order so its sell data is preserved
+                        self._filled_orders.append(in_flight_order.to_json())
+                        self._close_order = None
+                        # Fall through to place a new close order for the remainder
+                    else:
+                        return  # Close order filled, dust remaining — will be handled by control_shutdown_process
+                else:
+                    # Story C1: Throttle this log to max 1 per 60s per executor
+                    if HAS_LOG_THROTTLE and should_log(f"close_wait_{self.config.id}", interval_sec=60):
+                        self.logger().info("Waiting for close order to be filled")
+                    elif not HAS_LOG_THROTTLE:
+                        self.logger().debug("Waiting for close order to be filled")  # Downgrade to debug if no throttle
+                    return
             else:
                 self._failed_orders.append(self._close_order.order_id)
                 self._close_order = None
-        elif not self.config.keep_position or (self.close_type is not None and self.close_type != CloseType.POSITION_HOLD):
+        if not self._close_order and (not self.config.keep_position or (self.close_type is not None and self.close_type != CloseType.POSITION_HOLD)):
             # CRITICAL FIX: Place close order for any close type (STOP_LOSS, TIME_LIMIT, TAKE_PROFIT, etc.)
             # Only skip if keep_position=True AND close_type is None or POSITION_HOLD
             # Ensure we have a valid price for market orders
@@ -3287,15 +3448,39 @@ class GridExecutor(ExecutorBase):
             # Wait a bit more to allow balance to unlock
             await self._sleep(2.0)
 
+    @staticmethod
+    def _serialize_grid_level(level) -> Dict:
+        """Serialize a GridLevel to a JSON-safe dict (TrackedOrder → order_id string)."""
+        return {
+            "id": level.id,
+            "price": str(level.price),
+            "amount_quote": str(level.amount_quote),
+            "take_profit": str(level.take_profit),
+            "side": level.side.name,
+            "open_order_type": level.open_order_type.name,
+            "take_profit_order_type": level.take_profit_order_type.name,
+            "active_open_order": level.active_open_order.order_id if level.active_open_order else None,
+            "active_close_order": level.active_close_order.order_id if level.active_close_order else None,
+            "state": level.state.value,
+        }
+
     def get_custom_info(self) -> Dict:
         held_position_value = sum([
             Decimal(order["executed_amount_quote"])
             for order in self._held_position_orders
         ])
 
+        # Preserve entry_* fields from config.custom_info (set by controller at creation)
+        initial_info = self.config.custom_info or {}
+        entry_fields = {k: v for k, v in initial_info.items() if k.startswith("entry_")}
+
         return {
+            **entry_fields,
             "side": self.config.side,
-            "levels_by_state": {key.name: value for key, value in self.levels_by_state.items()},
+            "levels_by_state": {
+                key.name: [self._serialize_grid_level(lvl) for lvl in value]
+                for key, value in self.levels_by_state.items()
+            },
             "filled_orders": self._filled_orders,
             "held_position_orders": self._held_position_orders,
             "held_position_value": held_position_value,
@@ -3461,6 +3646,43 @@ class GridExecutor(ExecutorBase):
         This prevents orphan coins stuck on the exchange after ORDER_REJECTED failures.
         """
         if self._current_retries > self._max_retries:
+            # FIX: If an unwind is already in progress (GRACEFUL or AGGRESSIVE),
+            # do NOT terminate — let the unwind phases complete their sell orders.
+            # The previous code would kill the executor on the very next tick after
+            # start_forced_close because _market_retry_attempted was already True.
+            if self._unwind_phase in ("GRACEFUL", "AGGRESSIVE"):
+                # SAFETY NET: If unwind has been active > 10 minutes, check if the
+                # close order already filled but position_size_base has dust.
+                # This prevents the executor from blocking capital forever when the
+                # sell order filled but rounding dust keeps position_size_base > 0.
+                if self._unwind_started_ts:
+                    unwind_age = self._strategy.current_timestamp - self._unwind_started_ts
+                    if unwind_age > 600:  # 10 minutes
+                        self.update_position_metrics()
+                        min_order_size = getattr(self.trading_rules, 'min_order_size', Decimal("1"))
+                        close_order_filled = (
+                            self._close_order is not None
+                            and self._close_order.order is not None
+                            and self._close_order.order.is_filled
+                        )
+                        if close_order_filled and self.position_size_base < min_order_size:
+                            self.logger().warning(
+                                f"⏰ Unwind stuck for {unwind_age:.0f}s but close order filled with dust "
+                                f"({float(self.position_size_base):.10f} < min {float(min_order_size)}) — "
+                                f"forcing completion for {self.config.trading_pair}"
+                            )
+                            self._unwind_phase = "DONE"
+                            self.close_type = CloseType.EARLY_STOP
+                            self._early_stop_reason = EarlyStopReason.NO_PROGRESS_TIMEOUT
+                            self.stop()
+                            return
+
+                self.logger().debug(
+                    f"Max retries exceeded but unwind phase={self._unwind_phase} active — "
+                    f"letting unwind complete for {self.config.trading_pair}"
+                )
+                return
+
             # Check if we have inventory that needs to be sold
             self.update_position_metrics()
             if self.position_size_base > Decimal("0") and not getattr(self, '_market_retry_attempted', False):
@@ -3706,8 +3928,21 @@ class GridExecutor(ExecutorBase):
                         f"This likely means position was already sold. Resetting close state."
                     )
 
-                    # If we hit max retries, terminate to prevent infinite loop
+                    # If we hit max retries during GRACEFUL unwind, escalate to AGGRESSIVE
+                    # instead of terminating — AGGRESSIVE uses _determine_close_order_amount
+                    # which caps to available balance.
                     if self._insufficient_funds_retries >= self._max_insufficient_funds_retries:
+                        if self._unwind_phase == "GRACEFUL":
+                            self.logger().warning(
+                                f"⚠️  Executor {self.config.id[:8]}... Insufficient funds during GRACEFUL "
+                                f"unwind — escalating to AGGRESSIVE (market order with balance cap)"
+                            )
+                            self._unwind_phase = "AGGRESSIVE"
+                            self._closing_in_progress = False
+                            self._close_order_id = None
+                            self._insufficient_funds_retries = 0  # Reset for aggressive phase
+                            return
+
                         self.logger().error(
                             f"❌ Executor {self.config.id[:8]}... Insufficient funds errors exceeded max retries "
                             f"({self._max_insufficient_funds_retries}). Terminating executor."
@@ -3743,8 +3978,19 @@ class GridExecutor(ExecutorBase):
                     f"Resetting close guard to allow retry."
                 )
 
-                # After max retries, terminate
+                # After max retries, escalate or terminate
                 if self._insufficient_funds_retries >= self._max_insufficient_funds_retries:
+                    if self._unwind_phase == "GRACEFUL":
+                        self.logger().warning(
+                            f"⚠️  Executor {self.config.id[:8]}... Main close: Insufficient funds during "
+                            f"GRACEFUL unwind — escalating to AGGRESSIVE (market order with balance cap)"
+                        )
+                        self._unwind_phase = "AGGRESSIVE"
+                        self._closing_in_progress = False
+                        self._close_order_id = None
+                        self._insufficient_funds_retries = 0  # Reset for aggressive phase
+                        return
+
                     self.logger().error(
                         f"❌ Executor {self.config.id[:8]}... Insufficient funds errors exceeded max retries "
                         f"({self._max_insufficient_funds_retries}). Terminating executor."

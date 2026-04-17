@@ -333,6 +333,10 @@ class MarketsRecorder:
             else:
                 return query.limit(number_of_rows).all()
 
+    def get_all_trade_fills(self) -> List[TradeFill]:
+        with self._sql_manager.get_new_session() as session:
+            return session.query(TradeFill).all()
+
     def save_market_states(self, config_file_path: str, market: ConnectorBase, session: Session):
         market_states: Optional[MarketState] = self.get_market_states(config_file_path, market, session=session)
         timestamp: int = self.db_timestamp

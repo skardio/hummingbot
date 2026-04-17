@@ -145,8 +145,8 @@ class TestFailedOrderCloseGuardFix:
         executor._close_order = TrackedOrder(order_id=close_order_id)
         executor._close_order_id = close_order_id
         executor._closing_in_progress = True
-        # Set retries just below max (default max=3, set to 2 so next is >=3)
-        executor._insufficient_funds_retries = 2
+        # Set retries just below max (default max=5, set to 4 so next is >=5)
+        executor._insufficient_funds_retries = 4
 
         event = MagicMock()
         event.order_id = close_order_id
@@ -156,7 +156,7 @@ class TestFailedOrderCloseGuardFix:
 
         # Should be terminated
         assert executor._status == RunnableStatus.TERMINATED
-        assert executor._insufficient_funds_retries == 3
+        assert executor._insufficient_funds_retries == 5
 
     def test_failed_close_order_resets_guard_generic_error(self, executor):
         """For any non-specific failure, guard must still reset."""

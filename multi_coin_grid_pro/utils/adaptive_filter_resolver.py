@@ -55,6 +55,15 @@ class AdaptiveFilterResolver:
         self.active_filters = active
         return active
 
+    # Keys that are binary quality gates and should NOT be interpolated.
+    # These use regime values directly (no confidence blending).
+    _NO_SCALE_KEYS = frozenset({
+        'atr_min_pct', 'atr_max_pct',
+        'max_active_grids',
+        'bear_allow_meanrev',
+        'entry_confidence_min',
+    })
+
     def _apply_confidence_scaling(
         self,
         active: Dict,
@@ -64,6 +73,10 @@ class AdaptiveFilterResolver:
         """
         Scale filter aggressiveness based on regime confidence.
         Low confidence = interpolate toward baseline (safer).
+
+        Keys listed in ``_NO_SCALE_KEYS`` are binary quality gates
+        (e.g. ATR min/max) and use the regime value directly — they
+        are NOT interpolated toward baseline.
 
         Example:
           Regime says rsi_buy_max=85, baseline=70, confidence=0.7
@@ -75,9 +88,13 @@ class AdaptiveFilterResolver:
             if key in self.baseline_filters:
                 baseline_value = self.baseline_filters[key]
 
-                # Interpolate: baseline + (regime - baseline) * confidence
                 if isinstance(regime_value, (int, float)):
-                    scaled[key] = baseline_value + (regime_value - baseline_value) * confidence
+                    if key in self._NO_SCALE_KEYS:
+                        # Binary gate: use regime value directly
+                        scaled[key] = regime_value
+                    else:
+                        # Interpolate: baseline + (regime - baseline) * confidence
+                        scaled[key] = baseline_value + (regime_value - baseline_value) * confidence
 
         return scaled
 

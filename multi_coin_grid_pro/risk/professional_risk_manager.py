@@ -111,7 +111,8 @@ class ProfessionalRiskManager:
         min_win_rate: float = 0.35,  # Grid bots can be 35% win rate and profitable
         pause_cooldown_minutes: int = 120,  # 2-hour pause after trigger
         resume_min_pnl_pct: float = 0.0,  # Resume only if last 10 trades >= 0%
-        max_pause_extensions: int = 2,  # Max times pause can extend before forced resume
+        max_pause_extensions: int = 1,  # Max times pause can extend before forced resume
+        post_resume_immunity_minutes: int = 30,  # After force-resume, immune from re-pause
         max_correlation: float = 0.7,  # Max correlation between open positions
     ):
         self.max_daily_loss_pct = max_daily_loss_pct
@@ -133,6 +134,7 @@ class ProfessionalRiskManager:
         self.pause_cooldown_minutes = pause_cooldown_minutes
         self.resume_min_pnl_pct = resume_min_pnl_pct
         self.max_pause_extensions = max_pause_extensions
+        self.post_resume_immunity_minutes = post_resume_immunity_minutes
         self.max_correlation = max_correlation
 
         # Tracking
@@ -144,6 +146,7 @@ class ProfessionalRiskManager:
         self.pause_until: Optional[datetime] = None  # Cooldown tracking
         self.pause_reason: Optional[str] = None
         self._pause_extensions: int = 0  # Number of times pause has been extended
+        self._post_resume_immune_until: Optional[datetime] = None  # Immunity after force-resume
 
         logger.info("=" * 80)
         logger.info("🛡️  Professional Risk Manager initialized (GRID-AWARE v2)")
@@ -181,12 +184,18 @@ class ProfessionalRiskManager:
                     if self._pause_extensions >= self.max_pause_extensions:
                         # Force resume: stale data can't improve without new trades
                         # Clear stale trades so step 3 won't immediately re-trigger
+                        total_idle_min = (self._pause_extensions + 1) * self.pause_cooldown_minutes
                         logger.warning(
                             f"▶️  Force-resuming after {self._pause_extensions} extensions "
-                            f"({self._pause_extensions * self.pause_cooldown_minutes} min total) — "
+                            f"({total_idle_min} min total) — "
                             f"clearing stale trade history to break deadlock"
                         )
                         self.recent_trades.clear()
+                        # Grant post-resume immunity to prevent immediate re-trigger
+                        self._post_resume_immune_until = (
+                            datetime.now()
+                            + timedelta(minutes=self.post_resume_immunity_minutes)
+                        )
                     else:
                         # Extend pause
                         self.pause_until = datetime.now() + timedelta(minutes=self.pause_cooldown_minutes)
@@ -209,7 +218,23 @@ class ProfessionalRiskManager:
             return False, f"Max positions reached: {portfolio_risk.open_positions}/{self.max_positions}"
 
         # 3. Check rolling PnL + win rate (if we have enough history)
-        if len(self.recent_trades) >= 10:
+        # Skip if within post-resume immunity window (prevents immediate re-trigger after deadlock break)
+        is_immune = (
+            self._post_resume_immune_until is not None
+            and datetime.now() < self._post_resume_immune_until
+        )
+        if is_immune:
+            remaining_immunity = (self._post_resume_immune_until - datetime.now()).total_seconds() / 60
+            logger.debug(
+                f"🛡️ Post-resume immunity active ({remaining_immunity:.0f} min remaining) — "
+                f"skipping rolling PnL/win rate check"
+            )
+        elif self._post_resume_immune_until is not None and datetime.now() >= self._post_resume_immune_until:
+            # Immunity expired, clear it
+            logger.info("▶️  Post-resume immunity expired — normal pause checks resume")
+            self._post_resume_immune_until = None
+
+        if not is_immune and len(self.recent_trades) >= 10:
             rolling_pnl = sum(t["pnl_pct"] for t in self.recent_trades[-20:]) / len(self.recent_trades[-20:])
 
             # PnL-driven pause (primary) - trigger cooldown

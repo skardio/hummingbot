@@ -47,6 +47,7 @@ class GridSuitabilityScorer:
         self.min_grid_score = self.config.get('min_grid_score', 0.30)
         self.range_efficiency_max = self.config.get('range_efficiency_max', 0.70)
         self.lookback_candles = self.config.get('lookback_candles', 48)
+        self.last_scores: dict[str, GridScore] = {}  # Cache for post-hoc analysis
 
     def score_coin(self, symbol: str, candles: list) -> Optional[GridScore]:
         """
@@ -117,6 +118,7 @@ class GridSuitabilityScorer:
             gs = self.score_coin(sym, candles)
             if gs:
                 scored.append((sym, gs))
+                self.last_scores[sym] = gs  # Cache for custom_info
                 self.logger.info(
                     f"📐 GridScore {sym}: {gs.score:.2f} "
                     f"(RE={gs.range_efficiency:.2f}, MR={gs.mean_reversion:.2f}, "

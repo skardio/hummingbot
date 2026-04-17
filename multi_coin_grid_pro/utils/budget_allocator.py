@@ -12,6 +12,7 @@ The allocator uses a pessimistic reservation model:
 - New executor only starts if free_capital >= required_capital
 """
 import logging
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, Optional
@@ -84,6 +85,10 @@ class BudgetAllocator:
 
         # Active reservations: executor_id -> BudgetReservation
         self._reservations: Dict[str, BudgetReservation] = {}
+
+        # Rate-limit BUDGET BLOCKED warnings: symbol -> last_warn_time
+        self._last_blocked_warn: Dict[str, float] = {}
+        self._blocked_warn_interval: float = 300.0  # 5 min between repeated warnings
 
     @property
     def total_reserved(self) -> Decimal:
@@ -171,9 +176,19 @@ class BudgetAllocator:
                 f"have {available:.2f} (balance={total_balance:.2f}, "
                 f"reserved={reserved:.2f}, safety={min_reserve:.2f})"
             )
-            self.logger.warning(
-                f"🚫 US-004 BUDGET BLOCKED | {symbol or 'new'}: {reason}"
-            )
+            # Rate-limit repeated BLOCKED warnings per symbol (every 5 min)
+            warn_key = symbol or "new"
+            now = time.monotonic()
+            last_warn = self._last_blocked_warn.get(warn_key, 0.0)
+            if now - last_warn >= self._blocked_warn_interval:
+                self.logger.warning(
+                    f"🚫 US-004 BUDGET BLOCKED | {warn_key}: {reason}"
+                )
+                self._last_blocked_warn[warn_key] = now
+            else:
+                self.logger.debug(
+                    f"🚫 US-004 BUDGET BLOCKED (suppressed) | {warn_key}: {reason}"
+                )
             return BudgetCheckResult(
                 is_allowed=False,
                 available_quote=available,
@@ -245,6 +260,8 @@ class BudgetAllocator:
                 f"from executor {executor_id[:8]}... "
                 f"(remaining reserved: €{self.total_reserved:.2f}, {self.active_executor_count} executors)"
             )
+            # Reset warn suppression so next budget check logs fresh
+            self._last_blocked_warn.pop(reservation.symbol, None)
             return reservation.reserved_amount
         else:
             self.logger.debug(

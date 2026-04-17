@@ -9,11 +9,13 @@ Bug context:
 - This causes false unrealized losses that block trading via max_daily_loss_pct
 - Reconciliation detects when tracked loss >> actual loss and corrects it
 """
-import time
 import unittest
 from decimal import Decimal
 
 from multi_coin_grid_pro.core.global_risk_manager import GlobalRiskManager, RiskLimits
+
+# Fixed noon-UTC timestamp to avoid midnight-crossing flakiness
+_NOON_UTC = 1_718_452_800.0  # 2024-06-15 12:00:00 UTC
 
 
 class TestResetDailyLoss(unittest.TestCase):
@@ -38,7 +40,7 @@ class TestResetDailyLoss(unittest.TestCase):
     def test_reset_daily_loss_clears_loss(self):
         """reset_daily_loss() should set daily loss to zero"""
         # Simulate a loss trade
-        now = time.time()
+        now = _NOON_UTC
         self.manager.register_open_trade(symbol="BTC-EUR", notional=Decimal("100"), now=now)
         self.manager.register_close_trade(
             symbol="BTC-EUR",
@@ -61,7 +63,7 @@ class TestResetDailyLoss(unittest.TestCase):
 
     def test_reset_daily_loss_unblocks_trading(self):
         """After reset, trading should be allowed again"""
-        now = time.time()
+        now = _NOON_UTC
 
         # Create enough loss to block trading (5% of 1000 = $50)
         self.manager.register_open_trade(symbol="BTC-EUR", notional=Decimal("100"), now=now)
@@ -95,7 +97,7 @@ class TestResetDailyLoss(unittest.TestCase):
 
     def test_reset_preserves_open_allocations(self):
         """reset_daily_loss() should NOT affect open positions"""
-        now = time.time()
+        now = _NOON_UTC
 
         # Open a position
         self.manager.register_open_trade(symbol="SOL-EUR", notional=Decimal("200"), now=now)
@@ -140,7 +142,7 @@ class TestAdjustDailyLoss(unittest.TestCase):
 
     def test_adjust_reduces_loss(self):
         """adjust_daily_loss() should reduce tracked loss"""
-        now = time.time()
+        now = _NOON_UTC
 
         # Simulate tracked loss of $75 (from missed sell)
         self.manager.register_open_trade(symbol="HBAR-USD", notional=Decimal("75"), now=now)
@@ -160,7 +162,7 @@ class TestAdjustDailyLoss(unittest.TestCase):
 
     def test_adjust_cannot_go_negative(self):
         """adjust_daily_loss() should not create negative loss"""
-        now = time.time()
+        now = _NOON_UTC
 
         # Track $30 loss
         self.manager.register_open_trade(symbol="BTC-USD", notional=Decimal("100"), now=now)
@@ -178,7 +180,7 @@ class TestAdjustDailyLoss(unittest.TestCase):
 
     def test_partial_adjustment_allows_trading(self):
         """Partial adjustment should reduce loss% and potentially unblock"""
-        now = time.time()
+        now = _NOON_UTC
 
         # $50 loss on $400 reference = 12.5% > 10% limit
         self.manager.register_open_trade(symbol="ETH-USD", notional=Decimal("100"), now=now)
@@ -236,7 +238,7 @@ class TestReconciliationScenarios(unittest.TestCase):
             limits=limits
         )
 
-        now = time.time()
+        now = _NOON_UTC
 
         # Simulate the buys being tracked
         for i in range(4):

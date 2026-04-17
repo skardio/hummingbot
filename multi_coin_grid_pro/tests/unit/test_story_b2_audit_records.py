@@ -154,8 +154,8 @@ class TestAuditWriter(unittest.TestCase):
         """Test: Write audit record and read it back"""
         from datetime import datetime
 
-        # Use current timestamp so writer uses today's date
-        now = datetime.utcnow().timestamp()
+        # Fixed noon-UTC timestamp to avoid midnight-crossing flakiness
+        now = 1_718_452_800.0  # 2024-06-15 12:00:00 UTC
 
         audit = ExecutionAudit(
             symbol="BTC-EUR",
@@ -189,9 +189,8 @@ class TestAuditWriter(unittest.TestCase):
         # Write
         self.writer.write(audit)
 
-        # Read back
-        from datetime import datetime
-        date_str = datetime.utcnow().strftime("%Y-%m-%d")
+        # Read back — use fromtimestamp to match AuditWriter's date logic
+        date_str = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
         audits = self.writer.read_day(date_str)
 
         self.assertEqual(len(audits), 1)
@@ -202,8 +201,8 @@ class TestAuditWriter(unittest.TestCase):
         """Test: Multiple audits written to same file"""
         from datetime import datetime
 
-        # Use current timestamp so all audits use today's date
-        now = datetime.utcnow().timestamp()
+        # Fixed noon-UTC timestamp to avoid midnight-crossing flakiness
+        now = 1_718_452_800.0  # 2024-06-15 12:00:00 UTC
 
         audits_to_write = []
         for i in range(5):
@@ -238,9 +237,8 @@ class TestAuditWriter(unittest.TestCase):
             audits_to_write.append(audit)
             self.writer.write(audit)
 
-        # Read all
-        from datetime import datetime
-        date_str = datetime.utcnow().strftime("%Y-%m-%d")
+        # Read all — use fromtimestamp to match AuditWriter's date logic
+        date_str = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
         audits_read = self.writer.read_day(date_str)
 
         self.assertEqual(len(audits_read), 5)

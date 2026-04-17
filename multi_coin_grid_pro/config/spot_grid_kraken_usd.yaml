@@ -80,7 +80,10 @@ blacklist:
   # Poor performers (2026-04-02 session review)
   - VVV-USD              # illiquid, gap-prone, -10.9% open bag
   - PTB-USD              # -2.56% margin, too illiquid for grid
-  - PTB-USD              # -2.56% margin, too illiquid for grid
+  # Poor performers (2026-04-13 session: -$0.82 from SUI alone = 109% total loss)
+  - SUI-USD              # Trends too hard for grids, -$0.44 single trade loss
+  # Catastrophic loss (2026-04-16: -$68.14 ALGO, bought but never sold = EARLY_STOP with 0 sells)
+  - ALGO-USD             # Entire position stuck, close_type=8 with realized_sell=0
 
 # ==============================================================================
 # ADAPTIVE REGIME DETECTION & FILTERS
@@ -839,6 +842,7 @@ grid_range_pct_down: 4.0
 grid_range_pct_up: 12.0
 
 num_grids: 3                      # 🔧 FIX: 5→3 ($300/2=$150, 3 grids=$50/level — snelle fill)
+min_grid_level_spacing_pct: 1.5   # Min spacing/level: 3× Kraken RT fee (0.52%)
 
 use_dynamic_grid_sizer: true
 
@@ -877,6 +881,7 @@ trend_min_entry_strength: 0.007
 # ==============================================================================
 
 coin_rotation_threshold: 180
+pool_membership_cooldown_seconds: 1800  # ST-03: 30 min cooldown voordat coin uit pool mag (voorkom 29× in/uit flipping)
 price_update_interval: 30
 
 max_price_age_ms: 35000
@@ -916,10 +921,10 @@ switch_grace_period_seconds: 600      # 🔧 TUNED 2026-04-03: 180→600 (10 min
 use_professional_risk_mgmt: true
 
 # T0-Q8: Stop-loss enabled (was null, unbounded losses until -12% emergency)
-stop_loss_pct: 0.05                  # 5% stop-loss per positie
-atr_stop_multiplier: 2.0
-min_stop_pct: 0.02
-max_stop_pct: 0.05
+stop_loss_pct: 0.03                  # 🔧 TUNED 2026-04-14: 5%→3% (EARLY_STOP was -$1.33 vs TP +$0.59, losses te groot)
+atr_stop_multiplier: 1.5            # 🔧 TUNED 2026-04-14: 2.0→1.5 (tighter ATR stop, sneller sluiten)
+min_stop_pct: 0.015                  # 🔧 TUNED 2026-04-14: 2%→1.5% (tighter floor for small grids)
+max_stop_pct: 0.03                   # 🔧 TUNED 2026-04-14: 5%→3% (cap aligned with stop_loss_pct)
 
 take_profit_pct: 0.05
 
@@ -945,8 +950,8 @@ resume_min_pnl_pct: 0.0
 
 min_grid_profit_pct: 2.0          # 🔧 TUNED 2026-04-03: 1.2→2.0 (must exceed 0.42% RT fees + margin; matches dynamic_tp_min_pct)
 
-emergency_exit_pct: -5.0     # T0-Q9: Was -12%, nu -5% (4 coins × -5% = -20% vs -48% flash crash)
-hard_stop_pct: -8.0           # T0-Q9: Was -15%, nu -8% (ultiem vangnet)
+emergency_exit_pct: -3.0     # 🔧 TUNED 2026-04-14: -5%→-3% (bij $5 grid = max -$0.15 verlies, aligned met 3% stop_loss)
+hard_stop_pct: -5.0           # 🔧 TUNED 2026-04-14: -8%→-5% (smaller grids need tighter safety net)
 
 # ==============================================================================
 # DRAWDOWN / KILL SWITCH
@@ -973,8 +978,8 @@ max_open_orders: 20               # 🔧 FIX: 60→20 (2 coins × 5 levels × 2 
 order_frequency: 3
 
 min_switch_interval_seconds: 1800     # 🔧 TUNED 2026-04-03: 600→1800 (30 min cooldown, voorkom rapid-fire switches)
-min_hold_time_seconds: 7200          # 🔧 TUNED 2026-04-03: 3600→7200 (2h - grid heeft tijd nodig voor fills)
-max_hold_time_seconds: 21600      # 6h - align with hard_hold
+min_hold_time_seconds: 2700          # 🔧 TUNED 2026-04-14: 7200→2700 (45 min - data toont sweet spot 5-30m, >1h verliesgevend)
+max_hold_time_seconds: 5400          # 🔧 TUNED 2026-04-14: 21600→5400 (90 min hard cap - 2-6h bucket was -$0.40)
 
 # ==============================================================================
 # TREND-AWARE EXIT SYSTEM (Soft/Hard Hold Time)
@@ -984,17 +989,17 @@ max_hold_time_seconds: 21600      # 6h - align with hard_hold
 # After hard_hold: always exit (bag-holder prevention)
 # ==============================================================================
 
-soft_hold_time_seconds: 7200       # ⏰ 2 uur - trend-aware exit kicks in
-hard_hold_time_seconds: 21600      # ⏰ 6 uur - always exit (bag-holder prevention)
+soft_hold_time_seconds: 2700       # 🔧 TUNED 2026-04-14: 7200→2700 (45 min - aligned with sweet spot)
+hard_hold_time_seconds: 5400       # 🔧 TUNED 2026-04-14: 21600→5400 (90 min - trades >1h zijn verliesgevend)
 soft_exit_min_trend_pct: 0.3       # 📈 Trend must be > 0.3% to extend hold
-soft_exit_max_loss_pct: -1.0       # 🔧 TUNED 2026-04-02: -1.5→-1.0 (exit sooner when losing)
-soft_exit_extend_seconds: 1800     # ⏳ Extend by 30 min if trend bullish
+soft_exit_max_loss_pct: -0.5       # 🔧 TUNED 2026-04-14: -1.0→-0.5 (exit eerder bij verlies, kleine grids)
+soft_exit_extend_seconds: 900      # 🔧 TUNED 2026-04-14: 1800→900 (15 min extend ipv 30, sneller roteren)
 
-no_fill_timeout_sec: 3600            # T0-Q10: Was 1200 (20 min) → 3600 (60 min) - grid meer tijd geven
-no_progress_timeout_sec: 3600    # 🔧 TUNED 2026-04-02: 5400→3600 (1 uur, cut stalled positions faster)
+no_fill_timeout_sec: 1800            # 🔧 TUNED 2026-04-14: 3600→1800 (30 min - geen fills = dode liquiditeit, cut sneller)
+no_progress_timeout_sec: 2700    # 🔧 TUNED 2026-04-14: 3600→2700 (45 min - aligned met soft_hold sweet spot)
 no_progress_min_loss_pct: 0.5    # 🔧 TUNED 2026-04-03: 1.0→0.5 (cut bags at -0.5%, halves NO_PROGRESS losses)
 no_progress_atr_multiplier: 1.5
-close_grace_sec: 120
+close_grace_sec: 600               # ST-05b: 120→600 (10 min graceful LIMIT orders before aggressive market exit)
 
 min_startup_wait_seconds: 60
 
@@ -1033,3 +1038,72 @@ dynamic_slots:
     BULL: 1.5
     CHOP: 0.75
     BEAR: 0.25
+
+# ==============================================================================
+# REGIME-FIRST COIN SELECTION
+# ==============================================================================
+
+regime_coin_selection:
+  bear_allow_trading: false       # Sit out in BEAR regime
+  bear_max_grids: 0
+  chop_use_grid_ranking: true     # CHOP: rank by grid suitability
+  chop_min_trend_pct: 0.001      # Near-zero floor: accept flat/sideways coins
+  chop_max_trend_pct: 3.0        # >3% |trend| = too trendy for grid
+  bull_use_grid_ranking: false    # BULL: rank by trend strength
+
+# ==============================================================================
+# FEE-AWARE FILTER
+# ==============================================================================
+
+fee_aware_filter:
+  enabled: true
+  taker_fee_pct: 0.26            # Kraken taker fee
+  maker_fee_pct: 0.16            # Kraken maker fee
+  fee_model: average             # worst_case (2×taker) | average (taker+maker) | best_case (2×maker)
+  min_net_profit_pct: 0.3        # Min expected profit after fees
+
+# ==============================================================================
+# ST-11: IDLE MODE
+# Reduces scan frequency when no trading edge is found, saving resources.
+# ==============================================================================
+
+idle_mode:
+  enabled: true
+  no_edge_cycles_to_idle: 10     # Cycles with no edge before entering idle
+  idle_scan_interval_seconds: 120  # Seconds between scans in idle mode
+  normal_scan_interval_seconds: 10  # Normal scan interval (reference only)
+  log_interval_cycles: 5         # Log idle status every N cycles
+
+# ==============================================================================
+# ST-12: ECONOMIC EDGE GATE
+# Blocks grid creation when expected profit per level is too thin.
+# ==============================================================================
+
+economic_edge_gate:
+  enabled: true
+  min_edge_pct: 0.10             # Min expected edge after all costs
+  include_spread_cost: true      # Factor in bid-ask spread cost
+  include_slippage_buffer_pct: 0.05  # Slippage buffer to subtract
+
+# ==============================================================================
+# ENHANCED CLOSE COOLDOWNS
+# ==============================================================================
+
+close_cooldowns:
+  failed_sec: 21600              # 6h cooldown after FAILED
+  early_stop_sec: 10800          # 3h cooldown after EARLY_STOP
+  no_progress_sec: 3600          # 1h cooldown after timeout
+  loss_streak_multiplier: 1.5    # Escalate cooldown per consecutive loss
+  max_streak_before_blacklist: 3  # Long blacklist after N losses
+
+# ==============================================================================
+# REGIME-BASED TIMEOUTS
+# ==============================================================================
+
+regime_timeouts:
+  bull_no_progress_sec: 7200     # 2h - trending coins need time
+  chop_no_progress_sec: 5400     # 1.5h - should bounce within window
+  bear_no_progress_sec: 3600     # 1h - faster cuts in bear
+  bull_no_fill_sec: 5400         # 1.5h
+  chop_no_fill_sec: 3600         # 1h
+  bear_no_fill_sec: 2400         # 40m

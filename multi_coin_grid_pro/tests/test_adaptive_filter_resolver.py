@@ -244,6 +244,72 @@ class TestAdaptiveFilterResolver(unittest.TestCase):
         self.assertIsInstance(self.resolver.active_filters, dict)
         self.assertGreater(len(self.resolver.active_filters), 0)
 
+    def test_atr_excluded_from_confidence_scaling(self):
+        """ST-01: ATR min/max are binary quality gates — NOT interpolated."""
+        config = {
+            'baseline': {
+                'rsi_buy_max': 70.0,
+                'atr_min_pct': 0.15,
+                'atr_max_pct': 7.0,
+            },
+            'BEAR': {
+                'rsi_buy_max': 60.0,
+                'atr_min_pct': 0.08,
+                'atr_max_pct': 5.0,
+            },
+        }
+        resolver = AdaptiveFilterResolver(config, MagicMock())
+        metrics = RegimeMetrics(
+            trend_1h=-1.0, trend_4h=-2.0, trend_24h=-3.0,
+            consensus=-2.0, atr_pct=0.20, atr_expansion=-5.0,
+            range_efficiency=0.30, pullback_depth_pct=3.0,
+            timestamp=datetime.now()
+        )
+        state = RegimeState(
+            regime="BEAR", score=2.0, confidence=0.6,
+            duration_minutes=60, reason="Downtrend", metrics=metrics
+        )
+
+        filters = resolver.resolve_filters(state)
+
+        # ATR should use regime value directly (no interpolation)
+        self.assertEqual(filters['atr_min_pct'], 0.08)
+        self.assertEqual(filters['atr_max_pct'], 5.0)
+
+        # RSI SHOULD still be interpolated
+        # expected: 70 + (60 - 70) * 0.6 = 70 - 6 = 64.0
+        self.assertAlmostEqual(filters['rsi_buy_max'], 64.0, places=1)
+
+    def test_no_scale_keys_use_regime_value_at_any_confidence(self):
+        """ST-01: _NO_SCALE_KEYS produce same result at any confidence."""
+        config = {
+            'baseline': {'atr_min_pct': 0.15, 'rsi_buy_max': 70.0},
+            'BULL': {'atr_min_pct': 0.05, 'rsi_buy_max': 80.0},
+        }
+        resolver = AdaptiveFilterResolver(config, MagicMock())
+        metrics = RegimeMetrics(
+            trend_1h=2.0, trend_4h=3.0, trend_24h=5.0,
+            consensus=3.3, atr_pct=0.30, atr_expansion=10.0,
+            range_efficiency=0.80, pullback_depth_pct=1.0,
+            timestamp=datetime.now()
+        )
+
+        filters_low = resolver.resolve_filters(RegimeState(
+            regime="BULL", score=3.0, confidence=0.3,
+            duration_minutes=10, reason="Weak", metrics=metrics
+        ))
+        filters_high = resolver.resolve_filters(RegimeState(
+            regime="BULL", score=8.0, confidence=0.95,
+            duration_minutes=60, reason="Strong", metrics=metrics
+        ))
+
+        # ATR min should be identical regardless of confidence
+        self.assertEqual(filters_low['atr_min_pct'], 0.05)
+        self.assertEqual(filters_high['atr_min_pct'], 0.05)
+
+        # RSI should differ between confidence levels
+        self.assertNotEqual(filters_low['rsi_buy_max'], filters_high['rsi_buy_max'])
+
 
 if __name__ == "__main__":
     unittest.main()

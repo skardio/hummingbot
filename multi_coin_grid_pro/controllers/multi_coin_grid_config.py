@@ -300,6 +300,20 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={
             "is_updatable": True})
 
+    # ST-03: Pool membership cooldown — prevent rapid in/out flipping
+    pool_membership_cooldown_seconds: int = Field(
+        default=1800,  # 30 min
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Pool membership cooldown (seconds a coin must stay in pool, default 1800 = 30 min): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={
+            "is_updatable": True,
+            "description": "Coins stay in monitored pool for at least this long before being rotated out"
+        },
+        ge=0,
+    )
+
     # Periodic Coin Discovery (auto-refresh pool during runtime)
     coin_discovery_refresh_interval_seconds: int = Field(
         default=3600,  # 1 hour
@@ -640,7 +654,7 @@ class MultiCoinGridConfig(ControllerConfigBase):
     )
 
     close_grace_sec: int = Field(
-        default=120,  # 2 minutes for graceful close (maker) before aggressive (market)
+        default=600,  # ST-05b: 10 min for graceful close (LIMIT MAKER) before aggressive (MARKET)
         client_data=ClientFieldData(
             prompt=lambda mi: "Close grace period (seconds): ",
             prompt_on_new=False,
@@ -738,6 +752,15 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    min_grid_level_spacing_pct: float = Field(
+        default=1.0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum spacing between grid levels (%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     # Hybrid Grid: SmartEntryFilter Configuration
     use_smart_entry_filter: bool = Field(
         default=False,
@@ -816,6 +839,53 @@ class MultiCoinGridConfig(ControllerConfigBase):
             prompt=lambda mi: "DynamicGridSizer config (dict, leave empty for defaults): ",
             prompt_on_new=False,
         ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Regime-aware coin selection (regime_coin_selector.py)
+    regime_coin_selection: dict = Field(
+        default_factory=dict,
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Fee-aware pre-entry filter (fee_aware_filter.py)
+    fee_aware_filter: dict = Field(
+        default_factory=dict,
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ST-11: Idle mode — reduce scan frequency when no edge is found
+    idle_mode: dict = Field(
+        default_factory=lambda: {
+            'enabled': True,
+            'no_edge_cycles_to_idle': 10,
+            'idle_scan_interval_seconds': 120,
+            'normal_scan_interval_seconds': 10,
+            'log_interval_cycles': 5,
+        },
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ST-12: Economic edge gate — block entries without positive EV
+    economic_edge_gate: dict = Field(
+        default_factory=lambda: {
+            'enabled': True,
+            'min_edge_pct': 0.10,
+            'include_spread_cost': True,
+            'include_slippage_buffer_pct': 0.05,
+        },
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Enhanced close cooldowns (escalating, per-outcome)
+    close_cooldowns: dict = Field(
+        default_factory=dict,
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Regime-based executor timeouts
+    regime_timeouts: dict = Field(
+        default_factory=dict,
         json_schema_extra={"is_updatable": True}
     )
 
@@ -1585,8 +1655,8 @@ class MultiCoinGridConfig(ControllerConfigBase):
             trailing_stop=None,  # No trailing stop for now (can add later)
             open_order_type=order_type,
             take_profit_order_type=order_type,
-            stop_loss_order_type=OrderType.MARKET,  # Market order for fast exit
-            time_limit_order_type=OrderType.MARKET
+            stop_loss_order_type=OrderType.LIMIT,  # ST-05b: was MARKET → LIMIT for lower fees and less slippage
+            time_limit_order_type=OrderType.LIMIT   # ST-05b: was MARKET → LIMIT for lower fees and less slippage
         )
 
     @field_validator('trend_lookback_minutes')

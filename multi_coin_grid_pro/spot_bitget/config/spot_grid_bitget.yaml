@@ -413,6 +413,75 @@ dynamic_slots:
     BEAR: 0.25                        # Defensive: only 1 slot typically
 
 # ==============================================================================
+# REGIME-FIRST COIN SELECTION
+# ==============================================================================
+
+regime_coin_selection:
+  bear_allow_trading: false       # Sit out in BEAR regime
+  bear_max_grids: 0
+  chop_use_grid_ranking: true     # CHOP: rank by grid suitability
+  chop_min_trend_pct: 0.001      # Near-zero floor: accept flat/sideways coins
+  chop_max_trend_pct: 3.0        # >3% |trend| = too trendy for grid
+  bull_use_grid_ranking: false    # BULL: rank by trend strength
+
+# ==============================================================================
+# FEE-AWARE FILTER
+# ==============================================================================
+
+fee_aware_filter:
+  enabled: true
+  taker_fee_pct: 0.20            # Bitget taker fee (lower than Kraken)
+  maker_fee_pct: 0.10            # Bitget maker fee
+  fee_model: average             # worst_case (2×taker) | average (taker+maker) | best_case (2×maker)
+  min_net_profit_pct: 0.2        # Min expected profit after fees
+
+# ==============================================================================
+# ST-11: IDLE MODE
+# Reduces scan frequency when no trading edge is found, saving resources.
+# ==============================================================================
+
+idle_mode:
+  enabled: true
+  no_edge_cycles_to_idle: 10     # Cycles with no edge before entering idle
+  idle_scan_interval_seconds: 120  # Seconds between scans in idle mode
+  normal_scan_interval_seconds: 10  # Normal scan interval (reference only)
+  log_interval_cycles: 5         # Log idle status every N cycles
+
+# ==============================================================================
+# ST-12: ECONOMIC EDGE GATE
+# Blocks grid creation when expected profit per level is too thin.
+# ==============================================================================
+
+economic_edge_gate:
+  enabled: true
+  min_edge_pct: 0.08             # Lower than Kraken (Bitget fees are lower)
+  include_spread_cost: true      # Factor in bid-ask spread cost
+  include_slippage_buffer_pct: 0.03  # Lower slippage on Bitget (more liquid)
+
+# ==============================================================================
+# ENHANCED CLOSE COOLDOWNS
+# ==============================================================================
+
+close_cooldowns:
+  failed_sec: 21600              # 6h cooldown after FAILED
+  early_stop_sec: 10800          # 3h cooldown after EARLY_STOP
+  no_progress_sec: 3600          # 1h cooldown after timeout
+  loss_streak_multiplier: 1.5    # Escalate cooldown per consecutive loss
+  max_streak_before_blacklist: 3  # Long blacklist after N losses
+
+# ==============================================================================
+# REGIME-BASED TIMEOUTS
+# ==============================================================================
+
+regime_timeouts:
+  bull_no_progress_sec: 7200     # 2h - trending coins need time
+  chop_no_progress_sec: 5400     # 1.5h - should bounce within window
+  bear_no_progress_sec: 3600     # 1h - faster cuts in bear
+  bull_no_fill_sec: 5400         # 1.5h
+  chop_no_fill_sec: 3600         # 1h
+  bear_no_fill_sec: 2400         # 40m
+
+# ==============================================================================
 # SMART ENTRY FILTER v2
 # ==============================================================================
 
@@ -1253,6 +1322,7 @@ grid_range_pct_down: 2.0          # 🚀 0.8→2.0% (wider for pullbacks)
 grid_range_pct_up: 5.0            # 🚀 1.2→5.0% (wider for uptrends)
 
 num_grids: 7                      # 🔧 FIX: 10→7 (order math: 6×7×2=84)
+min_grid_level_spacing_pct: 0.6   # Min spacing/level: 3× Bitget RT fee (0.20%)
 
 use_dynamic_grid_sizer: true
 
@@ -1292,6 +1362,7 @@ trend_min_entry_strength: 0.0015  # 🔧 FIX: 0.010→0.0015 (0.15% - allow weak
 # ==============================================================================
 
 coin_rotation_threshold: 180        # 🚀 FIX: 180→60 (2 min - faster rotation)
+pool_membership_cooldown_seconds: 1800  # ST-03: 30 min cooldown voordat coin uit pool mag
 price_update_interval: 30
 
 max_coin_monitoring_seconds: 600    # T0-Q11: Was 180 (3 min) → 600 (10 min)
@@ -1423,7 +1494,7 @@ no_fill_timeout_sec: 3600          # T0-Q10: Was 1200 (20 min) → 3600 (60 min)
 no_progress_timeout_sec: 3600     # 🔧 TUNED 2026-04-02: 5400→3600 (1 uur, cut stalled positions faster)
 no_progress_min_loss_pct: 0.5     # 🔧 TUNED 2026-04-03: 1.0→0.5 (align met Kraken, kap bags eerder)
 no_progress_atr_multiplier: 1.5   # 🎯 PRO: Require adverse move > 1.5×ATR
-close_grace_sec: 120              # ⏰ 2 min - graceful close window
+close_grace_sec: 600              # ST-05b: 120→600 (10 min graceful LIMIT orders before aggressive market exit)
 
 min_startup_wait_seconds: 60       # 🚀 FIX: 90→60 (1 min startup delay)
 

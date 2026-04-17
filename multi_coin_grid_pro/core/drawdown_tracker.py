@@ -180,10 +180,13 @@ class DrawdownTracker:
 
     def check_drawdown_limits(self, current_balance: Decimal) -> Tuple[bool, str]:
         """
-        Check if any drawdown limits are exceeded
+        Check if any drawdown limits are exceeded.
 
-        Uses TOTAL PORTFOLIO VALUE (quote + coin values) for drawdown calculation,
-        not just the quote asset balance.
+        ALWAYS evaluates current drawdown with fresh portfolio values.
+        Never returns a cached/frozen reason — this ensures:
+        1. Log messages always show current portfolio values
+        2. Auto-recovery when portfolio recovers within limits
+        3. Period resets (midnight) work correctly
 
         Args:
             current_balance: Current quote asset balance (used as fallback if no calculator)
@@ -191,15 +194,11 @@ class DrawdownTracker:
         Returns:
             (is_allowed, reason) - False if trading should be paused
         """
-        # Get total portfolio value (quote + coins)
+        # Get total portfolio value (quote + active executor coins)
         portfolio_value = self._get_portfolio_value(current_balance)
 
-        # Reset counters if needed
+        # Reset counters if needed (resets start balances at day/week/month boundary)
         self._reset_if_needed(portfolio_value)
-
-        # Check if already paused
-        if self.is_paused:
-            return False, f"Trading paused: {self.pause_reason}"
 
         # Initialize balances if first check
         if self.daily_start_balance is None:
@@ -211,15 +210,37 @@ class DrawdownTracker:
             logger.warning("Daily start balance is 0, skipping drawdown check")
             return True, "OK (no balance yet)"
 
-        # Check daily drawdown (percentage) - uses PORTFOLIO VALUE
+        # --- Always evaluate fresh (never short-circuit on cached is_paused) ---
+
+        # Check daily drawdown (percentage)
         daily_pnl_pct = (portfolio_value - self.daily_start_balance) / self.daily_start_balance * Decimal("100")
         if daily_pnl_pct < -self.max_daily_loss_pct:
-            reason = (
-                f"Daily drawdown limit exceeded: {daily_pnl_pct:.2f}% < -{self.max_daily_loss_pct}% "
-                f"(Start portfolio: {self.daily_start_balance:.2f} → Current: {portfolio_value:.2f} {self.quote_asset})"
-            )
-            self._pause_trading(reason)
-            return False, reason
+            # Sanity check: phantom drawdown detection.
+            # If portfolio says large drop but realized PnL is small, it's likely
+            # due to stale balance data, executor timing, or inconsistent pricing.
+            realized_pnl_pct = Decimal("0")
+            if self.daily_start_balance > 0:
+                realized_pnl_pct = self.daily_realized_pnl / self.daily_start_balance * Decimal("100")
+            # Phantom threshold = 2× daily limit (was hardcoded 10%, too conservative)
+            phantom_threshold = self.max_daily_loss_pct * Decimal("2")
+            abs_portfolio_drop = abs(daily_pnl_pct)
+            abs_realized = abs(realized_pnl_pct)
+            if abs_portfolio_drop > phantom_threshold and abs_realized < self.max_daily_loss_pct:
+                logger.warning(
+                    f"⚠️ PHANTOM DRAWDOWN DETECTED: Portfolio says {daily_pnl_pct:.2f}% but "
+                    f"realized PnL is only {realized_pnl_pct:.2f}% ({self.daily_realized_pnl:+.2f} {self.quote_asset}). "
+                    f"Likely stale balance or executor timing. NOT pausing."
+                )
+                # Phantom detected — skip ALL period checks (weekly/monthly would
+                # see the same phantom drop and incorrectly pause)
+                return True, "OK (phantom drawdown detected, skipping all period checks)"
+            else:
+                reason = (
+                    f"Daily drawdown limit exceeded: {daily_pnl_pct:.2f}% < -{self.max_daily_loss_pct}% "
+                    f"(Start portfolio: {self.daily_start_balance:.2f} → Current: {portfolio_value:.2f} {self.quote_asset})"
+                )
+                self._pause_trading(reason)
+                return False, reason
 
         # Check weekly drawdown (percentage)
         if self.weekly_start_balance and self.weekly_start_balance != Decimal("0"):
@@ -244,7 +265,7 @@ class DrawdownTracker:
                 self._pause_trading(reason)
                 return False, reason
 
-        # Check daily euro loss (absolute) - uses PORTFOLIO VALUE for consistency
+        # Check daily euro loss (absolute)
         if self.max_daily_loss_eur:
             daily_portfolio_change = portfolio_value - self.daily_start_balance
             if daily_portfolio_change < -self.max_daily_loss_eur:
@@ -256,26 +277,43 @@ class DrawdownTracker:
                 self._pause_trading(reason)
                 return False, reason
 
-        # All checks passed
+        # All checks passed — auto-recover if previously paused
+        if self.is_paused:
+            logger.info(
+                f"✅ DRAWDOWN RECOVERED: All limits OK — trading resumed! "
+                f"Daily: {daily_pnl_pct:+.2f}% (limit: -{self.max_daily_loss_pct}%), "
+                f"Portfolio: {portfolio_value:.2f} {self.quote_asset}"
+            )
+            self.is_paused = False
+            self.pause_reason = None
+            self.paused_at = None
+
         return True, "OK"
 
     def _pause_trading(self, reason: str) -> None:
         """
-        Pause trading due to limit breach
+        Pause trading due to limit breach.
+
+        Only logs CRITICAL on first pause to avoid log spam (the controller
+        logs every blocked tick already). Updates reason every call so
+        the cached value always reflects the latest portfolio numbers.
 
         Args:
             reason: Reason for pause
         """
+        was_paused = self.is_paused
         self.is_paused = True
         self.pause_reason = reason
-        self.paused_at = datetime.now()
-
-        logger.critical(f"🛑 TRADING PAUSED: {reason}")
-        logger.critical("🛑 Trading will resume at next period reset (midnight/Monday/1st of month)")
+        if not was_paused:
+            self.paused_at = datetime.now()
+            logger.critical(f"🛑 TRADING PAUSED: {reason}")
+            logger.critical(
+                "🛑 Trading will resume when portfolio recovers or at period reset"
+            )
 
     def _check_all_limits_ok(self, portfolio_value: Decimal) -> Tuple[bool, Optional[str]]:
         """
-        Check if ALL limits are within bounds (used before unpausing)
+        Check if ALL limits are within bounds.
 
         Args:
             portfolio_value: Current portfolio value
@@ -283,21 +321,30 @@ class DrawdownTracker:
         Returns:
             (all_ok, violated_reason) - (True, None) if all limits OK, (False, reason) if any violated
         """
-        # Check daily percentage
-        daily_pnl_pct = (portfolio_value - self.daily_start_balance) / self.daily_start_balance * 100
-        if daily_pnl_pct < -float(self.max_daily_loss_pct):
+        # Check daily percentage (use Decimal throughout for consistency)
+        daily_pnl_pct = (
+            (portfolio_value - self.daily_start_balance)
+            / self.daily_start_balance * Decimal("100")
+        )
+        if daily_pnl_pct < -self.max_daily_loss_pct:
             return False, f"Daily drawdown still violated: {daily_pnl_pct:.2f}%"
 
         # Check weekly percentage
         if self.weekly_start_balance:
-            weekly_pnl_pct = (portfolio_value - self.weekly_start_balance) / self.weekly_start_balance * 100
-            if weekly_pnl_pct < -float(self.max_weekly_loss_pct):
+            weekly_pnl_pct = (
+                (portfolio_value - self.weekly_start_balance)
+                / self.weekly_start_balance * Decimal("100")
+            )
+            if weekly_pnl_pct < -self.max_weekly_loss_pct:
                 return False, f"Weekly drawdown still violated: {weekly_pnl_pct:.2f}%"
 
         # Check monthly percentage
         if self.monthly_start_balance:
-            monthly_pnl_pct = (portfolio_value - self.monthly_start_balance) / self.monthly_start_balance * 100
-            if monthly_pnl_pct < -float(self.max_monthly_loss_pct):
+            monthly_pnl_pct = (
+                (portfolio_value - self.monthly_start_balance)
+                / self.monthly_start_balance * Decimal("100")
+            )
+            if monthly_pnl_pct < -self.max_monthly_loss_pct:
                 return False, f"Monthly drawdown still violated: {monthly_pnl_pct:.2f}%"
 
         # Check daily euro loss
@@ -310,10 +357,15 @@ class DrawdownTracker:
 
     def _reset_if_needed(self, portfolio_value: Decimal):
         """
-        Reset balance counters at new day/week/month
+        Reset balance counters at new day/week/month.
+
+        Only resets start-balances and clears daily counters.
+        Unpause logic is handled by check_drawdown_limits() which always
+        evaluates fresh — after resetting the daily start to the current
+        portfolio, the daily check will see 0% drawdown and pass.
 
         Args:
-            portfolio_value: Current TOTAL PORTFOLIO VALUE for reset
+            portfolio_value: Current portfolio value for reset
         """
         now = datetime.now()
         today = now.date()
@@ -325,58 +377,34 @@ class DrawdownTracker:
             logger.info(
                 f"📅 NEW DAY: Daily counter reset "
                 f"(Yesterday P&L: {self.daily_realized_pnl:+.2f} {self.quote_asset}, "
-                f"{len(self.daily_trades)} trades)"
+                f"{len(self.daily_trades)} trades, "
+                f"portfolio: {portfolio_value:.2f} {self.quote_asset})"
             )
 
             self.daily_start_balance = portfolio_value
             self.daily_realized_pnl = Decimal("0")
             self.daily_trades = []
             self.last_reset_day = today
-
-            # Check if we can unpause (all limits must be OK, not just daily)
-            if self.is_paused:
-                all_ok, violated_reason = self._check_all_limits_ok(portfolio_value)
-                if all_ok:
-                    logger.info("✅ All limits OK - unpausing trading after daily reset!")
-                    self.is_paused = False
-                    self.pause_reason = None
-                    self.paused_at = None
-                else:
-                    logger.warning(f"⚠️ Daily reset but still paused: {violated_reason}")
+            # Note: auto-unpause happens in check_drawdown_limits()
+            # after all limits are re-evaluated with the fresh baseline
 
         # Check for new week
         if self.last_reset_week and current_week != self.last_reset_week:
-            logger.info("📅 NEW WEEK: Weekly counter reset")
+            logger.info(
+                f"📅 NEW WEEK: Weekly counter reset "
+                f"(portfolio: {portfolio_value:.2f} {self.quote_asset})"
+            )
             self.weekly_start_balance = portfolio_value
             self.last_reset_week = current_week
 
-            # Check if we can unpause (all limits must be OK, not just weekly)
-            if self.is_paused:
-                all_ok, violated_reason = self._check_all_limits_ok(portfolio_value)
-                if all_ok:
-                    logger.info("✅ All limits OK - unpausing trading after weekly reset!")
-                    self.is_paused = False
-                    self.pause_reason = None
-                    self.paused_at = None
-                else:
-                    logger.warning(f"⚠️ Weekly reset but still paused: {violated_reason}")
-
         # Check for new month
         if self.last_reset_month and current_month != self.last_reset_month:
-            logger.info("📅 NEW MONTH: Monthly counter reset")
+            logger.info(
+                f"📅 NEW MONTH: Monthly counter reset "
+                f"(portfolio: {portfolio_value:.2f} {self.quote_asset})"
+            )
             self.monthly_start_balance = portfolio_value
             self.last_reset_month = current_month
-
-            # Check if we can unpause (all limits must be OK, not just monthly)
-            if self.is_paused:
-                all_ok, violated_reason = self._check_all_limits_ok(portfolio_value)
-                if all_ok:
-                    logger.info("✅ All limits OK - unpausing trading after monthly reset!")
-                    self.is_paused = False
-                    self.pause_reason = None
-                    self.paused_at = None
-                else:
-                    logger.warning(f"⚠️ Monthly reset but still paused: {violated_reason}")
 
     def get_status(self, current_balance: Optional[Decimal] = None) -> Dict:
         """

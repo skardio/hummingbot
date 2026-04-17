@@ -1355,6 +1355,53 @@ class TestGridExecutor(IsolatedAsyncioWrapperTestCase, LoggerMixinForTest):
         self.assertEqual(custom_info["open_liquidity_placed"], executor.open_liquidity_placed)
         self.assertEqual(custom_info["close_liquidity_placed"], executor.close_liquidity_placed)
 
+    @patch.object(GridExecutor, "get_price", MagicMock(return_value=Decimal("100")))
+    async def test_get_custom_info_preserves_entry_fields(self):
+        config = GridExecutorConfig(
+            id="test",
+            timestamp=1234567890,
+            side=TradeType.BUY,
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            start_price=Decimal("100"),
+            end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            order_frequency=1.0,
+            max_open_orders=5,
+            max_orders_per_batch=2,
+            limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+                time_limit=100,
+                trailing_stop=TrailingStop(
+                    activation_price=Decimal("0.05"),
+                    trailing_delta=Decimal("0.005")
+                )
+            ),
+            custom_info={
+                "no_fill_timeout_sec": 1800,
+                "atr_pct": 0.35,
+                "entry_trend_pct": 9.34,
+                "entry_trend_score": 4.12,
+                "entry_grid_score": {"composite": 0.67, "range_eff": 0.16},
+            }
+        )
+        executor = self.get_grid_executor_from_config(config)
+        custom_info = executor.get_custom_info()
+        # entry_* fields must be preserved
+        self.assertEqual(custom_info["entry_trend_pct"], 9.34)
+        self.assertEqual(custom_info["entry_trend_score"], 4.12)
+        self.assertEqual(custom_info["entry_grid_score"], {"composite": 0.67, "range_eff": 0.16})
+        # non-entry config fields must NOT leak into output
+        self.assertNotIn("no_fill_timeout_sec", custom_info)
+        self.assertNotIn("atr_pct", custom_info)
+        # runtime fields must still be present
+        self.assertIn("realized_buy_size_quote", custom_info)
+        self.assertIn("side", custom_info)
+
     def test_creating_grid_with_unsupported_stop_loss_order(self, ):
         config = GridExecutorConfig(
             id="test",

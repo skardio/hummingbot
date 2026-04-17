@@ -111,6 +111,7 @@ class TestGraceBypassLogic(unittest.TestCase):
         """Test bypass when regime flips from BULL to BEAR"""
         executor_info = Mock()
         executor_info.is_active = True
+        executor_info.timestamp = 999000  # 1000s old (> min_bypass_age)
         executor_info.custom_info = {'entry_regime': 'BULL'}
 
         # Mock market regime filter
@@ -129,6 +130,7 @@ class TestGraceBypassLogic(unittest.TestCase):
         """Test bypass when regime flips from BEAR to BULL"""
         executor_info = Mock()
         executor_info.is_active = True
+        executor_info.timestamp = 999000  # 1000s old (> min_bypass_age)
         executor_info.custom_info = {'entry_regime': 'BEAR'}
 
         # Mock market regime filter
@@ -147,6 +149,7 @@ class TestGraceBypassLogic(unittest.TestCase):
         """Test NO bypass when regime stays the same"""
         executor_info = Mock()
         executor_info.is_active = True
+        executor_info.timestamp = 999000  # 1000s old (> min_bypass_age)
         executor_info.custom_info = {'entry_regime': 'BULL'}
 
         # Mock market regime filter - same regime
@@ -167,6 +170,7 @@ class TestGraceBypassLogic(unittest.TestCase):
         """Test bypass when all slots are full"""
         executor_info = Mock()
         executor_info.is_active = True
+        executor_info.timestamp = 999000  # 1000s old (> min_bypass_age)
         executor_info.custom_info = {}
 
         # Mock executors_info with 2 active executors (all slots full)
@@ -188,6 +192,7 @@ class TestGraceBypassLogic(unittest.TestCase):
         """Test NO bypass when slots are still available"""
         executor_info = Mock()
         executor_info.is_active = True
+        executor_info.timestamp = 999000  # 1000s old (> min_bypass_age)
         executor_info.custom_info = {}
 
         # Mock executors_info with only 1 active executor (1 slot free)
@@ -209,6 +214,7 @@ class TestGraceBypassLogic(unittest.TestCase):
         """Test bypass when market data is stale"""
         executor_info = Mock()
         executor_info.is_active = True
+        executor_info.timestamp = 999000  # 1000s old (> min_bypass_age)
         executor_info.custom_info = {}
 
         # Mark pair as stale
@@ -225,6 +231,7 @@ class TestGraceBypassLogic(unittest.TestCase):
         """Test bypass when price data is unavailable"""
         executor_info = Mock()
         executor_info.is_active = True
+        executor_info.timestamp = 999000  # 1000s old (> min_bypass_age)
         executor_info.custom_info = {}
 
         # Mock connector to return None for price
@@ -241,6 +248,7 @@ class TestGraceBypassLogic(unittest.TestCase):
         """Test NO bypass when all conditions are normal"""
         executor_info = Mock()
         executor_info.is_active = True
+        executor_info.timestamp = 999000  # 1000s old (> min_bypass_age)
         executor_info.custom_info = {}
 
         # Mock market regime filter - same regime

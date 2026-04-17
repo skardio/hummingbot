@@ -166,6 +166,7 @@ class ExecutorOrchestrator:
         self.executors_ids_position_held = deque(maxlen=50)
         self.cached_performance = {}
         self.initial_positions_by_controller = initial_positions_by_controller or {}
+        self._skipped_position_pairs: set = set()  # throttle "not in markets" warnings
         self._initialize_cached_performance()
 
     def _initialize_cached_performance(self):
@@ -185,6 +186,9 @@ class ExecutorOrchestrator:
                 continue
             self._update_cached_performance(controller_id, executor)
 
+        # Compute and add orphan fill PnL (fills not tracked by any executor)
+        self._apply_orphan_fill_adjustment(db_executors)
+
         # Create initial positions from config overrides first
         self._create_initial_positions()
 
@@ -202,6 +206,103 @@ class ExecutorOrchestrator:
                                       f"not available in current strategy markets")
                 continue
             self._load_position_from_db(controller_id, position)
+
+    def _apply_orphan_fill_adjustment(self, db_executors: list):
+        """
+        Build PositionHold entries from TradeFill records not tracked by any executor.
+        This fixes the tracking gap where orders fill on the exchange after their
+        executor has already closed. Orphan fills are added as held positions so that
+        generate_performance_report() can mark them to market properly, rather than
+        counting unsold crypto as realized loss.
+        """
+        controller_ids = list(self.strategy.controllers.keys())
+        if len(controller_ids) != 1:
+            if len(controller_ids) > 1:
+                self.logger().warning(
+                    "Orphan fill adjustment skipped: multiple controllers detected. "
+                    "TradeFills cannot be reliably attributed to specific controllers."
+                )
+            return
+
+        controller_id = controller_ids[0]
+
+        # Collect all order IDs tracked by executors
+        tracked_order_ids = set()
+        for executor_info in db_executors:
+            if not executor_info.custom_info:
+                continue
+            for fo in executor_info.custom_info.get('filled_orders', []):
+                client_id = fo.get('client_order_id', '')
+                if client_id:
+                    tracked_order_ids.add(client_id)
+            for ho in executor_info.custom_info.get('held_position_orders', []):
+                client_id = ho.get('client_order_id', '')
+                if client_id:
+                    tracked_order_ids.add(client_id)
+
+        # Query all TradeFills
+        try:
+            all_fills = MarketsRecorder.get_instance().get_all_trade_fills()
+        except Exception as e:
+            self.logger().error(f"Failed to query TradeFills for orphan adjustment: {e}")
+            return
+
+        if not all_fills:
+            return
+
+        # Group orphan fills by trading pair
+        orphan_fills_by_pair: Dict[str, list] = {}
+        orphan_count = 0
+        for fill in all_fills:
+            if fill.order_id in tracked_order_ids:
+                continue
+            pair = fill.symbol
+            if pair not in orphan_fills_by_pair:
+                orphan_fills_by_pair[pair] = []
+            orphan_fills_by_pair[pair].append(fill)
+            orphan_count += 1
+
+        if orphan_count == 0:
+            return
+
+        # Create PositionHold per trading pair from orphan fills
+        connector_name = all_fills[0].market if all_fills else "unknown"
+        positions = self.positions_held.get(controller_id, [])
+        total_orphan_volume = Decimal("0")
+
+        for pair, fills in orphan_fills_by_pair.items():
+            position = PositionHold(connector_name, pair, TradeType.BUY)
+            for fill in fills:
+                vol = fill.price * fill.amount
+                fee = fill.trade_fee_in_quote if fill.trade_fee_in_quote else Decimal("0")
+                is_buy = fill.trade_type == 'BUY'
+                if is_buy:
+                    position.buy_amount_base += fill.amount
+                    position.buy_amount_quote += vol
+                else:
+                    position.sell_amount_base += fill.amount
+                    position.sell_amount_quote += vol
+                position.cum_fees_quote += fee
+                position.volume_traded_quote += vol
+                total_orphan_volume += vol
+
+            # Set side based on net direction
+            net_base = position.buy_amount_base - position.sell_amount_base
+            if net_base < 0:
+                position.side = TradeType.SELL
+            positions.append(position)
+
+        self.positions_held[controller_id] = positions
+
+        total_fills = len(all_fills)
+        tracked_count = total_fills - orphan_count
+        self.logger().info(
+            f"Orphan fill adjustment: {orphan_count}/{total_fills} fills untracked by executors "
+            f"across {len(orphan_fills_by_pair)} pairs. "
+            f"Orphan volume: ${float(total_orphan_volume):,.2f}. "
+            f"Executor-tracked fills: {tracked_count}. "
+            f"Orphan positions will be marked-to-market in performance reports."
+        )
 
     def _update_cached_performance(self, controller_id: str, executor_info: ExecutorInfo):
         """
@@ -559,8 +660,12 @@ class ExecutorOrchestrator:
         for controller_id, positions_list in self.positions_held.items():
             positions_summary = []
             for position in positions_list:
-                mid_price = self.strategy.market_data_provider.get_price_by_type(
-                    position.connector_name, position.trading_pair, PriceType.MidPrice)
+                try:
+                    mid_price = self.strategy.market_data_provider.get_price_by_type(
+                        position.connector_name, position.trading_pair, PriceType.MidPrice)
+                except (ValueError, KeyError):
+                    # Pair not in subscribed markets (e.g. orphan PositionHold) — skip
+                    continue
                 positions_summary.append(position.get_position_summary(mid_price))
             report[controller_id] = positions_summary
         return report
@@ -623,11 +728,17 @@ class ExecutorOrchestrator:
             # Skip if the connector/trading pair is not in the current strategy markets
             if (position.connector_name not in self.strategy.markets or
                     position.trading_pair not in self.strategy.markets.get(position.connector_name, set())):
-                self.logger().warning(f"Skipping position in performance report for {position.connector_name}.{position.trading_pair} - "
-                                      f"not available in current strategy markets")
+                pair_key = f"{position.connector_name}.{position.trading_pair}"
+                if pair_key not in self._skipped_position_pairs:
+                    self._skipped_position_pairs.add(pair_key)
+                    self.logger().warning(f"Skipping position for {pair_key} - not in strategy markets (logged once)")
                 continue
-            mid_price = self.strategy.market_data_provider.get_price_by_type(
-                position.connector_name, position.trading_pair, PriceType.MidPrice)
+            try:
+                mid_price = self.strategy.market_data_provider.get_price_by_type(
+                    position.connector_name, position.trading_pair, PriceType.MidPrice)
+            except (ValueError, KeyError):
+                # Order book not yet loaded during startup
+                continue
             position_summary = position.get_position_summary(mid_price if not mid_price.is_nan() else Decimal("0"))
 
             # Update report with position data

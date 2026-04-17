@@ -700,3 +700,225 @@ class TestExecutorOrchestrator(unittest.TestCase):
         self.assertEqual(len(result["controller2"]["executors"]), 0)
         self.assertEqual(len(result["controller3"]["executors"]), 0)
         self.assertEqual(len(result["controller3"]["positions"]), 0)
+
+    @patch("hummingbot.strategy_v2.executors.executor_orchestrator.MarketsRecorder.get_instance")
+    def test_orphan_fill_adjustment_single_controller(self, mock_get_instance: MagicMock):
+        """Orphan fills should create PositionHold entries, not add to realized PnL."""
+        mock_markets_recorder = MagicMock(spec=MarketsRecorder)
+        mock_get_instance.return_value = mock_markets_recorder
+
+        # Create an executor that tracks one order
+        executor_info = ExecutorInfo(
+            id="exec1", timestamp=1234, type="position_executor",
+            status=RunnableStatus.TERMINATED, config=PositionExecutorConfig(
+                timestamp=1234, trading_pair="ETH-USDT", connector_name="binance",
+                side=TradeType.BUY, amount=Decimal(10), entry_price=Decimal(100),
+            ),
+            filled_amount_quote=Decimal(100), net_pnl_quote=Decimal(5), net_pnl_pct=Decimal(5),
+            cum_fees_quote=Decimal(1), is_trading=False, is_active=False,
+            custom_info={
+                "side": TradeType.BUY,
+                "filled_orders": [{"client_order_id": "tracked_order_1"}],
+            },
+            controller_id="test",
+            close_type=CloseType.TAKE_PROFIT,
+        )
+
+        # Create TradeFills: one tracked, two orphans (one buy, one sell) for same pair
+        tracked_fill = MagicMock()
+        tracked_fill.order_id = "tracked_order_1"
+        tracked_fill.price = Decimal("100")
+        tracked_fill.amount = Decimal("1")
+        tracked_fill.trade_fee_in_quote = Decimal("0.20")
+        tracked_fill.trade_type = "BUY"
+        tracked_fill.symbol = "ETH-USDT"
+        tracked_fill.market = "binance"
+
+        orphan_buy = MagicMock()
+        orphan_buy.order_id = "orphan_buy_1"
+        orphan_buy.price = Decimal("50")
+        orphan_buy.amount = Decimal("2")
+        orphan_buy.trade_fee_in_quote = Decimal("0.10")
+        orphan_buy.trade_type = "BUY"
+        orphan_buy.symbol = "SOL-USDT"
+        orphan_buy.market = "binance"
+
+        orphan_sell = MagicMock()
+        orphan_sell.order_id = "orphan_sell_1"
+        orphan_sell.price = Decimal("55")
+        orphan_sell.amount = Decimal("2")
+        orphan_sell.trade_fee_in_quote = Decimal("0.15")
+        orphan_sell.trade_type = "SELL"
+        orphan_sell.symbol = "SOL-USDT"
+        orphan_sell.market = "binance"
+
+        mock_markets_recorder.get_all_executors.return_value = [executor_info]
+        mock_markets_recorder.get_all_positions.return_value = []
+        mock_markets_recorder.get_all_trade_fills.return_value = [tracked_fill, orphan_buy, orphan_sell]
+
+        self.mock_strategy.controllers = {"test": MagicMock()}
+
+        orchestrator = ExecutorOrchestrator(strategy=self.mock_strategy)
+
+        # Executor PnL in cached_performance stays at executor-only value
+        report = orchestrator.cached_performance["test"]
+        self.assertEqual(report.realized_pnl_quote, Decimal("5"))
+
+        # Orphan fills should create a PositionHold for SOL-USDT
+        positions = orchestrator.positions_held.get("test", [])
+        self.assertEqual(len(positions), 1)
+        pos = positions[0]
+        self.assertEqual(pos.trading_pair, "SOL-USDT")
+        self.assertEqual(pos.buy_amount_base, Decimal("2"))
+        self.assertEqual(pos.sell_amount_base, Decimal("2"))
+        self.assertEqual(pos.buy_amount_quote, Decimal("100"))   # 50*2
+        self.assertEqual(pos.sell_amount_quote, Decimal("110"))  # 55*2
+        self.assertEqual(pos.cum_fees_quote, Decimal("0.25"))
+
+    @patch("hummingbot.strategy_v2.executors.executor_orchestrator.MarketsRecorder.get_instance")
+    def test_orphan_fill_adjustment_no_orphans(self, mock_get_instance: MagicMock):
+        """When all fills are tracked, no orphan positions should be created."""
+        mock_markets_recorder = MagicMock(spec=MarketsRecorder)
+        mock_get_instance.return_value = mock_markets_recorder
+
+        executor_info = ExecutorInfo(
+            id="exec1", timestamp=1234, type="position_executor",
+            status=RunnableStatus.TERMINATED, config=PositionExecutorConfig(
+                timestamp=1234, trading_pair="ETH-USDT", connector_name="binance",
+                side=TradeType.BUY, amount=Decimal(10), entry_price=Decimal(100),
+            ),
+            filled_amount_quote=Decimal(100), net_pnl_quote=Decimal(5), net_pnl_pct=Decimal(5),
+            cum_fees_quote=Decimal(1), is_trading=False, is_active=False,
+            custom_info={
+                "side": TradeType.BUY,
+                "filled_orders": [{"client_order_id": "order_1"}],
+            },
+            controller_id="test",
+            close_type=CloseType.TAKE_PROFIT,
+        )
+
+        # All fills tracked by the executor
+        tracked_fill = MagicMock()
+        tracked_fill.order_id = "order_1"
+        tracked_fill.price = Decimal("100")
+        tracked_fill.amount = Decimal("1")
+        tracked_fill.trade_fee_in_quote = Decimal("0.20")
+        tracked_fill.trade_type = "BUY"
+        tracked_fill.symbol = "ETH-USDT"
+        tracked_fill.market = "binance"
+
+        mock_markets_recorder.get_all_executors.return_value = [executor_info]
+        mock_markets_recorder.get_all_positions.return_value = []
+        mock_markets_recorder.get_all_trade_fills.return_value = [tracked_fill]
+
+        self.mock_strategy.controllers = {"test": MagicMock()}
+
+        orchestrator = ExecutorOrchestrator(strategy=self.mock_strategy)
+        report = orchestrator.cached_performance["test"]
+
+        # Only executor PnL, no orphan positions
+        self.assertEqual(report.realized_pnl_quote, Decimal("5"))
+        self.assertEqual(report.volume_traded, Decimal("100"))
+        self.assertEqual(len(orchestrator.positions_held.get("test", [])), 0)
+
+    @patch("hummingbot.strategy_v2.executors.executor_orchestrator.MarketsRecorder.get_instance")
+    def test_orphan_fill_adjustment_multi_controller_skipped(self, mock_get_instance: MagicMock):
+        """Orphan adjustment should be skipped for multi-controller setups."""
+        mock_markets_recorder = MagicMock(spec=MarketsRecorder)
+        mock_get_instance.return_value = mock_markets_recorder
+
+        mock_markets_recorder.get_all_executors.return_value = []
+        mock_markets_recorder.get_all_positions.return_value = []
+        # This should NOT be called when multi-controller is detected
+        mock_markets_recorder.get_all_trade_fills.return_value = []
+
+        self.mock_strategy.controllers = {"ctrl1": MagicMock(), "ctrl2": MagicMock()}
+
+        orchestrator = ExecutorOrchestrator(strategy=self.mock_strategy)
+
+        # Both controllers should have default empty reports
+        self.assertEqual(orchestrator.cached_performance["ctrl1"].realized_pnl_quote, Decimal("0"))
+        self.assertEqual(orchestrator.cached_performance["ctrl2"].realized_pnl_quote, Decimal("0"))
+        # get_all_trade_fills should not have been called
+        mock_markets_recorder.get_all_trade_fills.assert_not_called()
+
+    @patch("hummingbot.strategy_v2.executors.executor_orchestrator.MarketsRecorder.get_instance")
+    def test_orphan_fill_adjustment_empty_fills(self, mock_get_instance: MagicMock):
+        """Empty TradeFills should not cause errors."""
+        mock_markets_recorder = MagicMock(spec=MarketsRecorder)
+        mock_get_instance.return_value = mock_markets_recorder
+
+        mock_markets_recorder.get_all_executors.return_value = []
+        mock_markets_recorder.get_all_positions.return_value = []
+        mock_markets_recorder.get_all_trade_fills.return_value = []
+
+        self.mock_strategy.controllers = {"test": MagicMock()}
+
+        orchestrator = ExecutorOrchestrator(strategy=self.mock_strategy)
+        report = orchestrator.cached_performance["test"]
+
+        self.assertEqual(report.realized_pnl_quote, Decimal("0"))
+        self.assertEqual(report.volume_traded, Decimal("0"))
+
+    @patch("hummingbot.strategy_v2.executors.executor_orchestrator.MarketsRecorder.get_instance")
+    def test_orphan_fill_adjustment_held_position_orders(self, mock_get_instance: MagicMock):
+        """Orders in held_position_orders should also be considered tracked."""
+        mock_markets_recorder = MagicMock(spec=MarketsRecorder)
+        mock_get_instance.return_value = mock_markets_recorder
+
+        executor_info = ExecutorInfo(
+            id="exec1", timestamp=1234, type="position_executor",
+            status=RunnableStatus.TERMINATED, config=PositionExecutorConfig(
+                timestamp=1234, trading_pair="ETH-USDT", connector_name="binance",
+                side=TradeType.BUY, amount=Decimal(10), entry_price=Decimal(100),
+            ),
+            filled_amount_quote=Decimal(100), net_pnl_quote=Decimal(0), net_pnl_pct=Decimal(0),
+            cum_fees_quote=Decimal(1), is_trading=False, is_active=False,
+            custom_info={
+                "side": TradeType.BUY,
+                "filled_orders": [{"client_order_id": "filled_1"}],
+                "held_position_orders": [{"client_order_id": "held_1"}],
+            },
+            controller_id="test",
+            close_type=CloseType.TAKE_PROFIT,
+        )
+
+        # held_1 should be tracked, orphan_1 should be orphan
+        held_fill = MagicMock()
+        held_fill.order_id = "held_1"
+        held_fill.price = Decimal("100")
+        held_fill.amount = Decimal("1")
+        held_fill.trade_fee_in_quote = Decimal("0.10")
+        held_fill.trade_type = "BUY"
+        held_fill.symbol = "ETH-USDT"
+        held_fill.market = "binance"
+
+        orphan_fill = MagicMock()
+        orphan_fill.order_id = "orphan_1"
+        orphan_fill.price = Decimal("200")
+        orphan_fill.amount = Decimal("1")
+        orphan_fill.trade_fee_in_quote = Decimal("0.50")
+        orphan_fill.trade_type = "SELL"
+        orphan_fill.symbol = "SOL-USDT"
+        orphan_fill.market = "binance"
+
+        mock_markets_recorder.get_all_executors.return_value = [executor_info]
+        mock_markets_recorder.get_all_positions.return_value = []
+        mock_markets_recorder.get_all_trade_fills.return_value = [held_fill, orphan_fill]
+
+        self.mock_strategy.controllers = {"test": MagicMock()}
+
+        orchestrator = ExecutorOrchestrator(strategy=self.mock_strategy)
+
+        # Executor PnL stays at 0 (no orphan added to realized)
+        report = orchestrator.cached_performance["test"]
+        self.assertEqual(report.realized_pnl_quote, Decimal("0"))
+
+        # Orphan SELL creates a PositionHold for SOL-USDT with net short direction
+        positions = orchestrator.positions_held.get("test", [])
+        self.assertEqual(len(positions), 1)
+        pos = positions[0]
+        self.assertEqual(pos.trading_pair, "SOL-USDT")
+        self.assertEqual(pos.sell_amount_base, Decimal("1"))
+        self.assertEqual(pos.sell_amount_quote, Decimal("200"))
+        self.assertEqual(pos.side, TradeType.SELL)  # net short

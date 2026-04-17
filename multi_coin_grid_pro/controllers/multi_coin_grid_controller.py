@@ -66,7 +66,6 @@ from multi_coin_grid_pro.logic.smart_entry import SmartEntryBaseConfig, SmartEnt
 from multi_coin_grid_pro.models.execution_audit import AuditWriter, create_audit_from_executor
 from multi_coin_grid_pro.observability.decision_logger import DecisionLogger
 from multi_coin_grid_pro.observability.event_logger import EventLogger
-from multi_coin_grid_pro.observability.outcome_logger import OutcomeLogger
 from multi_coin_grid_pro.observability.snapshot_builders import (
     build_bot_state,
     build_filter_checks_from_trace,
@@ -188,6 +187,9 @@ class MultiCoinGridController(ControllerBase):
         # Replace coin after X updates without trades
         self.rotation_threshold: int = getattr(config, 'coin_rotation_threshold', 90)
 
+        # Pool membership cooldown (anti-churn): tracks when each coin joined the pool
+        self._pool_join_time: Dict[str, float] = {}
+
         # Periodic coin discovery (auto-refresh pool)
         self.coin_discovery_refresh_interval: int = getattr(config, 'coin_discovery_refresh_interval_seconds', 3600)
         self._last_coin_discovery: float = 0.0  # Timestamp of last discovery scan
@@ -202,11 +204,6 @@ class MultiCoinGridController(ControllerBase):
         self.bot_start_time: float = time.time()  # Track when bot started (for startup delay)
         # Max simultaneous coins from config (default 1 for backwards compatibility)
         self.max_simultaneous_coins: int = getattr(config, 'max_simultaneous_coins', 1)
-
-        # Regime-adaptive overrides (populated by _apply_adaptive_filters)
-        self._regime_max_active_grids: Optional[int] = None
-        self._regime_grid_spacing_mult: float = 1.0
-        self._regime_entry_confidence_min: Optional[float] = None
 
         # DYNAMIC ALLOCATION: Stores dynamically calculated grid count
         # Set by calculate_optimal_allocation, used by _create_grid_action
@@ -262,6 +259,9 @@ class MultiCoinGridController(ControllerBase):
         # Phase 1.2: Circuit Breaker state
         self.circuit_breaker_active: bool = False
         self.circuit_breaker_triggered_at: Optional[float] = None
+
+        # Graceful stop: block new entries, stop when all executors finish
+        self._graceful_stop_requested: bool = False
         self.price_history_for_volatility: Dict[str, List[Dict]] = {}  # {coin: [{price, timestamp}]}
         self.circuit_breaker_threshold_pct: float = 5.0  # 5% move in 1 minute = circuit breaker
         self.circuit_breaker_window_seconds: int = 60  # 1 minute window
@@ -284,6 +284,12 @@ class MultiCoinGridController(ControllerBase):
 
         self._last_logged_regime = None
         self._last_detected_regime = None  # Story 6 Part 2: Cache detected regime for momentum guards
+
+        # ST-11: Idle mode state
+        self._idle_mode_active: bool = False
+        self._no_edge_cycles: int = 0
+        self._idle_mode_log_counter: int = 0
+        self._last_idle_scan_time: float = 0.0
 
         # Phase 1.4: Position Size Limits state
         self.current_exposure_per_coin: Dict[str, Decimal] = {}  # {coin: exposure_amount}
@@ -420,21 +426,6 @@ class MultiCoinGridController(ControllerBase):
             except Exception as e:
                 self.logger().error(f"DecisionLogger init failed: {e}")
 
-        # AI-F2: Outcome Logger (links decision_ids to executor results)
-        self.outcome_logger: Optional[OutcomeLogger] = None
-        if structured_events_enabled:
-            try:
-                ol_dir = observability_cfg.get('outcome_log_dir', 'data/outcome_logs') if isinstance(observability_cfg, dict) else getattr(observability_cfg, 'outcome_log_dir', 'data/outcome_logs')  # noqa: E501
-                ol_retention = observability_cfg.get('outcome_log_retention_days', 90) if isinstance(observability_cfg, dict) else getattr(observability_cfg, 'outcome_log_retention_days', 90)  # noqa: E501
-                self.outcome_logger = OutcomeLogger(
-                    enabled=True,
-                    output_dir=ol_dir,
-                    retention_days=ol_retention,
-                )
-                self.logger().info(f"✅ AI-F2 OutcomeLogger initialized (dir={ol_dir})")
-            except Exception as e:
-                self.logger().error(f"OutcomeLogger init failed: {e}")
-
         # Phase 1C: Correlation tracking (for observability)
         self._last_smart_entry_trace = None  # Stores last trace for correlation_id propagation
         self._last_entry_indicators: Dict[str, Any] = {}  # AI-F1: cached indicators per symbol
@@ -450,7 +441,7 @@ class MultiCoinGridController(ControllerBase):
             max_monthly_loss_pct=Decimal(str(getattr(config, 'max_monthly_loss_pct', 15.0))),
             max_daily_loss_eur=max_daily_loss_eur,
             quote_asset=config.quote_asset,
-            portfolio_value_calculator=self._calculate_portfolio_value
+            portfolio_value_calculator=self._calculate_drawdown_portfolio
         )
 
         # Phase 3: Switch Logic Improvements state
@@ -570,6 +561,7 @@ class MultiCoinGridController(ControllerBase):
             event_logger=self.event_logger,  # Pass EventLogger for Phase 2 observability
             connector_name=config.connector_name  # Pass connector name for event filtering
         )
+        self._kill_switch_logged = False  # Prevent CRITICAL spam every tick
 
         # SmartEntry Filter v2.0 (with coin profiles)
         self.smart_entry_v2: Optional[SmartEntryFilterV2] = None
@@ -826,17 +818,6 @@ class MultiCoinGridController(ControllerBase):
                 )
         except Exception as e:
             self.logger().error(f"Error closing DecisionLogger: {e}")
-        try:
-            if hasattr(self, 'outcome_logger') and self.outcome_logger:
-                self.outcome_logger.close()
-                stats = self.outcome_logger.stats
-                self.logger().info(
-                    f"✅ AI-F2 OutcomeLogger closed "
-                    f"(logged={stats['total_logged']}, errors={stats['total_errors']}, "
-                    f"missing={stats['total_missing']})"
-                )
-        except Exception as e:
-            self.logger().error(f"Error closing OutcomeLogger: {e}")
 
     def _log_decision_trace(self, trace: PairDecisionTrace):
         """
@@ -924,26 +905,20 @@ class MultiCoinGridController(ControllerBase):
         reason_code: Optional[str] = None,
         reason_msg: Optional[str] = None,
         trace=None,
-        filter_checks: Optional[list] = None,
-        best_candidate: Optional[str] = None,
-    ) -> Optional[str]:
-        """Log an entry decision snapshot.  Never raises.  Returns decision_id if accepted."""
+    ) -> None:
+        """Log an entry decision snapshot.  Never raises."""
         if not self.decision_logger:
-            return None
+            return
         try:
             snap = self.decision_logger.create_snapshot("entry", symbol, self.config.connector_name)
             snap.outcome = "accepted" if accepted else "rejected"
             snap.rejected_by = rejected_by
             snap.reason_code = reason_code
             snap.reason_msg = reason_msg
-            # Use best_candidate for market features when symbol is NONE
-            market_symbol = best_candidate if best_candidate and symbol == "NONE" else symbol
             snap.market = build_market_features(
-                market_symbol, self.trend_calculator,
+                symbol, self.trend_calculator,
                 last_entry_indicators=self._last_entry_indicators,
             )
-            if best_candidate and symbol == "NONE":
-                snap.market["best_candidate"] = best_candidate
             snap.strategy = build_strategy_state(
                 self.active_coins, self._get_current_max_slots(),
                 self.monitored_coins, self.config,
@@ -955,12 +930,10 @@ class MultiCoinGridController(ControllerBase):
                 paper_trading=getattr(self.config, "paper_trading", False),
             )
             snap.risk = build_risk_context(self.risk_manager, self.drawdown_tracker)
-            snap.filter_checks = filter_checks if filter_checks else build_filter_checks_from_trace(trace)
+            snap.filter_checks = build_filter_checks_from_trace(trace)
             self.decision_logger.log(snap)
-            return snap.decision_id if accepted else None
         except Exception as e:
             self.logger().error(f"AI-F1 _log_entry_decision failed (non-fatal): {e}")
-            return None
 
     def _log_rotation_decision(
         self,
@@ -1009,6 +982,64 @@ class MultiCoinGridController(ControllerBase):
         except Exception as e:
             self.logger().error(f"AI-F1 _log_rotation_decision failed (non-fatal): {e}")
 
+    def _log_selection_trace(
+        self,
+        top_coins: list,
+        best_coin: Optional[str],
+        candidate_rejections: list,
+        rejection_reason: Optional[str],
+    ) -> None:
+        """ST-06a: Log a single structured selection funnel summary per tick.
+
+        Captures the entire decision chain from monitored pool to final
+        selection in one log entry so operators can explain why a coin
+        was or wasn't selected.  Never raises.
+        """
+        try:
+            monitored = len(self.monitored_coins)
+            active = len(self.active_coins)
+
+            # Gather trend-calculator debug info
+            debug = getattr(self.trend_calculator, '_debug_info', {})
+            sufficient_data = debug.get('sufficient', 0)
+            total_tracked = debug.get('total', 0)
+            qualifying = debug.get('all_count', 0)
+            depth_filtered = debug.get('depth_filtered', 0)
+
+            # Summarise per-filter rejection counts
+            reject_counts: dict = {}
+            for rej in candidate_rejections:
+                key = rej.get("filter", "unknown")
+                reject_counts[key] = reject_counts.get(key, 0) + 1
+
+            funnel = {
+                "monitored_pool": monitored,
+                "active_grids": active,
+                "sufficient_data": sufficient_data,
+                "total_tracked": total_tracked,
+                "qualifying_coins": qualifying,
+                "depth_filtered": depth_filtered,
+                "top_coins": len(top_coins),
+                "rejections": reject_counts,
+                "best_coin": best_coin,
+                "rejection_reason": rejection_reason,
+            }
+
+            self.logger().info(f"📊 Selection funnel: {funnel}")
+
+            # Also log to DecisionLogger JSONL if available
+            if self.decision_logger:
+                snap = self.decision_logger.create_snapshot(
+                    "selection_funnel", best_coin or "NONE",
+                    self.config.connector_name,
+                )
+                snap.outcome = "selected" if best_coin else "no_selection"
+                snap.reason_msg = rejection_reason
+                snap.filter_checks = funnel
+                self.decision_logger.log(snap)
+        except Exception:
+            pass  # Non-critical observability — never block trading
+
     def _handle_parabolic_cooldown(self, symbol: str, reason: str):
         """
         Story 10: Handle parabolic detection cooldown persistence
@@ -1051,51 +1082,49 @@ class MultiCoinGridController(ControllerBase):
         """
         Calculate the BOT's portfolio value in quote asset.
 
-        Only counts:
-        - Quote asset balance
-        - Coins actively managed by bot executors
-
-        Investment coins held on the same account are EXCLUDED to prevent
-        market moves on long-term holdings from triggering the drawdown kill switch.
+        Uses executor data (position_size_quote, position_pnl_quote) to value
+        coins held by active executors, avoiding reliance on connector balance
+        lookups which can fail silently (e.g. asset name mismatches, stale data).
 
         Returns:
             Bot portfolio value in quote asset
         """
         try:
             quote_asset = self.config.quote_asset
-            total_value = Decimal("0")
-
-            # 1. Get quote asset balance
             quote_balance = self.connector.get_balance(quote_asset)
-            total_value += quote_balance
+            total_value = quote_balance
+            coin_value_total = Decimal("0")
 
-            # 2. Build set of coins actively managed by bot executors
-            bot_coins = set()
-            for coin in self.active_coins.keys():
-                bot_coins.add(coin.split('-')[0])
+            # Add market value of coins held by ACTIVE executors
+            # position_size_quote + position_pnl_quote + position_fees_quote
+            # = position_size_base × mid_price (true mark-to-market)
             if hasattr(self, 'executors_info') and self.executors_info:
                 for ei in self.executors_info:
-                    tp = getattr(ei, 'trading_pair', None) or \
-                        getattr(getattr(ei, 'config', None), 'trading_pair', None)
-                    if tp:
-                        bot_coins.add(tp.split('-')[0])
-
-            # 3. Only include coins the bot is actively trading
-            if bot_coins and hasattr(self.connector, '_account_balances'):
-                balances = self.connector._account_balances
-                for asset, amount in balances.items():
-                    if asset == quote_asset or asset not in bot_coins:
+                    if not ei.is_active:
                         continue
-                    if amount < Decimal("0.0001"):
-                        continue
+                    ci = ei.custom_info or {}
+                    pos_size = Decimal(str(ci.get('position_size_quote', 0)))
+                    pos_pnl = Decimal(str(ci.get('position_pnl_quote', 0)))
+                    pos_fees = Decimal(str(ci.get('position_fees_quote', 0)))
+                    coin_value = pos_size + pos_pnl + pos_fees
+                    if coin_value > 0:
+                        coin_value_total += coin_value
 
-                    trading_pair = f"{asset}-{quote_asset}"
-                    try:
-                        mid_price = self.connector.get_mid_price(trading_pair)
-                        if mid_price and mid_price > Decimal("0"):
-                            total_value += amount * mid_price
-                    except Exception:
-                        pass
+            # Add value of held positions (executors that closed with POSITION_HOLD)
+            if hasattr(self, 'positions_held') and self.positions_held:
+                for pos in self.positions_held:
+                    # amount × breakeven_price = cost basis; unrealized_pnl = market move
+                    held_value = pos.amount * pos.breakeven_price + pos.unrealized_pnl_quote
+                    if held_value > 0:
+                        coin_value_total += held_value
+
+            total_value += coin_value_total
+
+            if coin_value_total > 0:
+                self.logger().debug(
+                    f"📊 Portfolio: quote={quote_balance:.2f} + coins={coin_value_total:.2f} "
+                    f"= {total_value:.2f} {quote_asset}"
+                )
 
             return total_value
 
@@ -1103,55 +1132,91 @@ class MultiCoinGridController(ControllerBase):
             self.logger().error(f"Error calculating portfolio value: {e}")
             return self.connector.get_balance(self.config.quote_asset)
 
+    def _calculate_drawdown_portfolio(self) -> Decimal:
+        """
+        Calculate WORKING CAPITAL for drawdown tracking.
+
+        Excludes positions_held (orphaned/frozen positions from previous runs)
+        because their price fluctuations should not trigger drawdown limits
+        on active trading capital. Only includes:
+        - Quote asset balance (free cash)
+        - Active executor positions (coins currently being traded)
+
+        This prevents phantom drawdown from orphan coin price swings and
+        ensures the drawdown limit is meaningful relative to tradeable capital.
+
+        Returns:
+            Working capital in quote asset
+        """
+        try:
+            quote_asset = self.config.quote_asset
+            quote_balance = self.connector.get_balance(quote_asset)
+            total_value = quote_balance
+            active_coin_value = Decimal("0")
+
+            # Only count ACTIVE executor positions (not positions_held)
+            if hasattr(self, 'executors_info') and self.executors_info:
+                for ei in self.executors_info:
+                    if not ei.is_active:
+                        continue
+                    ci = ei.custom_info or {}
+                    pos_size = Decimal(str(ci.get('position_size_quote', 0)))
+                    pos_pnl = Decimal(str(ci.get('position_pnl_quote', 0)))
+                    pos_fees = Decimal(str(ci.get('position_fees_quote', 0)))
+                    coin_value = pos_size + pos_pnl + pos_fees
+                    if coin_value > 0:
+                        active_coin_value += coin_value
+
+            total_value += active_coin_value
+
+            return total_value
+
+        except Exception as e:
+            self.logger().error(f"Error calculating drawdown portfolio: {e}")
+            return self.connector.get_balance(self.config.quote_asset)
+
     def _get_current_max_slots(self) -> int:
         """
         Task 3.1: Get current max slots based on dynamic slot manager or static config.
 
         Returns dynamic slots if enabled, otherwise falls back to static max_simultaneous_coins.
-        Regime-adaptive max_active_grids caps the result.
 
         Returns:
             int: Current maximum simultaneous trading slots
         """
         if not self.dynamic_slot_manager.enabled:
-            base = self.max_simultaneous_coins
-        else:
-            # Get current portfolio value
-            try:
-                account_balance = self._calculate_portfolio_value()
-            except Exception as e:
-                self.logger().warning(f"Failed to calculate portfolio value for dynamic slots: {e}, using static fallback")
-                base = self.max_simultaneous_coins
-                account_balance = None
+            return self.max_simultaneous_coins
 
-            if account_balance is not None:
-                # Get current regime
-                try:
-                    if self.market_regime_filter:
-                        regime_state = self.market_regime_filter.get_market_regime_state()
-                        current_regime = "BULL" if (regime_state and regime_state.is_favorable) else "BEAR"
-                    else:
-                        current_regime = "baseline"
-                except Exception as e:
-                    self.logger().warning(f"Failed to get regime for dynamic slots: {e}, using baseline")
+        # Get current portfolio value
+        try:
+            account_balance = self._calculate_portfolio_value()
+        except Exception as e:
+            self.logger().warning(f"Failed to calculate portfolio value for dynamic slots: {e}, using static fallback")
+            return self.max_simultaneous_coins
+
+        # Get current regime
+        try:
+            if self.market_regime_filter:
+                regime_state = self.market_regime_filter.get_market_regime_state()
+                # MarketRegimeState has is_favorable (bool), convert to regime string
+                if regime_state:
+                    current_regime = "BULL" if regime_state.is_favorable else "BEAR"
+                else:
                     current_regime = "baseline"
+            else:
+                current_regime = "baseline"
+        except Exception as e:
+            self.logger().warning(f"Failed to get regime for dynamic slots: {e}, using baseline")
+            current_regime = "baseline"
 
-                # Calculate dynamic slots
-                base = self.dynamic_slot_manager.get_dynamic_slots(
-                    account_balance_eur=account_balance,
-                    current_regime=current_regime,
-                    static_fallback=self.max_simultaneous_coins
-                )
+        # Calculate dynamic slots
+        dynamic_slots = self.dynamic_slot_manager.get_dynamic_slots(
+            account_balance_eur=account_balance,
+            current_regime=current_regime,
+            static_fallback=self.max_simultaneous_coins
+        )
 
-        # Apply regime-adaptive cap (from adaptive filters)
-        if self._regime_max_active_grids is not None and base > self._regime_max_active_grids:
-            self.logger().debug(
-                f"📊 Regime cap: max_slots {base}→{self._regime_max_active_grids} "
-                f"(adaptive filter)"
-            )
-            base = self._regime_max_active_grids
-
-        return base
+        return dynamic_slots
 
     async def _handle_api_error(self, error: Exception, operation: str) -> None:
         """
@@ -2265,10 +2330,15 @@ class MultiCoinGridController(ControllerBase):
         # HYBRID GRID v2.0: Check RiskGuard before any trading operations
         try:
             if not self.risk_guard_v2.check_limits():
-                self.logger().critical("🚨 RiskGuard v2.0: Kill switch activated - trading disabled")
+                if not self._kill_switch_logged:
+                    self.logger().critical("🚨 RiskGuard v2.0: Kill switch activated - trading disabled")
+                    self._kill_switch_logged = True
                 # T1-K2: Stop ALL active executors — don't just skip this tick
                 await self._kill_switch_stop_all_executors()
                 return  # Stop all trading activity
+            else:
+                # Reset flag when limits are OK again (e.g. after daily reset)
+                self._kill_switch_logged = False
         except Exception as e:
             self.logger().critical(f"🛑 FAIL-CLOSED: RiskGuard check error, blocking all trading: {e}")
             await self._kill_switch_stop_all_executors()
@@ -2622,6 +2692,17 @@ class MultiCoinGridController(ControllerBase):
                     self._last_report_time = current_time
                 except Exception as e:
                     self.logger().error(f"❌ US-E3: Failed to generate scheduled report: {e}")
+
+        # ===== ST-11: IDLE MODE SCAN THROTTLE =====
+        # When idle mode is active, skip expensive processing unless enough time elapsed
+        idle_cfg = getattr(self.config, 'idle_mode', {}) or {}
+        if idle_cfg.get('enabled', True) and self._idle_mode_active:
+            idle_interval = idle_cfg.get('idle_scan_interval_seconds', 120)
+            current_time_idle = time.time()
+            elapsed = current_time_idle - self._last_idle_scan_time
+            if elapsed < idle_interval:
+                return  # Skip this tick — idle mode throttle
+            self._last_idle_scan_time = current_time_idle
 
         # CRITICAL FIX: Always update trends and determine actions, even if mdp_ready is False
         # Market data provider might not be ready if no candle feeds are configured,
@@ -3376,6 +3457,7 @@ class MultiCoinGridController(ControllerBase):
         """
         Update monitored_coins list based on fresh volume/spread data.
         Preserves coins that currently have active positions (grids).
+        Respects pool_membership_cooldown_seconds to prevent rapid churn.
         Called during periodic coin pool refresh.
 
         NOTE: If no volume data available (e.g., Bitget), keeps existing monitored_coins.
@@ -3386,10 +3468,14 @@ class MultiCoinGridController(ControllerBase):
                 self.logger().info("📊 No volume data available - keeping existing monitored coins")
                 return
 
+            import time as _time
+            now = _time.time()
+
             max_coins = self.config.max_coins_to_monitor
             min_volume = float(getattr(self.config, 'min_24h_volume_usdt', self.config.min_24h_volume_eur))
             spread_limit = 0.005  # 0.5%
             blacklist = set(getattr(self.config, 'blacklist', []) or [])
+            cooldown = getattr(self.config, 'pool_membership_cooldown_seconds', 0)
 
             # Get coins with active positions (must keep these!)
             active_coins = set()
@@ -3415,9 +3501,34 @@ class MultiCoinGridController(ControllerBase):
             # Sort by volume (highest first)
             candidates.sort(key=lambda x: x[1], reverse=True)
 
-            # Build new monitored list: active coins first, then top volume coins
-            new_monitored = list(active_coins)  # Always keep active coins
+            # Top-N candidate set
+            top_n_pairs = {pair for pair, _, _ in candidates[:max_coins]}
 
+            # Seed join times for existing monitored coins that don't have one yet
+            if not hasattr(self, '_pool_join_time'):
+                self._pool_join_time = {}
+            for coin in self.monitored_coins:
+                if coin not in self._pool_join_time:
+                    self._pool_join_time[coin] = now
+
+            # Determine which current coins should be kept (cooldown / active protection)
+            kept_coins = []
+            for coin in self.monitored_coins:
+                if coin in active_coins:
+                    kept_coins.append(coin)
+                    continue
+                if coin in top_n_pairs:
+                    kept_coins.append(coin)
+                    continue
+                # Coin fell out of top-N: check cooldown
+                join_time = self._pool_join_time.get(coin, 0)
+                if cooldown > 0 and (now - join_time) < cooldown:
+                    kept_coins.append(coin)  # Cooldown protects
+                    continue
+                # Coin can be removed
+
+            # Build new monitored list: kept coins first, then fill from candidates
+            new_monitored = list(kept_coins)
             for pair, volume, spread in candidates:
                 if pair not in new_monitored and len(new_monitored) < max_coins:
                     new_monitored.append(pair)
@@ -3440,6 +3551,13 @@ class MultiCoinGridController(ControllerBase):
 
                 # Update the list
                 self.monitored_coins = new_monitored
+
+                # Update join times: add for new, remove for gone
+                for coin in added:
+                    self._pool_join_time[coin] = now
+                for coin in removed:
+                    self._pool_join_time.pop(coin, None)
+                    self._unsubscribe_from_orderbook(coin)
 
                 # Log new list with volumes
                 self.logger().info(f"📊 NEW MONITORED COINS ({len(new_monitored)}):")
@@ -3468,19 +3586,39 @@ class MultiCoinGridController(ControllerBase):
     def _rotate_underperforming_coins(self):
         """
         Replace coins that haven't had trades in X updates with new coins from the pool.
-        Uses volume-based selection and respects blacklist.
+        Uses volume-based selection and respects blacklist + pool membership cooldown.
         """
+        import time as _time
+        now = _time.time()
+
         # Track updates for each coin (increment counter)
         for coin in self.monitored_coins:
             if coin not in self.coin_performance:
                 self.coin_performance[coin] = 0
             self.coin_performance[coin] += 1
 
+        # Ensure _pool_join_time exists
+        if not hasattr(self, '_pool_join_time'):
+            self._pool_join_time = {}
+
+        cooldown = getattr(self.config, 'pool_membership_cooldown_seconds', 0)
+
+        # Get coins with active executors (NEVER rotate these out)
+        active_executor_coins = set(self.active_coins.keys())
+
         # Find coins to replace (no trades for rotation_threshold updates)
-        coins_to_replace = [
-            coin for coin in self.monitored_coins
-            if self.coin_performance.get(coin, 0) >= self.rotation_threshold
-        ]
+        # Respect cooldown: skip coins that joined recently
+        coins_to_replace = []
+        for coin in self.monitored_coins:
+            if coin in active_executor_coins:
+                continue  # Never rotate out a coin with an active grid
+            if self.coin_performance.get(coin, 0) < self.rotation_threshold:
+                continue
+            # Check cooldown
+            join_time = self._pool_join_time.get(coin, 0)
+            if cooldown > 0 and (now - join_time) < cooldown:
+                continue  # Cooldown protects this coin
+            coins_to_replace.append(coin)
 
         if not coins_to_replace:
             return
@@ -3491,21 +3629,20 @@ class MultiCoinGridController(ControllerBase):
         spread_limit = 0.005  # 0.5%
 
         # Find new coins not yet monitored, sorted by volume (highest first)
-        # Filter by: not monitored, not blacklisted (config + runtime), meets volume threshold, meets spread threshold
         candidate_pairs = []
         for pair in self.all_available_pairs:
             if pair in self.monitored_coins:
-                continue  # Already monitored
+                continue
             if pair in blacklist:
-                continue  # Blacklisted in config
+                continue
             if pair in self.auto_blacklisted_coins:
-                continue  # Auto-blacklisted at runtime (NL-restrictions, error loops, etc.)
+                continue
             if pair not in self.pair_volumes:
-                continue  # No volume data
+                continue
             if self.pair_volumes[pair] < min_volume:
-                continue  # Below volume threshold
+                continue
             if pair in self.pair_spreads and self.pair_spreads[pair] > spread_limit:
-                continue  # Spread too high
+                continue
 
             candidate_pairs.append((pair, self.pair_volumes[pair]))
 
@@ -3514,7 +3651,6 @@ class MultiCoinGridController(ControllerBase):
 
         if not candidate_pairs:
             self.logger().info("💡 No suitable replacement coins found (all blacklisted or below volume threshold)")
-            # Reset counters for coins that can't be replaced
             for coin in coins_to_replace:
                 self.coin_performance[coin] = 0
             return
@@ -3534,6 +3670,13 @@ class MultiCoinGridController(ControllerBase):
             # Reset performance counters
             self.coin_performance[new_coin] = 0
             del self.coin_performance[old_coin]
+
+            # Update pool join times
+            self._pool_join_time[new_coin] = now
+            self._pool_join_time.pop(old_coin, None)
+
+            # Unsubscribe removed coin from orderbook
+            self._unsubscribe_from_orderbook(old_coin)
 
             replacements.append((old_coin, new_coin, new_volume))
 
@@ -3561,6 +3704,23 @@ class MultiCoinGridController(ControllerBase):
         exit_actions = self._check_professional_exit_signals()
         if exit_actions:
             actions.extend(exit_actions)
+
+        # ===== GRACEFUL STOP: block new entries, stop when all executors finish =====
+        if self._graceful_stop_requested:
+            active_count = len([e for e in self.executors_info if e.is_active])
+            if active_count == 0:
+                if not getattr(self, '_graceful_stop_complete', False):
+                    self.logger().info(
+                        "🛑 GRACEFUL STOP: All executors finished — "
+                        "run 'stop' to shut down."
+                    )
+                    self._graceful_stop_complete = True
+            else:
+                self._graceful_stop_complete = False
+                self.logger().info(
+                    f"⏳ GRACEFUL STOP: Waiting for {active_count} active executor(s) to finish..."
+                )
+            return actions  # No new entries — flag stays True until manual 'stop'
 
         # ===== FEATURE 1.2: TIME-BASED FILTER CHECK =====
         if self.time_based_filter:
@@ -3764,7 +3924,6 @@ class MultiCoinGridController(ControllerBase):
                     exclude_coins=list(excluded_coins_with_active) if excluded_coins_with_active else None,
                     orderbook_config=orderbook_config,
                     trade_direction=self._get_trade_direction_for_discovery(),
-                    grid_scorer=self.grid_suitability_scorer,
                 )
 
                 self.logger().info(
@@ -3834,8 +3993,18 @@ class MultiCoinGridController(ControllerBase):
                     exclude_coins=list(excluded_coins_with_active) if excluded_coins_with_active else None,
                     orderbook_config=orderbook_config,
                     trade_direction=self._get_trade_direction_for_discovery(),
-                    grid_scorer=self.grid_suitability_scorer,
                 )
+
+                # ===== GRID SUITABILITY FILTER =====
+                if self.grid_suitability_scorer and top_coins:
+                    candles_map = {}
+                    for sym in top_coins:
+                        trend = self.trend_calculator.get_trend(sym)
+                        if trend and hasattr(trend, 'candles') and trend.candles:
+                            candles_map[sym] = trend.candles
+                    top_coins = self.grid_suitability_scorer.filter_coins(
+                        top_coins, candles_map
+                    )
 
                 max_slots = self._get_current_max_slots()
                 self.logger().info(
@@ -3882,9 +4051,8 @@ class MultiCoinGridController(ControllerBase):
             # SMART SELECTION: Check SmartEntry BEFORE finalizing coin selection
             # This prevents selecting coins that will be rejected anyway
             rejection_reason = None
-            candidate_rejections = []  # AI-F1: track per-coin rejection reasons
+            candidate_rejections = []
             if best_coin and not self._check_smart_entry_filter(best_coin):
-                candidate_rejections.append({"symbol": best_coin, "filter": "smart_entry", "passed": False})
                 self.logger().warning(
                     f"⚠️  {best_coin} rejected by SmartEntry - checking fallbacks..."
                 )
@@ -3896,12 +4064,10 @@ class MultiCoinGridController(ControllerBase):
                     for i, (fallback_coin, fallback_trend) in enumerate(top_10[1:], start=2):
                         # 🔧 FIX: Skip if coin already has active grid
                         if fallback_coin in self.active_coins:
-                            candidate_rejections.append({"symbol": fallback_coin, "filter": "active", "passed": False})
                             self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (already active)")
                             continue
 
                         if fallback_coin in excluded_coins or fallback_coin in config_blacklist:
-                            candidate_rejections.append({"symbol": fallback_coin, "filter": "blacklist", "passed": False})
                             self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (blacklist)")
                             continue
 
@@ -3909,7 +4075,6 @@ class MultiCoinGridController(ControllerBase):
                         if self._check_smart_entry_filter(fallback_coin):
                             # Multi-timeframe buy protection check
                             if not self._check_multi_timeframe_buy(fallback_coin):
-                                candidate_rejections.append({"symbol": fallback_coin, "filter": "mtf_protection", "passed": False})
                                 self.logger().warning(f"⏱️  {fallback_coin}: Blocked by multi-timeframe protection")
                                 continue
 
@@ -3923,10 +4088,8 @@ class MultiCoinGridController(ControllerBase):
                                 fallback_found = True
                                 break
                             else:
-                                candidate_rejections.append({"symbol": fallback_coin, "filter": "mtf_conditions", "passed": False})
                                 self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (multi-timeframe)")
                         else:
-                            candidate_rejections.append({"symbol": fallback_coin, "filter": "smart_entry", "passed": False})
                             self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (SmartEntry)")
 
                 if not fallback_found:
@@ -3935,7 +4098,6 @@ class MultiCoinGridController(ControllerBase):
                     rejection_reason = "All top coins rejected by SmartEntry filters"
 
             elif best_coin and not self._check_multi_timeframe_buy(best_coin):
-                candidate_rejections.append({"symbol": best_coin, "filter": "mtf_protection", "passed": False})
                 self.logger().warning(
                     f"⏱️  {best_coin} rejected by multi-timeframe protection - checking fallbacks..."
                 )
@@ -3947,12 +4109,10 @@ class MultiCoinGridController(ControllerBase):
                     for i, (fallback_coin, fallback_trend) in enumerate(top_10[1:], start=2):
                         # 🔧 FIX: Skip if coin already has active grid
                         if fallback_coin in self.active_coins:
-                            candidate_rejections.append({"symbol": fallback_coin, "filter": "active", "passed": False})
                             self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (already active)")
                             continue
 
                         if fallback_coin in excluded_coins or fallback_coin in config_blacklist:
-                            candidate_rejections.append({"symbol": fallback_coin, "filter": "blacklist", "passed": False})
                             self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (blacklist)")
                             continue
 
@@ -3960,7 +4120,6 @@ class MultiCoinGridController(ControllerBase):
                         if self._check_smart_entry_filter(fallback_coin):
                             # Multi-timeframe buy protection check
                             if not self._check_multi_timeframe_buy(fallback_coin):
-                                candidate_rejections.append({"symbol": fallback_coin, "filter": "mtf_protection", "passed": False})
                                 self.logger().warning(f"⏱️  {fallback_coin}: Blocked by multi-timeframe protection")
                                 continue
 
@@ -3974,10 +4133,8 @@ class MultiCoinGridController(ControllerBase):
                                 fallback_found = True
                                 break
                             else:
-                                candidate_rejections.append({"symbol": fallback_coin, "filter": "mtf_conditions", "passed": False})
                                 self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (multi-timeframe)")
                         else:
-                            candidate_rejections.append({"symbol": fallback_coin, "filter": "smart_entry", "passed": False})
                             self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (SmartEntry)")
 
                 if not fallback_found:
@@ -4047,7 +4204,6 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().warning(
                         f"❌ {best_coin} does not meet multi-timeframe buy conditions - will retry next cycle"
                     )
-                    candidate_rejections.append({"symbol": best_coin, "filter": "mtf_conditions", "passed": False, "reason": rejection_reason})
                     best_coin = None
                 else:
                     # Fix #2: MTF passed - emit gate_passed event
@@ -4063,6 +4219,14 @@ class MultiCoinGridController(ControllerBase):
                         mtf_pass_trace.stage = Stage.MTF.value
                         mtf_pass_trace.correlation_id = last_trace.correlation_id
                         self._log_decision_trace(mtf_pass_trace)
+
+            # ST-06a: Structured selection funnel trace
+            self._log_selection_trace(
+                top_coins=top_coins,
+                best_coin=best_coin,
+                candidate_rejections=candidate_rejections,
+                rejection_reason=rejection_reason,
+            )
 
             # Log debug info from trend_calculator
             if hasattr(self.trend_calculator, '_debug_info'):
@@ -4283,21 +4447,34 @@ class MultiCoinGridController(ControllerBase):
             self.logger().info(f"❌ No coin found with trend >= {self.config.trend_min_change_pct}%")
 
             # AI-F1: Log rejected entry (no qualifying coin)
-            # Include per-coin rejection details + best candidate's market data
-            _best_candidate = None
-            if candidate_rejections:
-                _best_candidate = candidate_rejections[0].get("symbol")
-            elif hasattr(self.trend_calculator, '_debug_info'):
-                _top = self.trend_calculator._debug_info.get('best')
-                if _top:
-                    _best_candidate = _top[0]
             self._log_entry_decision(
                 symbol="NONE", accepted=False,
                 rejected_by="no_qualifying_coin",
                 reason_msg=rejection_reason or f"No coin >= {self.config.trend_min_change_pct}%",
-                filter_checks=candidate_rejections or None,
-                best_candidate=_best_candidate,
             )
+
+            # ===== ST-11: IDLE MODE =====
+            idle_cfg = getattr(self.config, 'idle_mode', {}) or {}
+            if idle_cfg.get('enabled', True):
+                self._no_edge_cycles += 1
+                cycles_to_idle = idle_cfg.get('no_edge_cycles_to_idle', 10)
+                log_interval = idle_cfg.get('log_interval_cycles', 5)
+
+                if self._no_edge_cycles >= cycles_to_idle and not self._idle_mode_active:
+                    self._idle_mode_active = True
+                    self.logger().info(
+                        f"💤 IDLE MODE: Activated after {self._no_edge_cycles} cycles "
+                        "with no edge — reducing scan frequency"
+                    )
+
+                if self._idle_mode_active:
+                    self._idle_mode_log_counter += 1
+                    if self._idle_mode_log_counter % log_interval == 0:
+                        self.logger().info(
+                            f"💤 IDLE MODE: {self._no_edge_cycles} cycles without edge "
+                            f"(scanning every "
+                            f"{idle_cfg.get('idle_scan_interval_seconds', 120)}s)"
+                        )
 
             # PHASE 2 FIX: "No better coin" does NOT force close!
             # Risk management (stop loss, P&L targets) controls exits, NOT coin selection
@@ -4312,6 +4489,16 @@ class MultiCoinGridController(ControllerBase):
             # Just pause new entries - don't touch active positions!
             return actions
 
+        # ===== ST-11: EXIT IDLE MODE =====
+        if self._idle_mode_active:
+            self.logger().info(
+                f"🔔 IDLE MODE: Deactivated — edge found ({best_coin}) "
+                f"after {self._no_edge_cycles} idle cycles"
+            )
+        self._idle_mode_active = False
+        self._no_edge_cycles = 0
+        self._idle_mode_log_counter = 0
+
         # Check if risk controls allow new entries
         if risk_block_new_entries:
             self.logger().info("🛑 Risk controls blocking new executor creation this cycle")
@@ -4319,20 +4506,73 @@ class MultiCoinGridController(ControllerBase):
 
         # PHASE 1 FIX #2 & #3: Check drawdown limits
         try:
+            was_paused = self.drawdown_tracker.is_paused
             current_balance = self.connector.get_balance(self.config.quote_asset)
             allowed, reason = self.drawdown_tracker.check_drawdown_limits(current_balance)
             if not allowed:
                 self.logger().critical(f"🛑 DRAWDOWN LIMIT: {reason}")
                 return actions  # No new trades allowed
+            elif was_paused:
+                # Log recovery through controller's logger (always visible in bot logs)
+                pv = self.drawdown_tracker._last_portfolio_value
+                self.logger().info(
+                    f"✅ DRAWDOWN RECOVERED: Trading resumed! "
+                    f"Working capital: {pv:.2f} {self.config.quote_asset}"
+                    if pv else "✅ DRAWDOWN RECOVERED: Trading resumed!"
+                )
         except Exception as e:
             self.logger().critical(f"🛑 FAIL-CLOSED: Drawdown check error, blocking trades: {e}")
             return actions  # T0-Q5: Fail closed — block trading if risk check errors
+
+        # ===== ST-12: ECONOMIC EDGE GATE =====
+        edge_cfg = getattr(self.config, 'economic_edge_gate', {}) or {}
+        if edge_cfg.get('enabled', True):
+            try:
+                fee_cfg = getattr(self.config, 'fee_aware_filter', {}) or {}
+                taker_fee = fee_cfg.get('taker_fee_pct', 0.26)
+                maker_fee = fee_cfg.get('maker_fee_pct', 0.16)
+                fee_model = fee_cfg.get('fee_model', 'worst_case')
+
+                if fee_model == 'best_case':
+                    rt_fee_pct = maker_fee * 2
+                elif fee_model == 'average':
+                    rt_fee_pct = taker_fee + maker_fee
+                else:
+                    rt_fee_pct = taker_fee * 2
+
+                # Expected grid spread per level
+                range_down = float(getattr(self.config, 'grid_range_pct_down', 3))
+                range_up = float(getattr(self.config, 'grid_range_pct_up', 3))
+                total_range = range_down + range_up
+                num_grids = max(1, int(getattr(self.config, 'num_grids', 5)))
+                grid_spread_pct = total_range / num_grids
+
+                # Total costs
+                total_cost = rt_fee_pct
+                if edge_cfg.get('include_spread_cost', True):
+                    total_cost += rt_fee_pct * 0.5  # Spread cost ~50% of fees
+                slippage = edge_cfg.get('include_slippage_buffer_pct', 0.05)
+                total_cost += slippage
+
+                expected_edge = grid_spread_pct - total_cost
+                min_edge = edge_cfg.get('min_edge_pct', 0.10)
+
+                if expected_edge < min_edge:
+                    self.logger().info(
+                        f"🚧 ST-12 EDGE GATE: {best_coin} rejected — "
+                        f"edge {expected_edge:.3f}% < min {min_edge:.3f}% "
+                        f"(spread/level={grid_spread_pct:.3f}%, "
+                        f"costs={total_cost:.3f}%)"
+                    )
+                    return actions
+            except Exception as e:
+                self.logger().error(f"❌ ST-12: Edge gate error (fail-open): {e}")
 
         # Check if we should create/switch grid
         # Note: best_coin is already filtered to exclude coins in cooldown
         if self._should_create_new_grid(best_coin):
             # AI-F1: Log accepted entry decision
-            _entry_decision_id = self._log_entry_decision(
+            self._log_entry_decision(
                 symbol=best_coin, accepted=True,
                 trace=getattr(self, '_last_smart_entry_trace', None),
             )
@@ -4698,6 +4938,22 @@ class MultiCoinGridController(ControllerBase):
                     )
                     adjusted_size = per_coin_capital
 
+                # PARALLEL SLOT GUARD: Cap per-slot allocation to leave room for other slots.
+                # Without this, the first slot can take 48-60% of capital, starving the 2nd slot.
+                # Use total balance (available + reserved) as baseline for fair split.
+                if self.max_simultaneous_coins > 1:
+                    total_balance_for_cap = available_balance + budget_reserved
+                    # 90% of fair share: e.g., 2 coins → 45% each, 3 coins → 30% each
+                    max_per_slot_pct = Decimal("0.90") / Decimal(str(self.max_simultaneous_coins))
+                    max_per_slot = total_balance_for_cap * max_per_slot_pct
+                    if adjusted_size > max_per_slot:
+                        self.logger().info(
+                            f"📊 PARALLEL SLOT CAP: {adjusted_size:.2f} → {max_per_slot:.2f} "
+                            f"(max {float(max_per_slot_pct) * 100:.0f}% of {total_balance_for_cap:.2f} "
+                            f"to leave room for {self.max_simultaneous_coins - 1} other slot(s))"
+                        )
+                        adjusted_size = max_per_slot
+
                 self.logger().info(
                     f"💰 Capital allocation: €{total_capital} / {
                         current_max_slots} coins = €{
@@ -4761,14 +5017,6 @@ class MultiCoinGridController(ControllerBase):
                             grid_levels=self._dynamic_num_grids or self.config.num_grids,
                             timestamp=time.time()
                         )
-                        # AI-F2: Link decision → executor for outcome tracking
-                        if _entry_decision_id and self.outcome_logger:
-                            self.outcome_logger.register_pending(
-                                decision_id=_entry_decision_id,
-                                executor_id=grid_action.executor_config.id,
-                                symbol=best_coin,
-                                exchange=self.config.connector_name,
-                            )
                         self.logger().info(
                             f"📊 Active coins: {list(self.active_coins.keys())} ({len(self.active_coins)}/{self._get_current_max_slots()})")  # noqa: E501
                 else:
@@ -5057,7 +5305,23 @@ class MultiCoinGridController(ControllerBase):
                         return
 
             # Track errors for this coin (for automatic blacklisting)
-            if self.active_coin:
+            # BUT: Skip 0-fill EARLY_STOP — these are controller-initiated stops
+            # (e.g., coin disqualification), NOT actual coin/exchange errors.
+            is_zero_fill_early_stop = False
+            if failed_executor and not failed_executor.is_active:
+                close_type_val = failed_executor.close_type
+                filled_quote = failed_executor.filled_amount_quote or Decimal("0")
+                if isinstance(filled_quote, str):
+                    filled_quote = Decimal(filled_quote)
+                # CloseType.EARLY_STOP = 5
+                is_early_stop = (
+                    str(close_type_val) == "CloseType.EARLY_STOP"
+                    or str(close_type_val) == "5"
+                    or (hasattr(close_type_val, 'value') and close_type_val.value == 5)
+                )
+                is_zero_fill_early_stop = is_early_stop and filled_quote == Decimal("0")
+
+            if self.active_coin and not is_zero_fill_early_stop:
                 if self.active_coin not in self.coin_error_count:
                     self.coin_error_count[self.active_coin] = 0
                 self.coin_error_count[self.active_coin] += 1
@@ -5077,6 +5341,10 @@ class MultiCoinGridController(ControllerBase):
                             if self.active_coin not in self.config.blacklist:
                                 self.config.blacklist.append(self.active_coin)
                                 self.logger().info(f"✅ Added {self.active_coin} to persistent blacklist")
+            elif self.active_coin and is_zero_fill_early_stop:
+                self.logger().debug(
+                    f"📋 {self.active_coin}: 0-fill EARLY_STOP — not counting as coin error"
+                )
 
             # Check if executor failed due to insufficient balance OR stop-loss
             if failed_executor and not failed_executor.is_active:
@@ -5167,19 +5435,35 @@ class MultiCoinGridController(ControllerBase):
         Returns:
             (should_bypass, reason) tuple
         """
-        # Check 1: Executor in error state
+        # Check 1: Executor in error state (always allowed — real error)
         if getattr(self.config, 'grace_bypass_on_executor_error', True):
             if executor_info and not executor_info.is_active:
                 close_type = str(executor_info.close_type) if executor_info.close_type else ""
                 if 'FAILED' in close_type or 'ERROR' in close_type or 'INSUFFICIENT_BALANCE' in close_type:
                     return True, f"executor error: {close_type}"
 
-        # Check 2: Stop-loss hit
+        # Check 2: Stop-loss hit (always allowed — risk event)
         if getattr(self.config, 'grace_bypass_on_sl_hit', True):
             if executor_info and executor_info.custom_info:
                 sl_hit = executor_info.custom_info.get('stop_loss_hit', False)
                 if sl_hit:
                     return True, "stop-loss triggered"
+
+        # === MINIMUM AGE GUARD ===
+        # Checks 3-5 are "soft" bypasses (better opportunity, regime change, etc.)
+        # They must NOT fire on young executors to prevent the EARLY_STOP cascade
+        # where executors are created and killed within seconds.
+        min_bypass_age = getattr(self.config, 'min_bypass_age_seconds', 120)
+        if executor_info and min_bypass_age > 0:
+            current_time = self.market_data_provider.time()
+            executor_age = current_time - executor_info.timestamp
+            if executor_age < min_bypass_age:
+                self.logger().debug(
+                    f"🛡️ YOUNG EXECUTOR PROTECTED: {trading_pair} is only "
+                    f"{executor_age:.0f}s old (min_bypass_age={min_bypass_age}s) — "
+                    f"blocking soft grace bypasses"
+                )
+                return False, ""
 
         # Check 3: Regime flip (BULL→BEAR or vice versa)
         if getattr(self.config, 'grace_bypass_on_regime_flip', True):
@@ -5618,13 +5902,6 @@ class MultiCoinGridController(ControllerBase):
                     realised_pnl = Decimal(str(executor.net_pnl_quote))
                     trading_pair = getattr(getattr(executor, "config", None), "trading_pair", self.active_coin)
 
-                    # AI-F2: Record outcome before any PnL correction
-                    if self.outcome_logger:
-                        try:
-                            self.outcome_logger.record_outcome(executor.id, executor, now)
-                        except Exception:
-                            pass  # Never block trading
-
                     # ==============================================================
                     # PHANTOM_LOSS_FIX: When a grid executor closes as FAILED and
                     # the market-sell fill data was lost (Kraken timeout → amounts=0),
@@ -5720,6 +5997,10 @@ class MultiCoinGridController(ControllerBase):
                             now=now,
                         )
 
+                        # Feed realized PnL to drawdown tracker so phantom drawdown
+                        # detection can distinguish real losses from stale pricing.
+                        self.drawdown_tracker.record_trade_pnl(realised_pnl, trading_pair)
+
                         # ==============================================================================
                         # T1-K1: WIRE KILL SWITCH — Feed realized PnL to pnl_tracker_v2
                         # ==============================================================================
@@ -5743,7 +6024,7 @@ class MultiCoinGridController(ControllerBase):
                                     side="buy",
                                     price=entry_price_val,
                                     size=qty,
-                                    fee=position_size * Decimal("0.0016"),  # ~maker fee
+                                    fee=Decimal("0"),  # realised_pnl already includes fees
                                     ts=int(getattr(executor_config, "timestamp", now)),
                                 )
                                 self.pnl_tracker_v2.on_trade_fill(buy_fill)
@@ -5758,7 +6039,7 @@ class MultiCoinGridController(ControllerBase):
                                     side="sell",
                                     price=exit_price_val,
                                     size=qty,
-                                    fee=position_size * Decimal("0.0026"),  # ~taker fee
+                                    fee=Decimal("0"),  # realised_pnl already includes fees
                                     ts=int(now),
                                 )
                                 self.pnl_tracker_v2.on_trade_fill(sell_fill)
@@ -7815,6 +8096,26 @@ class MultiCoinGridController(ControllerBase):
             import traceback
             self.logger().debug(traceback.format_exc())
 
+    def _unsubscribe_from_orderbook(self, symbol: str) -> None:
+        """Unsubscribe from orderbook updates for a trading pair."""
+        try:
+            if not getattr(self, 'connector', None):
+                return
+            tracker = getattr(self.connector, 'order_book_tracker', None)
+            if tracker is None:
+                return
+            if hasattr(tracker, '_trading_pairs') and symbol in tracker._trading_pairs:
+                tracker._trading_pairs.remove(symbol)
+            if hasattr(tracker, '_data_source') and hasattr(tracker._data_source, '_trading_pairs'):
+                if symbol in tracker._data_source._trading_pairs:
+                    tracker._data_source._trading_pairs.remove(symbol)
+            if hasattr(tracker, '_order_books') and symbol in tracker._order_books:
+                del tracker._order_books[symbol]
+            if hasattr(tracker, '_tracking_message_queues') and symbol in tracker._tracking_message_queues:
+                del tracker._tracking_message_queues[symbol]
+        except Exception as e:
+            self.logger().error(f"[ORDERBOOK] Failed to unsubscribe from {symbol}: {e}")
+
     # Phase 4.2: Volatility-Based Grid Count
     def _calculate_volatility_based_grid_count(self, symbol: str, trend) -> int:
         """
@@ -8430,6 +8731,20 @@ class MultiCoinGridController(ControllerBase):
         connector_name = self.config.connector_name.lower()
         return "bitget" in connector_name
 
+    def _get_cached_grid_score(self, symbol: str):
+        """Get cached grid suitability score for a symbol, or None."""
+        if self.grid_suitability_scorer and hasattr(self.grid_suitability_scorer, 'last_scores'):
+            gs = self.grid_suitability_scorer.last_scores.get(symbol)
+            if gs:
+                return {
+                    "composite": round(gs.score, 4),
+                    "range_eff": round(gs.range_efficiency, 4),
+                    "mean_rev": round(gs.mean_reversion, 4),
+                    "bounce": round(gs.bounce_rate, 4),
+                    "atr_consist": round(gs.atr_consistency, 4),
+                }
+        return None
+
     def _create_grid_action(self, symbol: str, total_amount_quote: Optional[Decimal] = None) -> CreateExecutorAction:
         """
         Create a CreateExecutorAction for GridExecutor
@@ -8485,13 +8800,9 @@ class MultiCoinGridController(ControllerBase):
             if atr_value and atr_value > 0:
                 atr_mult_down = getattr(self.config, 'atr_multiplier_down', 1.0)
                 atr_mult_up = getattr(self.config, 'atr_multiplier_up', 1.5)
-                # Apply regime-adaptive grid spacing multiplier
-                spacing_mult = self._regime_grid_spacing_mult
-                atr_mult_down *= spacing_mult
-                atr_mult_up *= spacing_mult
                 start_price = current_price - (Decimal(str(atr_value)) * Decimal(str(atr_mult_down)))
                 end_price = current_price + (Decimal(str(atr_value)) * Decimal(str(atr_mult_up)))
-                grid_method = f"ATR-based (spacing×{spacing_mult:.1f})"
+                grid_method = "ATR-based"
             else:
                 # Fallback to fixed percentages if ATR not available
                 start_price = current_price * (
@@ -8559,9 +8870,19 @@ class MultiCoinGridController(ControllerBase):
             )
             return None
 
-        # Validate grid range is large enough (minimum 1% spread)
+        # Fee-aware minimum grid spread: ensure each level covers roundtrip fees
+        fee_cfg = getattr(self.config, 'fee_aware_filter', {}) or {}
+        taker_fee_pct = float(fee_cfg.get('taker_fee_pct', 0.26))
+        maker_fee_pct = float(fee_cfg.get('maker_fee_pct', 0.16))
+        min_net_profit_pct = float(fee_cfg.get('min_net_profit_pct', 0.30))
+        roundtrip_fee_pct = taker_fee_pct + maker_fee_pct  # 0.42% for Kraken
+        min_spread_per_level_pct = roundtrip_fee_pct + min_net_profit_pct  # 0.72%
+
+        # Validate grid range is large enough (fee-aware minimum)
         grid_range_pct = float((end_price - start_price) / current_price * 100)
-        min_range_pct = 1.0  # Minimum 1% range
+        # min_range must accommodate num_grids levels, each >= min_spread_per_level
+        fee_based_min_range = num_grids * min_spread_per_level_pct
+        min_range_pct = max(1.0, fee_based_min_range)  # At least 1% or fee-based
         if grid_range_pct < min_range_pct:
             self.logger().warning(
                 f"⚠️  Grid range too small ({grid_range_pct:.2f}% < {min_range_pct}%) - expanding to minimum"
@@ -8662,6 +8983,7 @@ class MultiCoinGridController(ControllerBase):
             f"\n   Current Price: €{current_price:.4f}"
             f"\n   Range: €{start_price:.4f} - €{end_price:.4f} ({grid_method})"
             f"\n   Grid Levels: {num_grids} (volatility-adjusted)"
+            f"\n   Min Spread/Level: {min_spread_per_level_pct:.2f}% (fees {roundtrip_fee_pct:.2f}% + profit {min_net_profit_pct:.2f}%)"
             f"\n   Limit Price: €{limit_price:.4f} (circuit breaker)"
             f"\n   Capital: €{self.config.total_amount_quote}"
             f"\n   Stop Loss: -{dynamic_stop_loss_pct * 100:.2f}%{atr_info}"
@@ -8840,7 +9162,7 @@ class MultiCoinGridController(ControllerBase):
             end_price=end_price,
             limit_price=limit_price,
             total_amount_quote=trade_amount_quote,
-            min_spread_between_orders=Decimal("0.001"),  # 0.1% min spread
+            min_spread_between_orders=Decimal(str(min_spread_per_level_pct / 100)),  # Fee-aware: covers roundtrip fees + profit
             min_order_amount_quote=self.config.min_order_amount_quote,
             triple_barrier_config=dynamic_triple_barrier,  # ✅ USE DYNAMIC CONFIG!
             # Adjust max orders to grid count, ensure >= 1
@@ -8858,6 +9180,9 @@ class MultiCoinGridController(ControllerBase):
             custom_info={
                 "no_fill_timeout_sec": adaptive_timeout_sec,  # D1: Dynamic timeout
                 "no_progress_timeout_sec": self.config.no_progress_timeout_sec,
+                "no_progress_min_loss_pct": self.config.no_progress_min_loss_pct,
+                "no_progress_atr_multiplier": self.config.no_progress_atr_multiplier,
+                "no_progress_max_extension_sec": self.config.no_progress_timeout_sec * 2,
                 "max_hold_time_sec": self.config.max_hold_time_seconds,  # Reuse existing config
                 "close_grace_sec": self.config.close_grace_sec,
                 # Tier 3: Dynamic TP parameters
@@ -8866,6 +9191,10 @@ class MultiCoinGridController(ControllerBase):
                 "dynamic_tp_atr_multiplier": float(self.config.dynamic_tp_atr_multiplier),
                 "dynamic_tp_min_pct": float(self.config.dynamic_tp_min_pct),
                 "dynamic_tp_max_pct": float(self.config.dynamic_tp_max_pct),
+                # Selection scoring — instrument for post-hoc analysis
+                "entry_trend_pct": getattr(trend, 'consensus_trend_pct', None) or getattr(trend, 'trend_pct', None),
+                "entry_trend_score": getattr(trend, 'trend_score', None),
+                "entry_grid_score": self._get_cached_grid_score(symbol),
             }
         )
 
@@ -9212,6 +9541,17 @@ class MultiCoinGridController(ControllerBase):
         if self.last_switch_time > 0:
             time_since = self.market_data_provider.time() - self.last_switch_time
             status.append(f"║ Time Since Switch: {time_since / 60:.1f} minutes                        ║")
+
+        # Market Regime
+        regime = getattr(self, '_last_detected_regime', None)
+        if regime:
+            regime_emoji = {"BULL": "🟢", "CHOP": "🟡", "BEAR": "🔴"}.get(regime, "⚪")
+            selection_mode = ""
+            if hasattr(self, 'regime_coin_selector') and self.regime_coin_selector:
+                selection_mode = f" → {self.regime_coin_selector.get_selection_mode(regime)}"
+            status.append(f"║ {regime_emoji} Market Regime: {regime}{selection_mode:40} ║")
+        else:
+            status.append("║ ⚪ Market Regime: UNKNOWN (warming up)                       ║")
 
         # Monitored coins summary
         if self.trend_calculator:
@@ -9878,35 +10218,18 @@ class MultiCoinGridController(ControllerBase):
                         skipped_fields.append(f"{config_key} (attr not found)")
 
             # Log unmapped filters (might be for DynamicGridSizer)
-            unmapped = [k for k in filters.keys() if k not in filter_mapping]
+            controller_level_keys = {'grid_spacing_mult', 'max_active_grids', 'entry_confidence_min'}
+            unmapped = [k for k in filters.keys() if k not in filter_mapping and k not in controller_level_keys]
             if unmapped:
                 self.logger().debug(f"🔸 Unmapped filters (ignored): {unmapped}")
 
             # Apply non-SmartEntry filters to controller-level attributes
             if 'max_active_grids' in filters:
-                old_val = self._regime_max_active_grids
-                self._regime_max_active_grids = int(filters['max_active_grids'])
-                if old_val != self._regime_max_active_grids:
-                    self.logger().info(
-                        f"   max_active_grids: {old_val}→{self._regime_max_active_grids}"
-                    )
+                self._regime_max_active_grids = filters['max_active_grids']
             if 'grid_spacing_mult' in filters:
-                old_val = self._regime_grid_spacing_mult
-                self._regime_grid_spacing_mult = float(filters['grid_spacing_mult'])
-                if old_val != self._regime_grid_spacing_mult:
-                    self.logger().info(
-                        f"   grid_spacing_mult: {old_val:.1f}→{self._regime_grid_spacing_mult:.1f}"
-                    )
+                self._regime_grid_spacing_mult = filters['grid_spacing_mult']
             if 'entry_confidence_min' in filters:
-                old_val = self._regime_entry_confidence_min
-                self._regime_entry_confidence_min = float(filters['entry_confidence_min'])
-                if old_val != self._regime_entry_confidence_min:
-                    self.logger().info(
-                        f"   entry_confidence_min: {old_val}→{self._regime_entry_confidence_min:.2f}"
-                    )
-                # Apply as min_grid_score to suitability scorer
-                if self.grid_suitability_scorer:
-                    self.grid_suitability_scorer.min_grid_score = self._regime_entry_confidence_min
+                self._regime_entry_confidence_min = filters['entry_confidence_min']
 
             if updated_fields:
                 self.logger().info("✅ Adaptive filters applied to SmartEntry:")

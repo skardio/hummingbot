@@ -208,6 +208,9 @@ class OrderBookTracker:
                     continue
                 message_queue: asyncio.Queue = self._tracking_message_queues[trading_pair]
                 # Check the order book's initial update ID. If it's larger, don't bother.
+                if trading_pair not in self._order_books:
+                    # Pair was unsubscribed but WS data still arriving — skip silently
+                    continue
                 order_book: OrderBook = self._order_books[trading_pair]
 
                 if order_book.snapshot_uid > ob_message.update_id:

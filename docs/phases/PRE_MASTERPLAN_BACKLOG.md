@@ -475,41 +475,43 @@ in 10,4 uur, met coins als ICNT-USD die 29× in/uit flipten.
 
 ---
 
-### ST-11: Low-trade / idle mode
+### ST-11: Low-trade / idle mode ✅ DONE
 
 | | |
 |---|---|
 | **Type** | Story |
 | **Priority** | P1 |
 | **Story points** | 5 |
+| **Status** | ✅ **DONE** (2026-04-12) |
 
 **Als** quant/trader
 **wil ik** dat de bot naar een gecontroleerde idle mode kan gaan
 **zodat** hij niet nutteloos blijft scannen en roteren bij gebrek aan edge.
 
 **Acceptatiecriteria**
-- [ ] Idle mode activeert onder duidelijke, configureerbare voorwaarden
-- [ ] Gedrag in idle mode is configureerbaar (scan-interval, pool freeze, etc.)
-- [ ] Modewissels zijn zichtbaar in logs
+- [x] Idle mode activeert onder duidelijke, configureerbare voorwaarden
+- [x] Gedrag in idle mode is configureerbaar (scan-interval, pool freeze, etc.)
+- [x] Modewissels zijn zichtbaar in logs
 
 ---
 
-### ST-12: Economic edge gate
+### ST-12: Economic edge gate ✅ DONE
 
 | | |
 |---|---|
 | **Type** | Story |
 | **Priority** | P1 |
 | **Story points** | 8 |
+| **Status** | ✅ **DONE** (2026-04-12) |
 
 **Als** quant/trader
 **wil ik** dat trades alleen worden toegestaan als verwachte capture boven kosten ligt
 **zodat** de bot geen economisch zinloze setups neemt.
 
 **Acceptatiecriteria**
-- [ ] Eerste edge/EV-proxy is toegevoegd
-- [ ] Fees, spread en slippage worden meegenomen
-- [ ] Trades kunnen op economische gronden worden afgewezen
+- [x] Eerste edge/EV-proxy is toegevoegd
+- [x] Fees, spread en slippage worden meegenomen
+- [x] Trades kunnen op economische gronden worden afgewezen
 
 ---
 
