@@ -56,6 +56,7 @@ from multi_coin_grid_pro.filters import CandleIndicators, SmartEntryConfig, Smar
 # Story 6 Part 2: Momentum Indicators
 from multi_coin_grid_pro.indicators.momentum_indicators import MomentumIndicatorService
 from multi_coin_grid_pro.logic.coin_selector import CoinSelector
+from multi_coin_grid_pro.logic.fee_aware_filter import FeeAwareFilter, HourlyProfitEstimate  # noqa: F401
 from multi_coin_grid_pro.logic.grid_sizer import DynamicGridSizer as DynamicGridSizerV2
 
 # Hybrid Grid Bot v2.0 - New modular components
@@ -284,6 +285,10 @@ class MultiCoinGridController(ControllerBase):
 
         self._last_logged_regime = None
         self._last_detected_regime = None  # Story 6 Part 2: Cache detected regime for momentum guards
+        self._last_regime_score: float | None = None  # V2-06: Cache score for auto BEAR-light threshold
+        # V2-02: Regime smoothing — require N consecutive detections before switching
+        self._regime_candidate: str | None = None
+        self._regime_candidate_count: int = 0
 
         # ST-11: Idle mode state
         self._idle_mode_active: bool = False
@@ -578,6 +583,9 @@ class MultiCoinGridController(ControllerBase):
                     connector_name=config.connector_name,  # FIX: Pass connector name for bid/ask lookup
                     event_logger=self.event_logger
                 )
+                # RE-01: Store original YAML limits so adaptive baseline can't loosen them
+                from dataclasses import asdict
+                self._yaml_smart_entry_limits = asdict(base_cfg)
                 self.logger().info("🧠 SmartEntry v2.0: ENABLED (with coin profiles)")
 
         # Dynamic Grid Sizer v2.0 (ATR-based)
@@ -934,6 +942,43 @@ class MultiCoinGridController(ControllerBase):
             self.decision_logger.log(snap)
         except Exception as e:
             self.logger().error(f"AI-F1 _log_entry_decision failed (non-fatal): {e}")
+
+    def _v204_shadow_log(self, est) -> None:
+        """
+        V2-04: Write hourly-profit estimate to a persistent daily JSONL file.
+
+        Survives log rotation; use this data to calibrate fills_calibration_factor.
+        File: data/v204_shadow/v204_YYYY-MM-DD.jsonl
+        Each line: {"ts":..., "symbol":..., "atr_pct":..., "spacing_pct":...,
+                    "fills_per_h":..., "net_per_level_pct":...,
+                    "expected_hourly_pct":..., "threshold":..., "passed":...}
+        """
+        try:
+            import json
+            import time
+            from datetime import datetime, timezone
+            from pathlib import Path
+
+            shadow_dir = Path("data/v204_shadow")
+            shadow_dir.mkdir(parents=True, exist_ok=True)
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            path = shadow_dir / f"v204_{today}.jsonl"
+
+            record = {
+                "ts": round(time.time(), 3),
+                "symbol": est.symbol,
+                "atr_pct": round(est.atr_pct, 4),
+                "spacing_pct": round(est.grid_level_spacing_pct, 4),
+                "fills_per_h": round(est.fills_per_hour, 3),
+                "net_per_level_pct": round(est.net_profit_per_level_pct, 4),
+                "expected_hourly_pct": round(est.expected_hourly_profit_pct, 4),
+                "threshold": round(est.min_profit_per_hour_pct, 4),
+                "passed": est.passed,
+            }
+            with path.open("a") as fh:
+                fh.write(json.dumps(record) + "\n")
+        except Exception:
+            pass  # shadow logging never blocks trading
 
     def _log_rotation_decision(
         self,
@@ -2609,35 +2654,85 @@ class MultiCoinGridController(ControllerBase):
                 # Detect regime periodically (once per control cycle)
                 regime_state = await self._detect_current_regime()
                 if regime_state:
-                    # Story 6 Part 2: Cache regime for momentum guards
-                    self._last_detected_regime = regime_state.regime
+                    detected = regime_state.regime
 
-                    regime_changed = regime_state.regime != self._last_logged_regime
+                    # V2-02: Regime smoothing — require N consecutive identical detections
+                    # before accepting a regime switch. Prevents flicker from causing
+                    # unnecessary grid resets or filter swaps.
+                    smoothing_count = 1  # default: immediate switch (backward-compatible)
+                    regime_cfg_raw = getattr(self.config, 'adaptive_regime_detection', None)
+                    if isinstance(regime_cfg_raw, dict):
+                        smoothing_count = regime_cfg_raw.get('regime_smoothing_count', 1)
+
+                    if detected == self._last_detected_regime:
+                        # Same as current confirmed regime — reset candidate
+                        self._regime_candidate = None
+                        self._regime_candidate_count = 0
+                        accepted_regime = detected
+                    elif smoothing_count <= 1:
+                        # Smoothing disabled (count=1) — accept immediately
+                        accepted_regime = detected
+                        self._regime_candidate = None
+                        self._regime_candidate_count = 0
+                    else:
+                        # Different from current: accumulate candidate confirmations
+                        if detected != self._regime_candidate:
+                            self._regime_candidate = detected
+                            self._regime_candidate_count = 1
+                        else:
+                            self._regime_candidate_count += 1
+
+                        if self._regime_candidate_count >= smoothing_count:
+                            # Threshold reached — accept the switch
+                            accepted_regime = detected
+                            self._regime_candidate = None
+                            self._regime_candidate_count = 0
+                        else:
+                            # Still accumulating — stay on current regime
+                            accepted_regime = self._last_detected_regime or detected
+                            self.logger().debug(
+                                f"regime_candidate | {detected} "
+                                f"({self._regime_candidate_count}/{smoothing_count})"
+                            )
+
+                    # Story 6 Part 2: Cache smoothed regime for momentum guards
+                    self._last_detected_regime = accepted_regime
+                    self._last_regime_score = regime_state.score  # V2-06: cache raw score
+
+                    regime_changed = accepted_regime != self._last_logged_regime
                     if regime_changed:
                         self.logger().info(
-                            f"🌡️  REGIME: {regime_state.regime} "
+                            f"🌡️  REGIME: {accepted_regime} "
                             f"(score: {regime_state.score:.1f}, "
                             f"confidence: {regime_state.confidence:.2f}, "
                             f"duration: {regime_state.duration_minutes}m)\n"
                             f"   {regime_state.reason}"
                         )
-                        self._last_logged_regime = regime_state.regime
+                        self._last_logged_regime = accepted_regime
 
-                    # Resolve filters based on regime
+                    # Resolve filters based on smoothed regime
                     if hasattr(self, 'filter_resolver') and self.filter_resolver:
-                        active_filters = self.filter_resolver.resolve_filters(regime_state)
+                        # Pass accepted regime into the filter resolver via a lightweight wrapper
+
+                        class _SmoothedRegimeState:
+                            def __init__(self, inner, regime: str):
+                                self._inner = inner
+                                self.regime = regime
+
+                            def __getattr__(self, name):
+                                return getattr(self._inner, name)
+
+                        smoothed_state = _SmoothedRegimeState(regime_state, accepted_regime)
+                        active_filters = self.filter_resolver.resolve_filters(smoothed_state)
                         if regime_changed:
                             self.logger().info(self.filter_resolver.explain_active_filters())
 
                         # Apply filters if not in logging-only mode
                         logging_only = True
-                        if hasattr(self.config, 'adaptive_regime_detection'):
-                            # FIX: adaptive_regime_detection is a dict, not an object
-                            regime_cfg = self.config.adaptive_regime_detection
-                            if isinstance(regime_cfg, dict):
-                                logging_only = regime_cfg.get('logging_only', True)
-                            else:
-                                logging_only = getattr(regime_cfg, 'logging_only', True)
+                        if isinstance(regime_cfg_raw, dict):
+                            logging_only = regime_cfg_raw.get('logging_only', True)
+                        elif regime_cfg_raw is not None:
+                            logging_only = getattr(regime_cfg_raw, 'logging_only', True)
 
                         if not logging_only:
                             # Phase 2: Apply adaptive filters to SmartEntry
@@ -3810,16 +3905,40 @@ class MultiCoinGridController(ControllerBase):
                     return actions
                 # Continue to monitor active positions but don't create new ones
 
-        # ===== TIER 2: HARD REGIME KILL SWITCH =====
-        # Enforce bear_allow_meanrev: false — block ALL new entries in BEAR regime
+        # ===== TIER 2: BEAR REGIME KILL SWITCH (with V2-06 auto BEAR-light) =====
+        # Default: block all new entries in BEAR. Exception: auto BEAR-light when score
+        # is above `bear_auto_light_threshold` (shallow BEAR) — allows 1 grid with smaller size.
         if self._last_detected_regime == "BEAR" and not (self.active_coin and self.active_executor_id):
             adaptive_filters_cfg = getattr(self.config, 'adaptive_filters', None) or {}
             bear_cfg = adaptive_filters_cfg.get('BEAR', {})
-            if not bear_cfg.get('bear_allow_meanrev', False):
+            bear_allow_meanrev = bear_cfg.get('bear_allow_meanrev', False)
+
+            # V2-06: Check auto BEAR-light threshold
+            regime_detection_cfg = getattr(self.config, 'adaptive_regime_detection', {}) or {}
+            bear_auto_light_enabled = regime_detection_cfg.get('bear_auto_light_enabled', False)
+            bear_auto_light_threshold = float(regime_detection_cfg.get('bear_auto_light_threshold', -5.0))
+            current_score = self._last_regime_score
+
+            in_bear_light = (
+                bear_auto_light_enabled
+                and current_score is not None
+                and current_score > bear_auto_light_threshold
+            )
+
+            if not bear_allow_meanrev and not in_bear_light:
+                score_str = f"{current_score:.1f}" if current_score is not None else "?"
                 self.logger().info(
-                    "🐻 REGIME KILL: BEAR regime detected, bear_allow_meanrev=false → blocking ALL new entries"
+                    f"🐻 REGIME KILL: BEAR regime (score={score_str}, "
+                    f"threshold={bear_auto_light_threshold}), "
+                    "bear_allow_meanrev=false, bear_auto_light off → blocking new entries"
                 )
                 return actions
+
+            if in_bear_light:
+                self.logger().info(
+                    f"🐻✨ BEAR-LIGHT: shallow BEAR score={current_score:.1f} > "
+                    f"threshold={bear_auto_light_threshold} → allowing 1 grid with reduced size"
+                )
 
         # Filter out coins that are in cooldown due to insufficient balance
         coins_in_cooldown = []
@@ -4024,6 +4143,34 @@ class MultiCoinGridController(ControllerBase):
             # (We'll process all coins in the loop below)
             # 🔧 FIX: Use helper to skip coins with active grids
             best_coin = self.pick_first_inactive(top_coins) if top_coins else None
+
+            # ===== V2-06: BEAR-LIGHT DIVERGENCE FILTER =====
+            # In BEAR-light mode, only allow coins that are holding up better than BTC.
+            # Divergence: coin 24h trend > BTC 24h trend (less negative or positive).
+            if (
+                best_coin
+                and self._last_detected_regime == "BEAR"
+                and (getattr(self.config, 'adaptive_regime_detection', {}) or {}).get('bear_auto_light_enabled', False)
+            ):
+                quote = self.config.quote_asset
+                btc_pair = f"BTC-{quote}"
+                btc_trend_obj = self.trend_calculator.trends.get(btc_pair)
+                coin_trend_obj = self.trend_calculator.trends.get(best_coin)
+                if btc_trend_obj is not None and coin_trend_obj is not None:
+                    btc_24h = float(getattr(btc_trend_obj, 'trend_1440m', 0.0) or 0.0)
+                    coin_24h = float(getattr(coin_trend_obj, 'trend_1440m', 0.0) or 0.0)
+                    if coin_24h <= btc_24h:
+                        self.logger().info(
+                            f"🐻✨ BEAR-LIGHT DIVERGENCE FAIL: {best_coin} 24h={coin_24h:.2f}% ≤ "
+                            f"BTC 24h={btc_24h:.2f}% → skipping (no positive divergence)"
+                        )
+                        best_coin = None
+                    else:
+                        self.logger().info(
+                            f"🐻✨ BEAR-LIGHT DIVERGENCE OK: {best_coin} 24h={coin_24h:.2f}% > "
+                            f"BTC 24h={btc_24h:.2f}% → allowed"
+                        )
+                # If BTC data not available, skip divergence check (don't block)
 
             # Double-check: reject if somehow a blacklisted coin was selected (config or runtime)
             if best_coin and (best_coin in config_blacklist or best_coin in self.auto_blacklisted_coins):
@@ -4568,6 +4715,48 @@ class MultiCoinGridController(ControllerBase):
             except Exception as e:
                 self.logger().error(f"❌ ST-12: Edge gate error (fail-open): {e}")
 
+        # ===== V2-04: EXPECTED-FILL HOURLY PROFIT CHECK =====
+        try:
+            fee_cfg_v204 = getattr(self.config, 'fee_aware_filter', {}) or {}
+            if fee_cfg_v204.get('hourly_profit_check_enabled', False) or fee_cfg_v204.get('enabled', True):
+                range_down_v204 = float(getattr(self.config, 'grid_range_pct_down', 3))
+                range_up_v204 = float(getattr(self.config, 'grid_range_pct_up', 3))
+                total_range_v204 = range_down_v204 + range_up_v204
+                num_grids_v204 = max(1, int(getattr(self.config, 'num_grids', 5)))
+
+                # Get ATR for best_coin via candle_calc (same source as SmartEntry)
+                atr_pct_v204 = 0.0
+                if self.trend_calculator:
+                    try:
+                        trend_v204 = self.trend_calculator.get_trend(best_coin)
+                        if trend_v204 and len(trend_v204.candles) >= 14:
+                            highs_v204 = [c.high for c in trend_v204.candles]
+                            lows_v204 = [c.low for c in trend_v204.candles]
+                            closes_v204 = [c.close for c in trend_v204.candles]
+                            atr_pct_v204 = self.candle_calc.calculate_atr_pct(
+                                highs_v204, lows_v204, closes_v204, period=14
+                            ) or 0.0
+                    except Exception:
+                        pass  # use fallback below
+                if atr_pct_v204 <= 0:
+                    atr_pct_v204 = 1.5  # fallback when candle data unavailable
+
+                faf_v204 = FeeAwareFilter(config=fee_cfg_v204)
+                hourly_est = faf_v204.estimate_hourly_profit(
+                    symbol=best_coin,
+                    grid_range_pct=total_range_v204,
+                    num_grids=num_grids_v204,
+                    atr_pct=atr_pct_v204,
+                )
+
+                # Write to persistent daily JSONL (survives log rotation)
+                self._v204_shadow_log(hourly_est)
+
+                if not hourly_est.passed:
+                    return actions
+        except Exception as e:
+            self.logger().error(f"❌ V2-04: Hourly profit check error (fail-open): {e}")
+
         # Check if we should create/switch grid
         # Note: best_coin is already filtered to exclude coins in cooldown
         if self._should_create_new_grid(best_coin):
@@ -4906,6 +5095,21 @@ class MultiCoinGridController(ControllerBase):
                 # Store dynamic grid count for _create_grid_action
                 self._dynamic_num_grids = dynamic_num_grids
 
+                # ===== V2-06: BEAR-LIGHT SIZE MULTIPLIER =====
+                # When in auto BEAR-light mode, reduce position size to limit downside.
+                regime_detection_cfg_v206 = getattr(self.config, 'adaptive_regime_detection', {}) or {}
+                if (
+                    self._last_detected_regime == "BEAR"
+                    and regime_detection_cfg_v206.get('bear_auto_light_enabled', False)
+                ):
+                    bear_size_mult = float(regime_detection_cfg_v206.get('bear_size_multiplier', 0.5))
+                    original_capital = per_coin_capital
+                    per_coin_capital = Decimal(str(float(per_coin_capital) * bear_size_mult))
+                    self.logger().info(
+                        f"🐻✨ BEAR-LIGHT sizing: {float(original_capital):.2f} × {bear_size_mult} "
+                        f"= {float(per_coin_capital):.2f} {self.config.quote_asset}"
+                    )
+
                 # ===== FEATURE 1.2: APPLY TIME-BASED POSITION SIZE ADJUSTMENT =====
                 if self.time_based_filter:
                     time_decision = self.time_based_filter.check_trading_permission()
@@ -4955,9 +5159,9 @@ class MultiCoinGridController(ControllerBase):
                         adjusted_size = max_per_slot
 
                 self.logger().info(
-                    f"💰 Capital allocation: €{total_capital} / {
-                        current_max_slots} coins = €{
-                        per_coin_capital:.2f} per coin")
+                    f"💰 Capital allocation: €{total_capital} / {current_max_slots} coins"
+                    f" = €{per_coin_capital:.2f} per coin"
+                )
 
                 # 🔧 RACE CONDITION GUARD: Final check before creating grid
                 # Even with filtering, coin could become active between selection and creation
@@ -6673,8 +6877,10 @@ class MultiCoinGridController(ControllerBase):
                         f"Dropped: {list(dropped_pairs)[:5]}"
                     )
 
-                    # Update monitored coins (preserving active coins)
-                    self.monitored_coins = list(active_pairs | set(self.active_coins.keys()))
+                    # Update monitored coins (preserving active coins AND existing monitored coins)
+                    # Never shrink: only ADD new pairs, never drop existing ones
+                    # This prevents the DynamicPairManager from reducing a 24-coin pool to 9
+                    self.monitored_coins = list(current_monitored | active_pairs | set(self.active_coins.keys()))
 
             self.logger().info(f"✅ US-007: Scanned {scanned_count} pairs")
 
@@ -10204,6 +10410,22 @@ class MultiCoinGridController(ControllerBase):
             }
 
             # Update base config with resolved filters
+            # RE-01: Clamp adaptive values so they never loosen YAML limits
+            # For "max" thresholds: adaptive can tighten (lower) but not loosen (raise)
+            # For "min" thresholds: adaptive can tighten (raise) but not loosen (lower)
+            yaml_limits = getattr(self, '_yaml_smart_entry_limits', {})
+            max_fields = {  # These are ceilings—adaptive can go LOWER but not HIGHER
+                'rsi_buy_max', 'vwap_max_deviation_pct', 'max_atr_pct_for_grid',
+                'max_5m_spike_pct', 'max_up_accel_pct', 'max_trend_24h_pct',
+                'max_trend_4h_pct',
+            }
+            min_fields = {  # These are floors—adaptive can go HIGHER but not LOWER
+                'rsi_extreme_low', 'min_atr_pct_for_grid', 'min_wick_ratio',
+            }
+            # max_down_accel_pct is a negative ceiling (e.g. -6.0): adaptive can go more
+            # negative (stricter) but not less negative (looser)
+            neg_ceiling_fields = {'max_down_accel_pct'}
+
             updated_fields = []
             skipped_fields = []
 
@@ -10212,6 +10434,15 @@ class MultiCoinGridController(ControllerBase):
                     value = filters[filter_key]
                     if hasattr(self.smart_entry_v2.base_cfg, config_key):
                         old_value = getattr(self.smart_entry_v2.base_cfg, config_key)
+                        # Clamp against YAML limits
+                        if config_key in yaml_limits:
+                            yaml_val = yaml_limits[config_key]
+                            if config_key in max_fields:
+                                value = min(value, yaml_val)
+                            elif config_key in min_fields:
+                                value = max(value, yaml_val)
+                            elif config_key in neg_ceiling_fields:
+                                value = min(value, yaml_val)  # more negative = stricter
                         setattr(self.smart_entry_v2.base_cfg, config_key, value)
                         updated_fields.append(f"{config_key}: {old_value:.1f}→{value:.1f}" if isinstance(value, (int, float)) else f"{config_key}={value}")
                     else:

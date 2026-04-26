@@ -1,6 +1,7 @@
 # Pre-Masterplan v2 — Optimalisatie Backlog
 
 > **Datum:** 2026-04-07
+> **Bijgewerkt:** 2026-04-25
 > **Aanleiding:** Implementatie van 5 features (regime-first selectie, fee-aware filter, enhanced cooldowns, dual selection models, regime-based timeouts) is **live**. Dit document bevat de volgende ronde verbeteringen, geprioriteerd van hoog naar laag impact.
 > **Status:** Architectuur correct, nu optimalisatie en intelligentie toevoegen.
 
@@ -11,11 +12,11 @@
 | # | Verbetering | Prioriteit | Complexiteit | Wanneer |
 |---|-------------|-----------|-------------|---------|
 | V2-01 | ~~Dynamic fee model~~ | ✅ **DONE** | — | Fase A: `fee_model: worst_case \| average \| best_case` |
-| V2-02 | Regime smoothing (anti-nervositeit) | P2 | Low | Na observatie switch-frequentie |
+| V2-02 | ~~Regime smoothing (anti-nervositeit)~~ | ✅ **DONE** | — | `regime_smoothing_count: 3` — vereist 3 opeenvolgende detections |
 | V2-03 | ~~CHOP ranking niet hard genoeg~~ | ✅ **DONE** | — | Opgelost: `chop_max_trend_pct` filter |
-| V2-04 | Expected-fill profitability model | P2 | High | Na 100+ trades data |
+| V2-04 | ~~Expected-fill profitability model~~ | ✅ **DONE** | — | Shadow mode actief — `hourly_profit_check_enabled: false` |
 | V2-05 | Pattern-aware cooldowns | P2 | Medium | Na 100+ trades data |
-| V2-06 | BEAR-light mode | P3 | Low | Configureerbaar (al beschikbaar) |
+| V2-06 | ~~BEAR-light mode~~ | ✅ **DONE** | — | Auto BEAR-light actief (`bear_auto_light_enabled: true`) |
 | V2-07 | Per-coin adaptive timeouts | P3 | Medium | Na ATR-data per coin beschikbaar |
 
 ---
@@ -42,7 +43,9 @@
 
 ---
 
-## V2-02: Regime Detector Anti-Nervositeit
+## V2-02: Regime Detector Anti-Nervositeit ✅ DONE
+
+**Geïmplementeerd:** 2026-04-25
 
 **Probleem:** Als regime detector te vaak switcht:
 - Bot gaat van momentum → chop → niets → momentum
@@ -51,18 +54,18 @@
 
 **Huidige mitigatie:** Hysteresis al ingebouwd (bull ≥5.0, bear <-3.0, min duration 30m).
 
-**Extra verbetering:**
-1. **Smoothing:** Require 2-3 consecutive regime detections before switching
-2. **Regime confidence decay:** Niet instant switchen, maar geleidelijk confidence verlagen
-3. **Monitoring eerst:** Log regime switches + frequentie → data-driven beslissing of smoothing nodig is
+**Geïmplementeerde oplossing:**
+1. **Smoothing:** Require N consecutive regime detections before switching (`regime_smoothing_count: 3`)
+2. Backward-compatible: `regime_smoothing_count: 1` = oud gedrag (direct switchen)
+3. Candidate-state tracking: `_regime_candidate` + `_regime_candidate_count`
 
 **Acceptance criteria:**
-- [ ] Log regime switch frequentie (switches/uur)
-- [ ] Optionele `regime_smoothing_count: 3` config (require N consistent detections)
+- [x] Log regime switch frequentie (switches/uur)
+- [x] Optionele `regime_smoothing_count: 3` config (require N consistent detections)
 - [ ] Dashboard metric: regime stability score
 
-**Prioriteit:** P2 — huidige hysteresis kan voldoende zijn
-**Afhankelijkheid:** Productie-data over switch-frequentie nodig
+**Tests:** 13 unit tests — alle pass
+**Bestanden:** beide controller-bestanden + USD/EUR YAML configs
 
 ---
 
@@ -78,26 +81,95 @@
 
 ---
 
-## V2-04: Expected-Fill Profitability Model
+## V2-04: Expected-Fill Profitability Model ✅ DONE
+
+**Geïmplementeerd:** 2026-04-25
 
 **Probleem:** Fee check kijkt alleen naar entry spread vs fees, niet naar verwachte fills.
 - Trade kan theoretisch goed zijn maar praktisch weinig opleveren
 - Hoeveel levels worden geraakt hangt af van ATR / volatiliteit
 - Partial fills verlagen effective profit
 
-**Oplossing:**
-1. **Expected fills per uur** gebaseerd op ATR en grid spacing
-2. **Expected profit = fills × (spread - fees) × capital per level**
-3. **Minimum profit/hour threshold** als extra filter
+**Geïmplementeerde oplossing:**
+1. `estimate_hourly_profit()` in `FeeAwareFilter` (ATR fill-rate model):
+   - `fills_per_hour = (atr_pct / grid_level_spacing_pct) × fills_calibration_factor`
+   - `expected_hourly_profit_pct = fills_per_hour × (spacing - round_trip_fee)`
+2. Controller integreert V2-04 check ná ST-12 Edge Gate (fail-open bij errors)
+3. **Shadow mode standaard** — logt `📈 V2-04: ...` bij elke entry, blokkeert nog niet
 
 **Acceptance criteria:**
-- [ ] `estimate_hourly_profit()` methode in FeeAwareFilter
-- [ ] Uses ATR + grid spacing om fill rate te schatten
-- [ ] Configureerbaar: `min_profit_per_hour_pct: 0.05` (0.05%/uur)
-- [ ] Backtested tegen historische grid data
+- [x] `estimate_hourly_profit()` methode in FeeAwareFilter
+- [x] Uses ATR + grid spacing om fill rate te schatten
+- [x] Configureerbaar: `min_profit_per_hour_pct: 0.05` (0.05%/uur)
+- [ ] Backtested en `fills_calibration_factor` gekalibreerd op live data (shadow logs)
 
-**Prioriteit:** P2 — vereist voldoende trade data voor kalibratie
-**Afhankelijkheid:** Minimaal 100 trades voor betrouwbare fill-rate schatting
+**Config (alle 3 YAMLs):**
+```yaml
+fee_aware_filter:
+  hourly_profit_check_enabled: false  # false = shadow mode, true = blokkeert
+  min_profit_per_hour_pct: 0.05
+  fills_calibration_factor: 1.0       # tune via shadow logs
+```
+
+**Tests:** 12 nieuwe unit tests (27 totaal in test_fee_aware_filter.py) — alle pass
+**Bestanden:** `multi_coin_grid_pro/logic/fee_aware_filter.py` + beide controllers + alle 3 YAML configs
+
+**Shadow data locatie:** `data/v204_shadow/v204_YYYY-MM-DD.jsonl` (dagelijks, geen rotatie)
+
+### 🔜 Nog te doen: kalibratie + activeren
+
+**Stap 1 — Na ≥1 week shadow data: analyseer de schattingen**
+```bash
+cat data/v204_shadow/v204_*.jsonl | python3 -c "
+import sys, json, statistics
+rows = [json.loads(l) for l in sys.stdin]
+ratios = [r['expected_hourly_pct'] for r in rows]
+actuals = [r['fills_per_h'] for r in rows]
+print(f'Samples: {len(rows)}')
+print(f'Median expected/h: {statistics.median(ratios):.3f}%')
+print(f'P10 expected/h: {sorted(ratios)[len(ratios)//10]:.3f}%')
+print(f'Median fills/h (model): {statistics.median(actuals):.2f}')
+"
+```
+
+**Stap 2 — Vergelijk met werkelijke fills uit de SQLite:**
+```bash
+python3 -c "
+import sqlite3, json
+db = sqlite3.connect('data/multi_coin_grid_v2_usd.sqlite')
+rows = db.execute('''
+    SELECT timestamp, close_timestamp, custom_info
+    FROM Executors WHERE is_active=0 AND filled_amount_quote > 0
+''').fetchall()
+fills_per_h = []
+for ts, cts, ci in rows:
+    orders = json.loads(ci).get('filled_orders', [])
+    h = (cts - ts) / 3600
+    if h > 0:
+        fills_per_h.append(len(orders) / h)
+import statistics
+print(f'Werkelijke fills/h: median={statistics.median(fills_per_h):.2f}, '
+      f'p10={sorted(fills_per_h)[len(fills_per_h)//10]:.2f}')
+db.close()
+"
+```
+
+**Stap 3 — Bereken `fills_calibration_factor`:**
+```
+calibration_factor = werkelijke_fills_per_h / model_fills_per_h
+```
+Pas aan in alle 3 YAMLs:
+```yaml
+fee_aware_filter:
+  fills_calibration_factor: <berekende waarde>  # was 1.0
+```
+
+**Stap 4 — Activeer de filter:**
+```yaml
+fee_aware_filter:
+  hourly_profit_check_enabled: true   # was false (shadow mode)
+  min_profit_per_hour_pct: 0.05       # begin conservatief, verhoog na validatie
+```
 
 ---
 
@@ -126,28 +198,27 @@ Voorbeelden:
 
 ---
 
-## V2-06: BEAR-Light Mode
+## V2-06: BEAR-Light Mode ✅ DONE
+
+**Geïmplementeerd:** 2026-04-25
 
 **Probleem:** BEAR = volledig uit is veilig maar kan kansen missen:
 - Lokale pumps in bear market
 - Mean-reversion kansen op oversold coins
 
-**Huidige status:** Al configureerbaar!
-- `bear_allow_trading: true` + `bear_max_grids: 1` = BEAR-light mode
-- Selecteert dan via grid-suitability ranking met max 1 grid
-
-**Verbetering:**
-1. **Auto BEAR-light:** Automatisch 1 grid toestaan als bear_score > -5.0 (shallow bear)
-2. **BEAR coin filter:** Alleen coins met positieve divergence (prijs daalt minder dan BTC)
-3. **Smaller position:** Automatisch 50% position size in BEAR
+**Geïmplementeerde oplossing:**
+1. **Auto BEAR-light:** Automatisch 1 grid toestaan als `bear_score > bear_auto_light_threshold (-5.0)` (shallow bear)
+2. **BEAR coin filter:** Alleen coins met positieve divergence (coin 24h-trend > BTC 24h-trend)
+3. **Smaller position:** Automatisch 50% position size in BEAR (`bear_size_multiplier: 0.5`)
+4. **Actief:** `bear_auto_light_enabled: true` in alle drie configs (Kraken USD, Kraken EUR, Bitget)
 
 **Acceptance criteria:**
-- [ ] `bear_auto_light_threshold: -5.0` config
-- [ ] Position sizing: `bear_size_multiplier: 0.5`
-- [ ] Divergence filter: coin 24h > BTC 24h
+- [x] `bear_auto_light_threshold: -5.0` config
+- [x] Position sizing: `bear_size_multiplier: 0.5`
+- [x] Divergence filter: coin 24h > BTC 24h
 
-**Prioriteit:** P3 — huidige "sit out" is veilig genoeg voor €300 fase
-**Afhankelijkheid:** Geen
+**Tests:** 18 unit tests — alle pass
+**Bestanden:** beide controller-bestanden + USD/EUR/Bitget YAML configs
 
 ---
 
@@ -179,10 +250,11 @@ Voorbeelden:
 
 ```
 Nu:        V2-03 ✅ DONE (CHOP ranking fix)
-Week 1:    V2-01 (dynamic fee model — fase A: config worst/avg/best)
-Week 1-2:  V2-02 (regime smoothing — eerst monitoring, dan smoothing)
+Week 1:    V2-01 ✅ DONE (dynamic fee model — fase A: config worst/avg/best)
+Week 1-2:  V2-02 ✅ DONE (regime smoothing — 3 consecutive detections)
+Week 2:    V2-06 ✅ DONE (BEAR-light mode — auto actief, score > -5.0)
 Week 3+:   V2-04 + V2-05 (na 100+ trades data beschikbaar)
-Later:     V2-06 + V2-07 (finetuning, lage prioriteit)
+Later:     V2-07 (finetuning, lage prioriteit)
 ```
 
 > **Principe:** Eerst data verzamelen met huidige v1 implementatie, dan data-driven optimaliseren.

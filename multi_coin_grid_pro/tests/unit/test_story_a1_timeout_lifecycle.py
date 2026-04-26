@@ -172,7 +172,13 @@ class TestStoryA1TimeoutLifecycle(unittest.TestCase):
         self.assertFalse(self.executor._timeout_close_triggered)
 
     def test_no_fill_timeout_with_inventory_triggers_forced_close(self):
-        """Test: No fills after 20 min BUT has inventory → start forced close (not shutdown)"""
+        """Test: No fills after 20 min BUT has inventory → suppress NO_FILL, patch fill timestamp.
+
+        When the executor has inventory (position_size_base > 0) but _last_fill_timestamp
+        is None, the fill event was missed (Kraken connector race).  Instead of triggering
+        NO_FILL_TIMEOUT (which led to phantom PnL from selling coins bought by a prior
+        session), we patch _last_fill_timestamp so NO_PROGRESS checks take over.
+        """
         # Setup: No last_fill_timestamp (e.g., from inflight orders) but has inventory
         self.executor._last_fill_timestamp = None
         self.executor._last_progress_timestamp = None
@@ -184,13 +190,14 @@ class TestStoryA1TimeoutLifecycle(unittest.TestCase):
         # Trigger timeout check
         result = self.executor._check_timeout_triggers()
 
-        # Verify: Timeout triggered, but forced close (not shutdown) due to inventory
-        self.assertTrue(result, "No-fill timeout should trigger")
-        self.assertTrue(self.executor._timeout_close_triggered)
-        self.assertEqual(self.executor._timeout_close_type, CloseType.NO_FILL_TIMEOUT)
-        self.assertEqual(self.executor.close_type, CloseType.NO_FILL_TIMEOUT)
-        # Should call start_forced_close, which sets status to CLOSING (not SHUTTING_DOWN)
-        self.assertEqual(self.executor._status, RunnableStatus.CLOSING)
+        # Verify: NO_FILL_TIMEOUT SUPPRESSED, _last_fill_timestamp patched
+        self.assertFalse(result, "Should suppress NO_FILL_TIMEOUT when inventory > 0")
+        self.assertFalse(self.executor._timeout_close_triggered)
+        self.assertIsNotNone(self.executor._last_fill_timestamp,
+                             "_last_fill_timestamp should be patched to creation time")
+        self.assertEqual(self.executor._last_fill_timestamp, self.executor.config.timestamp)
+        # close_type should NOT be set
+        self.assertIsNone(self.executor.close_type)
 
     def test_no_progress_timeout_triggers_graceful_close(self):
         """Test: No progress after 1 hour → start graceful unwind"""

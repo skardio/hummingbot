@@ -755,6 +755,21 @@ class GridExecutor(ExecutorBase):
 
         # Check 1: No-fill timeout (no fills at all)
         if no_fill_timeout > 0 and self._last_fill_timestamp is None and age_sec >= no_fill_timeout:
+            # 🔧 FIX: Refresh position metrics first — if grid levels show fills,
+            # the fill event was missed (Kraken connector race).  Patch _last_fill_timestamp
+            # so the executor survives as NO_PROGRESS instead of false NO_FILL.
+            self.update_position_metrics()
+            if self.position_size_base >= self.trading_rules.min_order_size:
+                self.logger().warning(
+                    f"⚠️  NO_FILL suppressed: {self.config.trading_pair} | "
+                    f"_last_fill_timestamp is None but position_size_base="
+                    f"{float(self.position_size_base):.6f} (fill event missed). "
+                    f"Patching _last_fill_timestamp to creation time."
+                )
+                # Patch so NO_PROGRESS checks (Check 2) take over from here
+                self._last_fill_timestamp = self.config.timestamp
+                return False  # Re-evaluate on next tick under NO_PROGRESS rules
+
             self.logger().warning(
                 f"⏰ NO_FILL_TIMEOUT triggered: {self.config.trading_pair} | "
                 f"age={age_sec / 60:.1f}m >= {no_fill_timeout / 60:.1f}m | No fills received"
@@ -765,24 +780,12 @@ class GridExecutor(ExecutorBase):
             # US-006: Set early stop reason
             self._early_stop_reason = EarlyStopReason.NO_FILL_TIMEOUT
 
-            # 🔧 CRITICAL FIX: Check if there's inventory before skipping unwind
-            # Even with no last_fill_timestamp, partial fills might exist (e.g., from inflight orders)
-            self.update_position_metrics()
-
-            if self.position_size_base >= self.trading_rules.min_order_size:
-                # Have inventory - must close position with two-phase unwind
-                self.logger().warning(
-                    f"⚠️  NO_FILL_TIMEOUT but have inventory: {float(self.position_size_base):.6f} "
-                    f"{self.config.trading_pair.split('-')[0]} - starting forced close to prevent stuck position"
-                )
-                self.start_forced_close(CloseType.NO_FILL_TIMEOUT)
-            else:
-                # No inventory - safe to shutdown directly
-                self.logger().info(
-                    "✅ NO_FILL_TIMEOUT with no inventory - safe shutdown"
-                )
-                self.cancel_open_orders()
-                self._status = RunnableStatus.SHUTTING_DOWN
+            # No inventory - safe to shutdown directly
+            self.logger().info(
+                "✅ NO_FILL_TIMEOUT with no inventory - safe shutdown"
+            )
+            self.cancel_open_orders()
+            self._status = RunnableStatus.SHUTTING_DOWN
             return True
 
         # Check 2: No-progress timeout (PRO VERSION: PnL + ATR aware)
@@ -1829,8 +1832,10 @@ class GridExecutor(ExecutorBase):
             # Update metrics to get current position size and price
             self.update_position_metrics()
 
-            # 🔧 FIX: Double-check position with actual exchange balance
-            # Prevents partial sells when tracked position is outdated
+            # 🔧 FIX: Log exchange balance for diagnostics but do NOT override
+            # position_size_base.  The executor must only sell what it TRACKED
+            # buying via its own grid levels.  Overriding from exchange balance
+            # caused phantom PnL (selling coins bought by a prior session).
             try:
                 connector = self.connectors[self.config.connector_name]
                 trading_pair_parts = self.config.trading_pair.split("-")
@@ -1838,15 +1843,13 @@ class GridExecutor(ExecutorBase):
                     base_asset = trading_pair_parts[0]
                     actual_balance = connector.get_available_balance(base_asset)
 
-                    # If actual balance > tracked position, use actual balance
                     if actual_balance > self.position_size_base:
                         self.logger().warning(
-                            f"⚠️  Position mismatch detected! "
+                            f"⚠️  Position mismatch (INFO ONLY): "
                             f"Tracked: {self.position_size_base} {base_asset}, "
                             f"Actual: {actual_balance} {base_asset}. "
-                            f"Using ACTUAL balance for close order."
+                            f"NOT overriding — executor sells only what it bought."
                         )
-                        self.position_size_base = actual_balance
             except Exception as e:
                 self.logger().warning(f"⚠️  Could not verify position with exchange balance: {e}")
 

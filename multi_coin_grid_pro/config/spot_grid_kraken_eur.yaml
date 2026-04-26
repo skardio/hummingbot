@@ -79,6 +79,16 @@ adaptive_regime_detection:
   enabled: true                    # Enable regime detection
   logging_only: false              # 🔧 ACTIVE: Apply filters (pause in bear!)
 
+  # V2-02: Require N consecutive identical detections before accepting a regime switch.
+  # Prevents flicker. Higher = more stable, slower reaction. 1 = immediate (old behavior).
+  regime_smoothing_count: 3
+
+  # V2-06: Auto BEAR-light — allow 1 grid in shallow BEAR when score > threshold.
+  # Safe default: disabled. Enable only after reviewing live BEAR regime behavior.
+  bear_auto_light_enabled: true       # V2-06: BEAR-light active
+  bear_auto_light_threshold: -5.0    # Score above this = shallow BEAR → allow 1 grid
+  bear_size_multiplier: 0.5          # Position size fraction in BEAR-light (0.5 = 50%)
+
   # Regime classification thresholds
   bull_score_min: 5.0              # Score >= 5 → BULL
   chop_score_min: -3.0             # Score in [-3, 5] → CHOP
@@ -379,7 +389,7 @@ orderbook_prefetch:
 use_smart_entry_filter: true       # BELANGRIJK: AAN
 
 smart_entry_filter:
-  rsi_buy_max: 72.0                # T3-F3: 68→72 (42% rejects waren RSI overbought)
+  rsi_buy_max: 60.0                # 🔧 RE-01 2026-04: 72→60 (RSI >60 trades 3.4× worse PnL)
   rsi_extreme_low: 18.0            # 🚀 25→18 (catch deeper oversold)
   rsi_block_min: 85.0              # 🚀 80→85 (higher ceiling)
 
@@ -389,7 +399,7 @@ smart_entry_filter:
 
   # Volatiliteit / ATR – geschikt voor grids
   max_atr_pct_for_grid: 7.0        # 🚀 6→7 (allow more volatile coins)
-  min_atr_pct_for_grid: 0.15       # 🔧 HF-01 2026-04-04: 1.5→0.15 (sync met baseline, 1.5% was 5-15x te hoog)
+  min_atr_pct_for_grid: 0.30       # 🔧 RE-01 2026-04: 0.15→0.30 (low-ATR coins don't reach TP, focus on volatile)
 
   # Short-term spikes
   max_5m_spike_pct: 4.0            # 🚀 3.0→4.0 (bigger moves OK)
@@ -397,6 +407,7 @@ smart_entry_filter:
   max_up_accel_pct: 5.0            # T3-F3: 4→5 (12% rejects waren blow-off accel)
 
   # 24h trend bounds (geen extreme parabolische coins)
+  max_trend_4h_pct: 2.5            # 🔧 RE-01 2026-04: NEW (4h trend >1.2% = 4× worse PnL, cap at 2.5%)
   max_trend_24h_pct: 15.0          # 🔧 TUNED 2026-04-03: 35→15 (stop trend-chasing: coins +25% in 24h zijn geen grid-candidates)
   min_trend_24h_pct: -10.0         # -8 → -10: allow normale correcties
 
@@ -879,6 +890,10 @@ fee_aware_filter:
   maker_fee_pct: 0.16            # Kraken maker fee
   fee_model: average             # worst_case (2×taker) | average (taker+maker) | best_case (2×maker)
   min_net_profit_pct: 0.3        # Min expected profit after fees
+  # V2-04: Expected-Fill Hourly Profit Model
+  hourly_profit_check_enabled: false  # false = shadow mode (logs only), true = blocks entry
+  min_profit_per_hour_pct: 0.05       # Min expected profit per hour as % of capital per level
+  fills_calibration_factor: 1.0       # Tunable: fills/h = (atr/spacing) × factor
 
 # ==============================================================================
 # ST-11: IDLE MODE

@@ -33,6 +33,20 @@ class FeeCheckResult:
     reason: str
 
 
+@dataclass
+class HourlyProfitEstimate:
+    """V2-04: Expected hourly profit estimate based on ATR fill-rate model."""
+    symbol: str
+    atr_pct: float                   # ATR as % of price (input)
+    grid_level_spacing_pct: float    # Spread per grid level
+    fills_per_hour: float            # Estimated fills per hour
+    net_profit_per_level_pct: float  # Profit per filled level after fees
+    expected_hourly_profit_pct: float  # fills/h × net_per_level
+    min_profit_per_hour_pct: float   # Configured minimum
+    passed: bool
+    reason: str
+
+
 class FeeAwareFilter:
     """
     Checks if a grid trade is worth it after fees.
@@ -64,6 +78,10 @@ class FeeAwareFilter:
         self.use_maker_fees = self.config.get('use_maker_fees', False)
         self.fee_model = self.config.get('fee_model', 'worst_case')
         self.min_net_profit_pct = self.config.get('min_net_profit_pct', 0.3)
+        # V2-04: Expected-fill profitability model
+        self.hourly_profit_check_enabled = self.config.get('hourly_profit_check_enabled', False)
+        self.min_profit_per_hour_pct = self.config.get('min_profit_per_hour_pct', 0.05)
+        self.fills_calibration_factor = self.config.get('fills_calibration_factor', 1.0)
 
     @property
     def round_trip_fee_pct(self) -> float:
@@ -201,3 +219,96 @@ class FeeAwareFilter:
             "estimated_net_profit": round(net, 2),
             "profitable": net > 0,
         }
+
+    def estimate_hourly_profit(
+        self,
+        symbol: str,
+        grid_range_pct: float,
+        num_grids: int,
+        atr_pct: float,
+        min_profit_per_hour_pct: Optional[float] = None,
+    ) -> HourlyProfitEstimate:
+        """
+        V2-04: Estimate expected hourly profit based on ATR fill-rate model.
+
+        Model: fills_per_hour ≈ (atr_pct / grid_level_spacing_pct) × calibration_factor
+
+        Rationale: Price moves roughly 'atr_pct' in typical conditions. Each grid
+        level is 'grid_level_spacing_pct' wide. A price that sweeps one ATR will
+        cross atr/spacing levels. The calibration_factor accounts for the fact that
+        ATR moves are not perfectly uniform (empirically ~1.0 from live data).
+
+        Args:
+            symbol: Trading pair
+            grid_range_pct: Total grid range in % (e.g., 3.0 for a 3% range)
+            num_grids: Number of grid levels
+            atr_pct: ATR as % of price (e.g., 1.5 for 1.5% ATR)
+            min_profit_per_hour_pct: Override threshold (uses config value if None)
+
+        Returns:
+            HourlyProfitEstimate with pass/fail decision and reasoning
+        """
+        threshold = min_profit_per_hour_pct if min_profit_per_hour_pct is not None else self.min_profit_per_hour_pct
+
+        # Grid level spacing (price distance between adjacent orders)
+        if num_grids > 1:
+            grid_level_spacing_pct = grid_range_pct / (num_grids - 1)
+        else:
+            grid_level_spacing_pct = grid_range_pct
+
+        # Guard: avoid division by zero
+        if grid_level_spacing_pct <= 0 or atr_pct <= 0:
+            return HourlyProfitEstimate(
+                symbol=symbol,
+                atr_pct=atr_pct,
+                grid_level_spacing_pct=grid_level_spacing_pct,
+                fills_per_hour=0.0,
+                net_profit_per_level_pct=0.0,
+                expected_hourly_profit_pct=0.0,
+                min_profit_per_hour_pct=threshold,
+                passed=not self.hourly_profit_check_enabled,
+                reason="Skipped: zero grid spacing or ATR",
+            )
+
+        # Estimated fills per hour: one ATR sweep crosses atr/spacing levels
+        fills_per_hour = (atr_pct / grid_level_spacing_pct) * self.fills_calibration_factor
+
+        # Net profit per filled level (after fees)
+        net_profit_per_level_pct = max(0.0, grid_level_spacing_pct - self.round_trip_fee_pct)
+
+        # Expected hourly profit as % of capital per level
+        expected_hourly_profit_pct = fills_per_hour * net_profit_per_level_pct
+
+        if not self.hourly_profit_check_enabled:
+            passed = True
+            reason = (
+                f"V2-04 disabled (shadow): {symbol} est {expected_hourly_profit_pct:.3f}%/h "
+                f"(fills/h={fills_per_hour:.1f}, net/level={net_profit_per_level_pct:.3f}%)"
+            )
+        elif expected_hourly_profit_pct >= threshold:
+            passed = True
+            reason = (
+                f"✅ V2-04 hourly profit OK: {expected_hourly_profit_pct:.3f}%/h "
+                f">= {threshold:.3f}%/h (fills/h={fills_per_hour:.1f}, "
+                f"spacing={grid_level_spacing_pct:.3f}%, ATR={atr_pct:.2f}%)"
+            )
+        else:
+            passed = False
+            reason = (
+                f"❌ V2-04 hourly profit too low: {expected_hourly_profit_pct:.3f}%/h "
+                f"< {threshold:.3f}%/h (fills/h={fills_per_hour:.1f}, "
+                f"spacing={grid_level_spacing_pct:.3f}%, ATR={atr_pct:.2f}%, "
+                f"net/level={net_profit_per_level_pct:.3f}%)"
+            )
+
+        return HourlyProfitEstimate(
+            symbol=symbol,
+            atr_pct=atr_pct,
+            grid_level_spacing_pct=grid_level_spacing_pct,
+            fills_per_hour=fills_per_hour,
+            net_profit_per_level_pct=net_profit_per_level_pct,
+            expected_hourly_profit_pct=expected_hourly_profit_pct,
+            min_profit_per_hour_pct=threshold,
+            passed=passed,
+            reason=reason,
+        )

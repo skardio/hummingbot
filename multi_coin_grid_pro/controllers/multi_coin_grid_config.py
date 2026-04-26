@@ -1725,7 +1725,7 @@ class MultiCoinGridConfig(ControllerConfigBase):
             'vwap_max_deviation_pct', 'min_wick_ratio',
             'max_atr_pct_for_grid', 'min_atr_pct_for_grid',
             'max_5m_spike_pct', 'max_down_accel_pct', 'max_up_accel_pct',
-            'max_trend_24h_pct', 'min_trend_24h_pct',
+            'max_trend_24h_pct', 'min_trend_24h_pct', 'max_trend_4h_pct',
             # Phase 2: Slippage Protection
             'slippage_check_enabled', 'max_entry_spread_pct',
             # Phase 2: Order Book Depth

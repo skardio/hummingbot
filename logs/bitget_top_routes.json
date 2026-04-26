@@ -1,0 +1,512 @@
+[
+  {
+    "triangle": [
+      "USDC/USDT",
+      "ETH/USDC",
+      "ETH/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "ETH/USDC",
+    "pair3": "ETH/USDT",
+    "min_volume_usdt": 18904608.7522,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 18904608.7522,
+    "vol3_usdt": 216178908.5019,
+    "theoretical_edge_pct": -0.004754105068176298,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.3047541050681763
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "BTC/USDC",
+      "BTC/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "BTC/USDC",
+    "pair3": "BTC/USDT",
+    "min_volume_usdt": 16530002.65189,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 16530002.65189,
+    "vol3_usdt": 355316897.009815,
+    "theoretical_edge_pct": 0.005599089538092681,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.2944009104619073
+  },
+  {
+    "triangle": [
+      "BTC/USDT",
+      "ETH/BTC",
+      "ETH/USDT"
+    ],
+    "pair1": "BTC/USDT",
+    "pair2": "ETH/BTC",
+    "pair3": "ETH/USDT",
+    "min_volume_usdt": 6861362.02007,
+    "vol1_usdt": 355316897.009815,
+    "vol2_usdt": 6861362.02007,
+    "vol3_usdt": 216178908.5019,
+    "theoretical_edge_pct": 0.015876555047955817,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.28412344495204417
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "DOGE/USDC",
+      "DOGE/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "DOGE/USDC",
+    "pair3": "DOGE/USDT",
+    "min_volume_usdt": 1518090.278,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 1518090.278,
+    "vol3_usdt": 8164696.5562,
+    "theoretical_edge_pct": -0.000811217129557023,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.300811217129557
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "XRP/USDC",
+      "XRP/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "XRP/USDC",
+    "pair3": "XRP/USDT",
+    "min_volume_usdt": 1071783.0,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 1071783.0,
+    "vol3_usdt": 18278409.4824,
+    "theoretical_edge_pct": -0.0029153404462721115,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.3029153404462721
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "SOL/USDC",
+      "SOL/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "SOL/USDC",
+    "pair3": "SOL/USDT",
+    "min_volume_usdt": 1026302.83,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 1026302.83,
+    "vol3_usdt": 24693253.135,
+    "theoretical_edge_pct": 0.011077928239887763,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.28892207176011225
+  },
+  {
+    "triangle": [
+      "RLUSD/USDT",
+      "BTC/RLUSD",
+      "BTC/USDT"
+    ],
+    "pair1": "RLUSD/USDT",
+    "pair2": "BTC/RLUSD",
+    "pair3": "BTC/USDT",
+    "min_volume_usdt": 977004.86,
+    "vol1_usdt": 977004.86,
+    "vol2_usdt": 2321406.326726,
+    "vol3_usdt": 355316897.009815,
+    "theoretical_edge_pct": -0.008388618656037666,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.30838861865603767
+  },
+  {
+    "triangle": [
+      "RLUSD/USDT",
+      "ETH/RLUSD",
+      "ETH/USDT"
+    ],
+    "pair1": "RLUSD/USDT",
+    "pair2": "ETH/RLUSD",
+    "pair3": "ETH/USDT",
+    "min_volume_usdt": 977004.86,
+    "vol1_usdt": 977004.86,
+    "vol2_usdt": 4217919.8311,
+    "vol3_usdt": 216178908.5019,
+    "theoretical_edge_pct": 0.00426506254974557,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.2957349374502544
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "TRX/USDC",
+      "TRX/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "TRX/USDC",
+    "pair3": "TRX/USDT",
+    "min_volume_usdt": 583429.0,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 583429.0,
+    "vol3_usdt": 5391617.4638,
+    "theoretical_edge_pct": 0.014597567841213509,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.28540243215878647
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "BGB/USDC",
+      "BGB/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "BGB/USDC",
+    "pair3": "BGB/USDT",
+    "min_volume_usdt": 570141.0367,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 570141.0367,
+    "vol3_usdt": 20493570.4855,
+    "theoretical_edge_pct": 0.009079937245784878,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.2909200627542151
+  },
+  {
+    "triangle": [
+      "USD1/USDT",
+      "BTC/USD1",
+      "BTC/USDT"
+    ],
+    "pair1": "USD1/USDT",
+    "pair2": "BTC/USD1",
+    "pair3": "BTC/USDT",
+    "min_volume_usdt": 535960.63,
+    "vol1_usdt": 535960.63,
+    "vol2_usdt": 2423884.686067,
+    "vol3_usdt": 355316897.009815,
+    "theoretical_edge_pct": 0.007277670763144367,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.29272232923685565
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "USDGO/USDC",
+      "USDGO/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "USDGO/USDC",
+    "pair3": "USDGO/USDT",
+    "min_volume_usdt": 504515.2854,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 504515.2854,
+    "vol3_usdt": 3152521.6754,
+    "theoretical_edge_pct": 0.025014255965251853,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.2749857440347481
+  },
+  {
+    "triangle": [
+      "USDE/USDT",
+      "BTC/USDE",
+      "BTC/USDT"
+    ],
+    "pair1": "USDE/USDT",
+    "pair2": "BTC/USDE",
+    "pair3": "BTC/USDT",
+    "min_volume_usdt": 395089.04,
+    "vol1_usdt": 395089.04,
+    "vol2_usdt": 1368110.046384,
+    "vol3_usdt": 355316897.009815,
+    "theoretical_edge_pct": 0.014733557213495646,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.28526644278650437
+  },
+  {
+    "triangle": [
+      "USD1/USDT",
+      "ETH/USD1",
+      "ETH/USDT"
+    ],
+    "pair1": "USD1/USDT",
+    "pair2": "ETH/USD1",
+    "pair3": "ETH/USDT",
+    "min_volume_usdt": 281932.563,
+    "vol1_usdt": 535960.63,
+    "vol2_usdt": 281932.563,
+    "vol3_usdt": 216178908.5019,
+    "theoretical_edge_pct": -0.02872593394651642,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.32872593394651645
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "BNB/USDC",
+      "BNB/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "BNB/USDC",
+    "pair3": "BNB/USDT",
+    "min_volume_usdt": 268549.721,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 268549.721,
+    "vol3_usdt": 2062465.3668,
+    "theoretical_edge_pct": -0.008841849929222496,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.3088418499292225
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "LINK/USDC",
+      "LINK/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "LINK/USDC",
+    "pair3": "LINK/USDT",
+    "min_volume_usdt": 247445.2,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 247445.2,
+    "vol3_usdt": 4693078.1801,
+    "theoretical_edge_pct": 0.05028301662628772,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.2497169833737123
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "ADA/USDC",
+      "ADA/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "ADA/USDC",
+    "pair3": "ADA/USDT",
+    "min_volume_usdt": 216347.0,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 216347.0,
+    "vol3_usdt": 5889841.608,
+    "theoretical_edge_pct": 0.005932538757502412,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.2940674612424976
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "AAVE/USDC",
+      "AAVE/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "AAVE/USDC",
+    "pair3": "AAVE/USDT",
+    "min_volume_usdt": 204030.804,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 204030.804,
+    "vol3_usdt": 2718982.0039,
+    "theoretical_edge_pct": 0.02381079965950758,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.27618920034049244
+  },
+  {
+    "triangle": [
+      "RLUSD/USDT",
+      "XRP/RLUSD",
+      "XRP/USDT"
+    ],
+    "pair1": "RLUSD/USDT",
+    "pair2": "XRP/RLUSD",
+    "pair3": "XRP/USDT",
+    "min_volume_usdt": 199219.9338,
+    "vol1_usdt": 977004.86,
+    "vol2_usdt": 199219.9338,
+    "vol3_usdt": 18278409.4824,
+    "theoretical_edge_pct": -0.002385664707690975,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.30238566470769096
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "RLUSD/USDC",
+      "RLUSD/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "RLUSD/USDC",
+    "pair3": "RLUSD/USDT",
+    "min_volume_usdt": 185490.27,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 185490.27,
+    "vol3_usdt": 977004.86,
+    "theoretical_edge_pct": 0.015008253639141364,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.2849917463608586
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "SUI/USDC",
+      "SUI/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "SUI/USDC",
+    "pair3": "SUI/USDT",
+    "min_volume_usdt": 116575.4,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 116575.4,
+    "vol3_usdt": 6319271.07,
+    "theoretical_edge_pct": 0.003948767246487378,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.29605123275351264
+  },
+  {
+    "triangle": [
+      "USDE/USDT",
+      "ETH/USDE",
+      "ETH/USDT"
+    ],
+    "pair1": "USDE/USDT",
+    "pair2": "ETH/USDE",
+    "pair3": "ETH/USDT",
+    "min_volume_usdt": 109097.5988,
+    "vol1_usdt": 395089.04,
+    "vol2_usdt": 109097.5988,
+    "vol3_usdt": 216178908.5019,
+    "theoretical_edge_pct": 0.024410887015335996,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.275589112984664
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "AVAX/USDC",
+      "AVAX/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "AVAX/USDC",
+    "pair3": "AVAX/USDT",
+    "min_volume_usdt": 95418.27,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 95418.27,
+    "vol3_usdt": 3531989.4903,
+    "theoretical_edge_pct": 0.024134033592778544,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.27586596640722144
+  },
+  {
+    "triangle": [
+      "ETH/USDT",
+      "BGB/ETH",
+      "BGB/USDT"
+    ],
+    "pair1": "ETH/USDT",
+    "pair2": "BGB/ETH",
+    "pair3": "BGB/USDT",
+    "min_volume_usdt": 83046.514873,
+    "vol1_usdt": 216178908.5019,
+    "vol2_usdt": 83046.514873,
+    "vol3_usdt": 20493570.4855,
+    "theoretical_edge_pct": -0.0024703550717529313,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.3024703550717529
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "TAO/USDC",
+      "TAO/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "TAO/USDC",
+    "pair3": "TAO/USDT",
+    "min_volume_usdt": 76160.9862,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 76160.9862,
+    "vol3_usdt": 2246376.236,
+    "theoretical_edge_pct": -0.015982802017005214,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.31598280201700524
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "PEPE/USDC",
+      "PEPE/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "PEPE/USDC",
+    "pair3": "PEPE/USDT",
+    "min_volume_usdt": 74237.0,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 74237.0,
+    "vol3_usdt": 3854174.0,
+    "theoretical_edge_pct": -0.005609811864731842,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.30560981186473185
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "FIL/USDC",
+      "FIL/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "FIL/USDC",
+    "pair3": "FIL/USDT",
+    "min_volume_usdt": 71432.6515,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 71432.6515,
+    "vol3_usdt": 445647.955,
+    "theoretical_edge_pct": -0.05957463922016345,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.35957463922016347
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "APT/USDC",
+      "APT/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "APT/USDC",
+    "pair3": "APT/USDT",
+    "min_volume_usdt": 68689.19,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 68689.19,
+    "vol3_usdt": 627701.29,
+    "theoretical_edge_pct": 0.04502025911660247,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.25497974088339753
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "TRUMP/USDC",
+      "TRUMP/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "TRUMP/USDC",
+    "pair3": "TRUMP/USDT",
+    "min_volume_usdt": 66193.1,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 66193.1,
+    "vol3_usdt": 2018191.07,
+    "theoretical_edge_pct": -0.03848977448867015,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.3384897744886701
+  },
+  {
+    "triangle": [
+      "USDC/USDT",
+      "ICP/USDC",
+      "ICP/USDT"
+    ],
+    "pair1": "USDC/USDT",
+    "pair2": "ICP/USDC",
+    "pair3": "ICP/USDT",
+    "min_volume_usdt": 51594.04,
+    "vol1_usdt": 30325451.7799,
+    "vol2_usdt": 51594.04,
+    "vol3_usdt": 515029.4809,
+    "theoretical_edge_pct": -0.03350801424220177,
+    "fees_pct": 0.3,
+    "net_edge_pct": -0.3335080142422018
+  }
+]

@@ -43,6 +43,7 @@ class SmartEntryBaseConfig:
     max_up_accel_pct: float
     max_trend_24h_pct: float
     min_trend_24h_pct: float
+    max_trend_4h_pct: float = 99.0
     # Phase 2: Slippage Protection
     slippage_check_enabled: bool = True
     max_entry_spread_pct: float = 0.5
@@ -361,6 +362,7 @@ class SmartEntryFilter:
             "max_up_accel_pct": self.base_cfg.max_up_accel_pct,
             "max_trend_24h_pct": self.base_cfg.max_trend_24h_pct,
             "min_trend_24h_pct": self.base_cfg.min_trend_24h_pct,
+            "max_trend_4h_pct": self.base_cfg.max_trend_4h_pct,
             # Phase 2: Slippage Protection
             "slippage_check_enabled": self.base_cfg.slippage_check_enabled,
             "max_entry_spread_pct": self.base_cfg.max_entry_spread_pct,
@@ -577,6 +579,18 @@ class SmartEntryFilter:
             return False, f"🧠 {symbol}: NO BUY – up accel {
                 accel:.2f}% > {
                 cfg['max_up_accel_pct']}% (blow-off top risk)", trace
+
+        # 6b) 4h Trend Cap (RE-01: entries after 4h rally perform worse)
+        trend_4h_ok = trace_percentage_check(
+            trace, "trend_4h_max", ind.trend_4h_pct, cfg["max_trend_4h_pct"], "<=")
+        if not trend_4h_ok:
+            trace.finalize(accepted=False, rejected_by="trend_4h_max",
+                           final_reason="4h trend too high")
+            trace.reason_code = ReasonCode.TREND_4H_TOO_HIGH.value
+            trace.stage = Stage.SMART_ENTRY.value
+            return False, f"🧠 {symbol}: NO BUY – 4h trend {
+                ind.trend_4h_pct:+.2f}% > {
+                cfg['max_trend_4h_pct']}% (post-rally risk)", trace
 
         # 7) 24h Trend Sanity Checks
         trend_24h_max_ok = trace_percentage_check(

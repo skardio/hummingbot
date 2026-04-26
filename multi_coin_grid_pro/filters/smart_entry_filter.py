@@ -69,6 +69,9 @@ class SmartEntryConfig:
     max_trend_24h_pct: float = 8.0    # > +8% dagtrend → beter niet instappen
     min_trend_24h_pct: float = -12.0  # < -12% dagtrend → capitulatie risk
 
+    # 4h Trend Cap (RE-01)
+    max_trend_4h_pct: float = 99.0    # > 2.5% na 4h rally → post-rally risk
+
     # Slippage Protection (NEW - Phase 2)
     max_entry_spread_pct: float = 0.5  # Reject if bid-ask spread > 0.5%
     slippage_check_enabled: bool = True  # Enable spread checking

@@ -5,7 +5,7 @@ set -e
 
 REPO_DIR="/home/mo/repos/hummingbot"
 BACKUP_DIR="${REPO_DIR}/backups/db"
-RETENTION_DAYS=7
+RETENTION_DAYS=90
 DATE=$(date +%Y-%m-%d)
 
 mkdir -p "${BACKUP_DIR}"
@@ -40,8 +40,7 @@ for db in "${DBS[@]}"; do
     fi
 done
 
-# Prune old backups
-find "${BACKUP_DIR}" -name "*.sqlite" -mtime +${RETENTION_DAYS} -delete 2>/dev/null || true
-find "${BACKUP_DIR}" -name "*.db" -mtime +${RETENTION_DAYS} -delete 2>/dev/null || true
+# Verwijder backups ouder dan 90 dagen
+find "${BACKUP_DIR}" \( -name "*.sqlite" -o -name "*.db" \) -mtime +${RETENTION_DAYS} -delete 2>/dev/null || true
 
 echo "$(date -Iseconds) backup: ${backed_up} databases backed up, pruned >${RETENTION_DAYS}d"

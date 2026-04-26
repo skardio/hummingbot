@@ -43,6 +43,8 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
         self.smart_entry_mock = Mock()
         self.smart_entry_mock.base_cfg = self.base_cfg
         self.controller.smart_entry_v2 = self.smart_entry_mock
+        # No YAML limits by default (adaptive has free reign)
+        self.controller._yaml_smart_entry_limits = {}
 
     def test_apply_bull_filters(self):
         """Test applying BULL regime filters"""
@@ -172,6 +174,53 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
 
         self.assertEqual(self.base_cfg.min_atr_pct_for_grid, 0.2)
         self.assertEqual(self.base_cfg.max_atr_pct_for_grid, 8.0)
+
+    def test_yaml_limits_clamp_adaptive(self):
+        """RE-01: Adaptive values clamped so they never loosen YAML limits"""
+        # Set YAML limits: RSI max 60, ATR min 0.30
+        self.controller._yaml_smart_entry_limits = {
+            'rsi_buy_max': 60.0,
+            'min_atr_pct_for_grid': 0.30,
+            'max_up_accel_pct': 5.0,
+            'rsi_extreme_low': 18.0,
+            'max_down_accel_pct': -6.0,
+        }
+
+        # Adaptive tries to loosen all of them
+        filters = {
+            'rsi_buy_max': 75.0,    # wants 75, YAML says max 60
+            'atr_min_pct': 0.05,    # wants 0.05, YAML says min 0.30
+            'max_up_accel_pct': 8.0,  # wants 8, YAML says max 5
+            'rsi_buy_min': 10.0,    # wants 10, YAML extreme_low says 18
+            'max_down_accel_pct': -3.0,  # wants -3 (looser), YAML says -6
+        }
+
+        MultiCoinGridController._apply_adaptive_filters(self.controller, filters)
+
+        # All clamped to YAML limits
+        self.assertEqual(self.base_cfg.rsi_buy_max, 60.0)
+        self.assertEqual(self.base_cfg.min_atr_pct_for_grid, 0.30)
+        self.assertEqual(self.base_cfg.max_up_accel_pct, 5.0)
+        self.assertEqual(self.base_cfg.rsi_extreme_low, 18.0)
+        self.assertEqual(self.base_cfg.max_down_accel_pct, -6.0)
+
+    def test_yaml_limits_allow_stricter(self):
+        """RE-01: Adaptive CAN tighten beyond YAML limits"""
+        self.controller._yaml_smart_entry_limits = {
+            'rsi_buy_max': 60.0,
+            'min_atr_pct_for_grid': 0.30,
+        }
+
+        # Adaptive wants stricter values
+        filters = {
+            'rsi_buy_max': 55.0,    # stricter than YAML 60 → allowed
+            'atr_min_pct': 0.50,    # stricter than YAML 0.30 → allowed
+        }
+
+        MultiCoinGridController._apply_adaptive_filters(self.controller, filters)
+
+        self.assertEqual(self.base_cfg.rsi_buy_max, 55.0)
+        self.assertEqual(self.base_cfg.min_atr_pct_for_grid, 0.50)
 
 
 if __name__ == '__main__':
