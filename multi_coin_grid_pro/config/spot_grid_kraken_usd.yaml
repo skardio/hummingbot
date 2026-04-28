@@ -341,7 +341,7 @@ orderbook_prefetch:
 use_smart_entry_filter: true
 
 smart_entry_filter:
-  rsi_buy_max: 60.0              # 🔧 RE-01 2026-04: 72→60 (RSI >60 trades 3.4× worse PnL)
+  rsi_buy_max: 65.0              # 🔧 RE-02 2026-04-27: 60→65 (claim niet statistisch onderbouwd, n=13)
   rsi_extreme_low: 18.0
   rsi_block_min: 85.0
 
@@ -916,6 +916,12 @@ total_amount_quote: 300             # $300 USD budget (rest van $1475 is long-te
 min_order_amount_quote: 15          # $15 minimum order
 
 risk_reference_balance_quote: 300   # 🔧 FIX: 400→300 (matcht actual trading budget)
+risk_bucket_limits:                 # Max % van portfolio per bucket (optioneel; weglaten = module defaults)
+  L1: 10.0                          # BTC/ETH -- zelden gehandeld, klein houden
+  L2: 35.0                          # SOL/DOT/etc -- primaire bucket
+  MEME: 25.0                        # PENGU/DOGE/etc -- ruimte voor 2-3 coins
+  ILLIQUID: 10.0                     # Onbekende/dunne coins -- conservatief
+  BLOCKED: 0.0                      # Nooit handelen
 risk_max_daily_loss_pct: 3           # T0-Q7: Was 30% ("TIJDELIJK" since 2025-02-14) → 3% real limit
 risk_max_balance_per_trade_pct: 55   # 🔧 FIX: 60→55% ($300×55%=$165 max per trade)
 risk_max_total_open_risk_pct: 95     # 🔧 FIX: 75→95% (2 slots gebruiken bijna heel budget)
@@ -938,6 +944,18 @@ min_stop_pct: 0.015                  # 🔧 TUNED 2026-04-14: 2%→1.5% (tighter
 max_stop_pct: 0.03                   # 🔧 TUNED 2026-04-14: 5%→3% (cap aligned with stop_loss_pct)
 
 take_profit_pct: 0.05
+
+# Item 7: Dynamic TP op basis van trendsterkte (0.70x–1.50x basis-TP)
+use_dynamic_take_profit: true
+min_take_profit_pct: 0.020         # Floor: 2.0%
+max_take_profit_pct: 0.08          # Ceiling: 8%
+
+# Item 4: Daily coin kill switch (-1R = halve size, -2R = disable voor vandaag)
+daily_kill_switch_enabled: true
+r_unit_quote: 5.0                  # 1R = $5
+
+# Item 16: Kapitaalreserve voor beste setups
+capital_reserve_pct: 10.0         # 10% achtergehouden voor hoge-kwaliteit entries
 
 # Trailing TP: lock in profit when price rises past activation, exit if it drops back by delta
 trailing_stop_activation_pct: 0.02   # 🔧 TUNED 2026-04-02: 0.015→0.02 (trail only after 2%, more room to run)

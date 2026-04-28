@@ -278,21 +278,9 @@ class SmartEntryFilter:
 
             if not bids or not asks or not mid_price:
                 if should_log(f"depth_no_ob_{symbol}", interval_sec=300):
-                    self.logger.warning(f"[DEPTH] {symbol} - No orderbook data available")
-                # Emit event voor tracking (critical: dit is de root cause van 99.9% loss)
-                if self.event_logger:
-                    try:
-                        self.event_logger.emit_gate_denied(
-                            correlation_id=f"depth_check_{symbol}",
-                            symbol=symbol,
-                            stage=Stage.SMART_ENTRY,
-                            reason_code=ReasonCode.NO_ORDERBOOK_DATA,
-                            reason_msg="No orderbook data available for depth check",
-                            metadata={"check_type": "depth", "order_size_eur": order_size_eur},
-                            connector=self.connector_name
-                        )
-                    except Exception as e:
-                        self.logger.debug(f"Failed to emit gate_denied event: {e}")
+                    self.logger.warning(f"[DEPTH] {symbol} - No orderbook data available (depth check skipped)")
+                # Do NOT emit gate_denied here: the depth check is skipped (returns True),
+                # so counting this as a denial inflates NO_ORDERBOOK_DATA stats incorrectly.
                 return True, "No orderbook data (skipping check)", 0.0, 0.0
 
             # Calculate depth metrics (bids/asks are List[OrderBookRow], mid_price is Decimal)

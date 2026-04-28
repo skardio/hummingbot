@@ -44,6 +44,12 @@ dynamic_slots:
 # Risk reference balance - SET TO YOUR ACTUAL ACCOUNT BALANCE!
 # This is used to calculate exposure limits (max_total_exposure_pct applies to this)
 risk_reference_balance_quote: 1500   # Jouw Bitget account balans (~€1500 gezien €1122 exposure)
+risk_bucket_limits:                 # Max % van portfolio per bucket (optioneel; weglaten = module defaults)
+  L1: 15.0                          # BTC/ETH
+  L2: 40.0                          # Established alts -- primaire bucket
+  MEME: 20.0                        # Meme coins
+  ILLIQUID: 3.0                     # Conservatief
+  BLOCKED: 0.0
 
 # ============================================================
 # RISK MANAGER - THREE-LAYER PROTECTION (Sprint 1)

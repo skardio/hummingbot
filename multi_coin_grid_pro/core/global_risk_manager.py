@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, MutableMapping, Optional
 
+from multi_coin_grid_pro.core.exit_types import ExitType, cooldown_for_exit
 from multi_coin_grid_pro.utils.log_throttle import should_log
 
 DecimalZero = Decimal("0")
@@ -60,7 +61,8 @@ class GlobalRiskManager:
     PnL figures.
     """
 
-    def __init__(self, reference_balance_quote: Decimal, limits: RiskLimits):
+    def __init__(self, reference_balance_quote: Decimal, limits: RiskLimits,
+                 max_consecutive_failures: int = 2):
         if reference_balance_quote <= DecimalZero:
             raise ValueError("reference_balance_quote must be positive")
         self._reference_balance_quote = reference_balance_quote
@@ -77,9 +79,19 @@ class GlobalRiskManager:
 
         # Cooldown tracking
         self._last_exit_time: Dict[str, float] = {}
+        self._exit_cooldown_override: Dict[str, int] = {}   # per-symbol cooldown (seconds)
+        self._exit_type_per_symbol: Dict[str, ExitType] = {}
         self._last_switch_time: float = 0.0
         self._last_loss_time: Dict[str, float] = {}       # per-coin
         self._consecutive_losses: Dict[str, int] = {}     # per-coin
+
+        # Daily coin kill switch (item 4)
+        self._daily_coin_pnl: Dict[str, float] = {}      # cumulative PnL per coin today
+        self._coin_r_unit: float = 5.0                    # configurable via set_r_unit()
+
+        # Item 3: Consecutive failed-cycle lock
+        self._max_consecutive_failures: int = max_consecutive_failures
+        self._failed_cycles: Dict[str, int] = {}          # consecutive losses per coin today
 
     # ------------------------------------------------------------------#
     # Helpers
@@ -92,6 +104,8 @@ class GlobalRiskManager:
             self._last_reset_date = current_date
             self._consecutive_losses.clear()
             self._last_loss_time.clear()
+            self._daily_coin_pnl.clear()        # daily coin kill switch reset
+            self._failed_cycles.clear()         # item 3: reset failed cycle counter
 
     def _max_trade_notional(self) -> Decimal:
         per_trade_cap = (
@@ -151,14 +165,39 @@ class GlobalRiskManager:
                         f"🛑 RISK BLOCKED {symbol}: consecutive loss cooldown ({elapsed:.0f}s / {self._limits.consecutive_loss_cooldown_seconds}s)")  # noqa: E501
                 return None
 
-        # Exit cooldown per symbol
+        # Item 3: Cycle lock — block if coin has >= max_consecutive_failures losses
+        if self.is_coin_cycle_locked(symbol):
+            n = self._failed_cycles.get(symbol, 0)
+            if logger and should_log(f"risk_blocked_cycle_{symbol}", interval_sec=300):
+                logger.info(
+                    f"🔒 COIN_CYCLE_LOCKED {symbol}: "
+                    f"{n} consecutive losses today (max {self._max_consecutive_failures})"
+                )
+            return None
+
+        # Daily coin kill switch — block if >= -2R today
+        if self.is_coin_disabled_today(symbol):
+            if logger and should_log(f"risk_blocked_kill_{symbol}", interval_sec=300):
+                logger.info(
+                    f"🚫 COIN_DISABLED_TODAY {symbol}: "
+                    f"daily_pnl={self._daily_coin_pnl.get(symbol, 0.0):.2f} < -2R"
+                )
+            return None
+
+        # Exit cooldown per symbol (duration depends on exit type)
         last_exit = self._last_exit_time.get(symbol)
         if last_exit is not None:
             elapsed = now - last_exit
-            if elapsed < self._limits.exit_cooldown_seconds:
+            cooldown = self._exit_cooldown_override.get(
+                symbol, self._limits.exit_cooldown_seconds
+            )
+            if elapsed < cooldown:
+                exit_type = self._exit_type_per_symbol.get(symbol, ExitType.UNKNOWN)
                 if logger and should_log(f"risk_blocked_exit_{symbol}", interval_sec=300):
                     logger.info(
-                        f"🛑 RISK BLOCKED {symbol}: exit cooldown ({elapsed:.0f}s / {self._limits.exit_cooldown_seconds}s)")  # noqa: E501
+                        f"🛑 RISK BLOCKED {symbol}: exit cooldown "
+                        f"[{exit_type.value}] ({elapsed:.0f}s / {cooldown}s)"
+                    )
                 return None
 
         # Switch cooldown (global)
@@ -220,12 +259,26 @@ class GlobalRiskManager:
         symbol: str,
         realised_pnl_quote: Decimal,
         now: float,
+        exit_type: ExitType = ExitType.UNKNOWN,
     ) -> None:
         """
         Update realised PnL statistics and remove exposure for the symbol.
+
+        Parameters
+        ----------
+        exit_type : ExitType
+            Classification of why the position was closed.  Determines the
+            cooldown duration applied to this symbol before a new entry.
         """
         self._reset_if_new_day(now)
+        # Apply exit-type-specific cooldown
         self._last_exit_time[symbol] = now
+        self._exit_type_per_symbol[symbol] = exit_type
+        self._exit_cooldown_override[symbol] = cooldown_for_exit(exit_type, now)
+        # Daily coin PnL tracking for kill switch
+        self._daily_coin_pnl[symbol] = (
+            self._daily_coin_pnl.get(symbol, 0.0) + float(realised_pnl_quote)
+        )
 
         allocation = self._open_allocations.pop(symbol, None)
         if allocation is not None:
@@ -238,9 +291,11 @@ class GlobalRiskManager:
             self._daily_loss_quote += abs(realised_pnl_quote)
             self._consecutive_losses[symbol] = self._consecutive_losses.get(symbol, 0) + 1
             self._last_loss_time[symbol] = now
+            self.note_failed_cycle(symbol)      # item 3
         else:
             self._consecutive_losses.pop(symbol, None)
             self._last_loss_time.pop(symbol, None)
+            self.note_successful_cycle(symbol)  # item 3
 
     def update_unrealised(self, *, symbol: str, unrealised_quote: Decimal) -> None:
         """
@@ -258,12 +313,17 @@ class GlobalRiskManager:
         remaining: Dict[str, float] = {}
         for symbol, timestamp in list(self._last_exit_time.items()):
             elapsed = now - timestamp
-            remaining_seconds = self._limits.exit_cooldown_seconds - elapsed
+            cooldown = self._exit_cooldown_override.get(
+                symbol, self._limits.exit_cooldown_seconds
+            )
+            remaining_seconds = cooldown - elapsed
             if remaining_seconds > 0:
                 remaining[symbol] = remaining_seconds
             else:
                 # Cooldown expired, drop record to keep structure tidy
                 del self._last_exit_time[symbol]
+                self._exit_cooldown_override.pop(symbol, None)
+                self._exit_type_per_symbol.pop(symbol, None)
         return remaining
 
     def switch_cooldown_remaining(self, now: float) -> float:
@@ -279,12 +339,72 @@ class GlobalRiskManager:
     def note_switch(self, now: float) -> None:
         self._last_switch_time = now
 
-    def note_exit(self, symbol: str, now: float) -> None:
+    def note_exit(
+        self,
+        symbol: str,
+        now: float,
+        exit_type: ExitType = ExitType.UNKNOWN,
+    ) -> None:
         """
-        Record an exit event without affecting realised PnL
-        (used when a stop is requested but fills not yet known).
+        Record an exit event without affecting realised PnL.
+
+        Used when a stop is requested but fills are not yet known.
+        Applies the exit-type-specific cooldown immediately.
         """
         self._last_exit_time[symbol] = now
+        self._exit_type_per_symbol[symbol] = exit_type
+        self._exit_cooldown_override[symbol] = cooldown_for_exit(exit_type, now)
+
+    def get_exit_type(self, symbol: str) -> Optional[ExitType]:
+        """Return the exit type recorded for a symbol (or None if not set)."""
+        return self._exit_type_per_symbol.get(symbol)
+
+    # ------------------------------------------------------------------#
+    # Item 3: Consecutive failed-cycle lock helpers
+    # ------------------------------------------------------------------#
+
+    def note_failed_cycle(self, symbol: str) -> None:
+        """Increment consecutive failure count for this coin."""
+        self._failed_cycles[symbol] = self._failed_cycles.get(symbol, 0) + 1
+
+    def note_successful_cycle(self, symbol: str) -> None:
+        """Reset consecutive failure count on success."""
+        self._failed_cycles.pop(symbol, None)
+
+    def is_coin_cycle_locked(self, symbol: str, max_failures: int = -1) -> bool:
+        """True if coin has >= max_consecutive_failures consecutive losses today."""
+        limit = max_failures if max_failures >= 0 else self._max_consecutive_failures
+        return self._failed_cycles.get(symbol, 0) >= limit
+
+    def get_failed_cycles(self, symbol: str) -> int:
+        """Return the current consecutive failure count for this coin."""
+        return self._failed_cycles.get(symbol, 0)
+
+    # ------------------------------------------------------------------#
+    # Daily coin kill switch helpers (item 4)
+    # ------------------------------------------------------------------#
+
+    def set_r_unit(self, r_unit_quote: float) -> None:
+        """Configure the R unit size (1R in quote currency)."""
+        self._coin_r_unit = max(0.01, float(r_unit_quote))
+
+    def record_coin_pnl(self, symbol: str, pnl_quote: float) -> None:
+        """Record additional realised PnL for daily coin kill switch tracking."""
+        self._daily_coin_pnl[symbol] = (
+            self._daily_coin_pnl.get(symbol, 0.0) + pnl_quote
+        )
+
+    def get_coin_daily_pnl(self, symbol: str) -> float:
+        """Return cumulative daily PnL for a symbol in quote currency."""
+        return self._daily_coin_pnl.get(symbol, 0.0)
+
+    def is_coin_halved_today(self, symbol: str) -> bool:
+        """True when coin's daily loss exceeds -1R (position size should be halved)."""
+        return self._daily_coin_pnl.get(symbol, 0.0) < -self._coin_r_unit
+
+    def is_coin_disabled_today(self, symbol: str) -> bool:
+        """True when coin's daily loss exceeds -2R (disabled for rest of day)."""
+        return self._daily_coin_pnl.get(symbol, 0.0) < -2.0 * self._coin_r_unit
 
     @property
     def min_hold_seconds(self) -> int:
@@ -322,6 +442,28 @@ class GlobalRiskManager:
         # Auto-reset on new day when accessed
         self._reset_if_new_day(time.time())
         return self._daily_realised_pnl_quote
+
+    def get_deployable_balance(self, total_balance: Decimal, reserve_pct: float = 0.0) -> Decimal:
+        """
+        Return deployable balance after keeping *reserve_pct* % back as an
+        opportunistic reserve.
+
+        Parameters
+        ----------
+        total_balance : Decimal
+            Full available balance in quote currency.
+        reserve_pct : float
+            Percentage to hold back (0.0 = no reserve, fully deployed).
+
+        Returns
+        -------
+        Decimal
+            Deployable balance (≥ 0).
+        """
+        if reserve_pct <= 0:
+            return total_balance
+        reserve = total_balance * Decimal(str(reserve_pct / 100.0))
+        return max(DecimalZero, total_balance - reserve)
 
     def reset_daily_loss(self, reason: str = "manual") -> None:
         """

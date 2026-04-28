@@ -5,7 +5,7 @@ This config defines all parameters for the multi-coin grid trading strategy.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import Field, field_validator
 
@@ -1050,6 +1050,34 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # Item 7: Dynamic Take-Profit — adjust TP based on trend strength
+    use_dynamic_take_profit: bool = Field(
+        default=False,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable dynamic take-profit (widen TP in uptrend, tighten in downtrend)? ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    min_take_profit_pct: Optional[Decimal] = Field(
+        default=None,  # Defaults to 70% of base take_profit_pct
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum take-profit % in dynamic mode (e.g., 0.005 = 0.5%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    max_take_profit_pct: Optional[Decimal] = Field(
+        default=None,  # Defaults to 200% of base take_profit_pct
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Maximum take-profit % in dynamic mode (e.g., 0.04 = 4%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     time_based_stop_minutes: int = Field(
         default=360,  # 6 hours (grid needs time to work)
         client_data=ClientFieldData(
@@ -1223,6 +1251,14 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": True},
     )
+    risk_bucket_limits: Optional[Dict[str, float]] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Per-bucket max allocation % as dict (L1/L2/MEME/ILLIQUID/BLOCKED), or leave empty for defaults: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
     risk_max_daily_loss_pct: Decimal = Field(
         default=Decimal("2"),
         client_data=ClientFieldData(
@@ -1255,6 +1291,22 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": True},
     )
+    r_unit_quote: float = Field(
+        default=5.0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "1R unit in quote currency (used for daily coin kill switch): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    daily_kill_switch_enabled: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable daily coin kill switch (-2R disables, -1R halves size): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
     risk_symbol_switch_cooldown_minutes: int = Field(
         default=0,  # TESTING: was 45 minutes
         client_data=ClientFieldData(
@@ -1270,6 +1322,19 @@ class MultiCoinGridConfig(ControllerConfigBase):
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True},
+    )
+
+    # Item 16: Capital Efficiency Reserve
+    capital_reserve_pct: float = Field(
+        default=0.0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Capital reserve % (0-50%, held back as opportunity reserve, activate at >€10k): ",
+            prompt_on_new=False,
+        ),
+        description="Percentage of balance reserved as opportunistic reserve (0-50%)",
+        json_schema_extra={"is_updatable": True},
+        ge=0.0,
+        le=50.0,
     )
 
     # Orphan recovery

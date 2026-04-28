@@ -492,6 +492,56 @@ class TestSmartEntryFilter(unittest.TestCase):
         )
         self.assertTrue(allowed)
 
+    def test_depth_no_orderbook_does_not_emit_gate_denied(self):
+        """When get_orderbook_snapshot returns empty, depth check is skipped (not blocked)
+        and NO gate_denied event is emitted — prevents false NO_ORDERBOOK_DATA inflation."""
+        from unittest.mock import Mock
+
+        mock_connector = Mock()
+        mock_orderbook = Mock()
+        # Empty bids/asks → get_orderbook_snapshot returns (None, None, None)
+        mock_orderbook.snapshot = ([], [])
+        mock_connector.get_order_book = Mock(return_value=mock_orderbook)
+
+        mock_event_logger = Mock()
+
+        filter_with_exchange = SmartEntryFilter(
+            self.base_cfg,
+            self.coin_profiles,
+            self.logger,
+            exchange_connector=mock_connector,
+            connector_name="mock_exchange"
+        )
+        filter_with_exchange.event_logger = mock_event_logger
+
+        indicators = CandleIndicators(
+            price=Decimal("10.0"),
+            rsi_14=50.0,
+            vwap=Decimal("10.0"),
+            atr_pct=2.5,
+            wick_ratio=0.50,
+            trend_1h_pct=0.5,
+            trend_4h_pct=0.3,
+            trend_24h_pct=1.0,
+            change_5m_pct=0.2,
+        )
+
+        allowed, reason, trace = filter_with_exchange.allows_entry(
+            "BTC-EUR", indicators, order_size_eur=100.0, trace_enabled=True
+        )
+
+        # Depth check skipped → entry not blocked by depth
+        self.assertNotIn("orderbook", reason.lower(), "Depth skip should not block entry")
+        # gate_denied must NOT have been called for NO_ORDERBOOK_DATA
+        for call in mock_event_logger.emit_gate_denied.call_args_list:
+            kwargs = call.kwargs if call.kwargs else {}
+            args = call.args if call.args else []
+            reason_code = kwargs.get("reason_code") or (args[3] if len(args) > 3 else None)
+            self.assertNotEqual(
+                str(reason_code), "NO_ORDERBOOK_DATA",
+                "emit_gate_denied must not be called with NO_ORDERBOOK_DATA on depth-skip path"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

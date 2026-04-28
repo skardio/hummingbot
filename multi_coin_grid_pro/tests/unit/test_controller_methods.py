@@ -646,3 +646,68 @@ class TestPaperTradingOrderBook:
 # NOTE: TestStaleDetection removed (2026-01-13)
 # Stale detection moved to MarketDataProvider in Task 2.1.1
 # New tests in test_fase_2_features.py cover the updated implementation
+
+
+class TestOrderbookSubscriptionGuard:
+    """Tests for _has_orderbook_subscription + guard in _check_smart_entry_filter."""
+
+    def test_has_orderbook_subscription_true(self, controller, mock_connector):
+        """Returns True when symbol is in tracker._trading_pairs."""
+        mock_tracker = MagicMock()
+        mock_tracker._trading_pairs = ["SOL-EUR", "BTC-EUR"]
+        mock_connector.order_book_tracker = mock_tracker
+        controller.connector = mock_connector
+
+        assert controller._has_orderbook_subscription("SOL-EUR") is True
+
+    def test_has_orderbook_subscription_false(self, controller, mock_connector):
+        """Returns False when symbol is NOT in tracker._trading_pairs."""
+        mock_tracker = MagicMock()
+        mock_tracker._trading_pairs = ["BTC-EUR"]
+        mock_connector.order_book_tracker = mock_tracker
+        controller.connector = mock_connector
+
+        assert controller._has_orderbook_subscription("JUP-EUR") is False
+
+    def test_has_orderbook_subscription_no_tracker(self, controller, mock_connector):
+        """Returns False gracefully when connector has no order_book_tracker."""
+        mock_connector.order_book_tracker = None
+        controller.connector = mock_connector
+
+        assert controller._has_orderbook_subscription("SOL-EUR") is False
+
+    def test_check_smart_entry_filter_subscribes_and_rejects_unsubscribed_pair(
+        self, controller, mock_connector
+    ):
+        """Unsubscribed pair triggers _subscribe_to_orderbook and returns False (no denial event)."""
+        mock_tracker = MagicMock()
+        mock_tracker._trading_pairs = ["BTC-EUR"]  # JUP-EUR not subscribed
+        mock_connector.order_book_tracker = mock_tracker
+        controller.connector = mock_connector
+
+        subscribe_mock = MagicMock()
+        controller._subscribe_to_orderbook = subscribe_mock
+
+        result = controller._check_smart_entry_filter("JUP-EUR")
+
+        assert result is False, "Unsubscribed pair must be rejected this cycle"
+        subscribe_mock.assert_called_once_with("JUP-EUR")
+
+    def test_check_smart_entry_filter_subscribed_pair_continues_evaluation(
+        self, controller, mock_connector
+    ):
+        """Subscribed pair skips the OB guard and proceeds to normal evaluation."""
+        mock_tracker = MagicMock()
+        mock_tracker._trading_pairs = ["SOL-EUR"]
+        mock_connector.order_book_tracker = mock_tracker
+        controller.connector = mock_connector
+
+        # Disable all other guards so we reach a True result
+        controller.pair_health_monitor = None
+        controller.staleness_guard = None
+        controller.smart_entry_v2 = None
+        controller.smart_entry_filter = None
+
+        result = controller._check_smart_entry_filter("SOL-EUR")
+
+        assert result is True, "Subscribed pair should reach normal evaluation"

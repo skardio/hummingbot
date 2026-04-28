@@ -414,11 +414,36 @@ def validate_order_before_submit(
         else:
             # For spot sell: need quantity
             if available_balance < quantized_qty:
-                return StandaloneValidationResult(
-                    is_valid=False,
-                    skip_reason=OrderSkipReason.INSUFFICIENT_BALANCE,
-                    message=f"Insufficient balance: have {float(available_balance):.6f}, need {float(quantized_qty):.6f}"
-                )
+                # Allow dust rounding differences (≤ 1 step_size) by capping qty to balance.
+                # This fixes the common case where a BUY fill of e.g. 2697.422700 PENGU
+                # results in a SELL order of 2697.422720 (floating-point drift in fill tracking).
+                dust_threshold = step_size if step_size > Decimal("0") else Decimal("0.000001")
+                deficit = quantized_qty - available_balance
+                if deficit <= dust_threshold and available_balance > Decimal("0"):
+                    # Floor available balance down to step_size
+                    adjusted_qty = (available_balance / step_size).to_integral_value(
+                        rounding=ROUND_DOWN
+                    ) * step_size if step_size > Decimal("0") else available_balance
+                    adjusted_notional = adjusted_qty * quantized_price
+                    if adjusted_qty > Decimal("0") and adjusted_notional >= min_notional_with_buffer:
+                        # Use reduced qty — log at quantized level (caller sees 📐 message)
+                        quantized_qty = adjusted_qty
+                    else:
+                        return StandaloneValidationResult(
+                            is_valid=False,
+                            skip_reason=OrderSkipReason.INSUFFICIENT_BALANCE,
+                            message=(
+                                f"Insufficient balance: have {float(available_balance):.6f}, "
+                                f"need {float(quantized_qty):.6f} "
+                                f"(adjusted {float(adjusted_qty):.6f} fails min_notional)"
+                            )
+                        )
+                else:
+                    return StandaloneValidationResult(
+                        is_valid=False,
+                        skip_reason=OrderSkipReason.INSUFFICIENT_BALANCE,
+                        message=f"Insufficient balance: have {float(available_balance):.6f}, need {float(quantized_qty):.6f}"
+                    )
 
     # 8. All checks passed
     return StandaloneValidationResult(
