@@ -21,8 +21,10 @@ class KrakenAuth(AuthBase):
 
     @classmethod
     def get_tracking_nonce(self) -> str:
-        # Use milliseconds for nonce (Kraken requirement) - more granular than seconds
-        nonce = int(time.time() * 1000)
+        # Use epoch microseconds. Kraken only requires a strictly increasing
+        # integer nonce; microseconds reduce same-key collisions across local
+        # clients compared with millisecond nonces.
+        nonce = time.time_ns() // 1_000
         self._last_tracking_nonce = nonce if nonce > self._last_tracking_nonce else self._last_tracking_nonce + 1
         return str(self._last_tracking_nonce)
 

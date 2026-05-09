@@ -1,6 +1,6 @@
 # Hummingbot Multi-Coin Grid Pro - Documentation Index
 
-**Last Updated:** 2025-12-26
+**Last Updated:** 2026-05-04
 
 ## 📚 Quick Start
 
@@ -23,13 +23,9 @@ Located in `docs/setup/`:
 
 Located in `docs/phases/`:
 
-### Phase 2: Liquidity Filtering
-- [Phase 2 Quick Reference](phases/PHASE_2_QUICK_REF.md) - 3 modes in 30 seconds
-- [Phase 2 Shadow Mode Implementation](phases/PHASE_2_SHADOW_MODE_IMPLEMENTATION.md) - Full spec
-- [Phase 2/3/4 Summary](phases/PHASE_2_3_4_SUMMARY.md) - Overview
-
-### Phase 4: Regime-Aware
-- [Phase 4 Regime-Aware Complete](phases/PHASE_4_REGIME_AWARE_COMPLETE.md) - Dynamic thresholds
+### Hybrid Quant Bot
+- [Hybrid Quant Bot User Stories](phases/HYBRID_BOT_USER_STORIES.md) - Fase 1 regime routing + Fase 2 momentum detect-only status, inclusief BTC macro-cache, volume-expansion hardening en Fase 3 proof gate
+- [ChatGPT Backlog Review](phases/CHATGPT_BACKLOG_REVIEW.md) - Backlog audit vs. werkelijke code
 
 ### Phase 5: Multi-Currency
 - [Phase 5 Implementation Checklist](phases/PHASE_5_IMPLEMENTATION_CHECKLIST.md)
@@ -70,6 +66,10 @@ Located in `docs/archive/`:
 - Integration V3.3 Complete
 - Unit Tests Complete
 - Liquidity Aware Sizing Feature
+- Phase 2 Quick Reference
+- Phase 2 Shadow Mode Implementation
+- Phase 2/3/4 Summary
+- Phase 4 Regime-Aware Complete
 - Trend Engine Implementation
 - Trend Engine Quick Reference
 - TODO Bitget Volume Workaround
@@ -113,7 +113,7 @@ See `hummingbot/multi_coin_grid_utils/`:
 
 **By Status:**
 - **Current Roadmap:** [SMART_GRID_PROP_DESK_V1_BACKLOG.md](../SMART_GRID_PROP_DESK_V1_BACKLOG.md)
-- **Production Ready:** Phase 1-4 complete
+- **Production Ready:** Phase 1-4 complete (implementation notes archived)
 - **In Progress:** Phase 5 (Multi-Currency)
 
 ---

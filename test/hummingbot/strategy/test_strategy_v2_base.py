@@ -10,6 +10,7 @@ from hummingbot.core.clock import Clock
 from hummingbot.core.clock_mode import ClockMode
 from hummingbot.core.data_type.common import PositionMode, TradeType
 from hummingbot.strategy.strategy_v2_base import StrategyV2Base, StrategyV2ConfigBase
+from hummingbot.strategy_v2.executors.data_types import PositionSummary
 from hummingbot.strategy_v2.executors.position_executor.data_types import PositionExecutorConfig, TripleBarrierConfig
 from hummingbot.strategy_v2.models.base import RunnableStatus
 from hummingbot.strategy_v2.models.executor_actions import CreateExecutorAction
@@ -342,6 +343,68 @@ class TestStrategyV2Base(IsolatedAsyncioWrapperTestCase):
         self.assertIn("$100.00", status)  # Check for performance data in the summary table
         self.assertIn("$50.00", status)
         self.assertIn("$150.00", status)
+
+    def test_format_status_hides_positions_held_by_default(self):
+        self.strategy.ready_to_trade = True
+        self.strategy.markets = {"mock_paper_exchange": {"ETH-USDT"}}
+        controller_mock = MagicMock()
+        controller_mock.to_format_status.return_value = ["Mock status for controller"]
+        self.strategy.controllers = {"controller_1": controller_mock}
+
+        self.strategy.controller_reports = {
+            "controller_1": {
+                "executors": [],
+                "positions": [PositionSummary(
+                    connector_name="kraken",
+                    trading_pair="ENA-USD",
+                    volume_traded_quote=Decimal("100"),
+                    side=TradeType.BUY,
+                    amount=Decimal("10"),
+                    breakeven_price=Decimal("1.25"),
+                    unrealized_pnl_quote=Decimal("1.5"),
+                    realized_pnl_quote=Decimal("0"),
+                    cum_fees_quote=Decimal("0.1"),
+                )],
+                "performance": None,
+            }
+        }
+
+        status = self.strategy.format_status()
+
+        self.assertNotIn("Positions Held", status)
+        self.assertNotIn("No positions held", status)
+        self.assertNotIn("ENA-USD", status)
+
+    def test_format_status_can_show_positions_held_when_enabled(self):
+        self.strategy.ready_to_trade = True
+        self.strategy.markets = {"mock_paper_exchange": {"ETH-USDT"}}
+        controller_mock = MagicMock()
+        controller_mock.show_positions_held_in_status = True
+        controller_mock.to_format_status.return_value = ["Mock status for controller"]
+        self.strategy.controllers = {"controller_1": controller_mock}
+
+        self.strategy.controller_reports = {
+            "controller_1": {
+                "executors": [],
+                "positions": [PositionSummary(
+                    connector_name="kraken",
+                    trading_pair="ENA-USD",
+                    volume_traded_quote=Decimal("100"),
+                    side=TradeType.BUY,
+                    amount=Decimal("10"),
+                    breakeven_price=Decimal("1.25"),
+                    unrealized_pnl_quote=Decimal("1.5"),
+                    realized_pnl_quote=Decimal("0"),
+                    cum_fees_quote=Decimal("0.1"),
+                )],
+                "performance": None,
+            }
+        }
+
+        status = self.strategy.format_status()
+
+        self.assertIn("Positions Held", status)
+        self.assertIn("ENA-USD", status)
 
     async def test_listen_to_executor_actions(self):
         self.strategy.actions_queue = MagicMock()

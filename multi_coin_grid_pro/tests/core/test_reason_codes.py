@@ -18,9 +18,9 @@ class TestReasonCodes(unittest.TestCase):
     """Test suite for ReasonCode enum and utilities"""
 
     def test_reason_code_count(self):
-        """Verify we have exactly 39 rejection codes (added TREND_4H_TOO_HIGH for RE-01)"""
+        """Verify we have exactly 53 rejection codes (includes Phase 2 momentum codes)"""
         codes = list(ReasonCode)
-        self.assertEqual(len(codes), 39, f"Expected 39 codes, got {len(codes)}")
+        self.assertEqual(len(codes), 54, f"Expected 54 codes, got {len(codes)}")
 
         # Verify no APPROVED code exists
         code_values = [code.value for code in codes]
@@ -130,6 +130,33 @@ class TestReasonCodes(unittest.TestCase):
                 f"{code} should map to REGIME, got {stage}"
             )
 
+    def test_stage_mapping_momentum(self):
+        """Test Momentum codes map to MOMENTUM stage"""
+        momentum_codes = [
+            ReasonCode.MOMENTUM_SCORE_TOO_LOW,
+            ReasonCode.MOMENTUM_REGIME_BLOCKED,
+            ReasonCode.MOMENTUM_CAPITAL_LIMIT,
+            ReasonCode.MOMENTUM_POSITION_LIMIT,
+            ReasonCode.MOMENTUM_COOLDOWN,
+            ReasonCode.MOMENTUM_DUPLICATE,
+            ReasonCode.MOMENTUM_RSI_TOO_HIGH,
+            ReasonCode.MOMENTUM_VOLUME_TOO_LOW,
+            ReasonCode.MOMENTUM_SPREAD_TOO_WIDE,
+            ReasonCode.MOMENTUM_WICK_RISK_TOO_HIGH,
+            ReasonCode.MOMENTUM_STOP_LOSS,
+            ReasonCode.MOMENTUM_TRAILING_STOP,
+            ReasonCode.MOMENTUM_TIME_STOP,
+            ReasonCode.MOMENTUM_REGIME_EXIT,
+        ]
+
+        for code in momentum_codes:
+            stage = get_stage_for_reason(code)
+            self.assertEqual(
+                stage,
+                Stage.MOMENTUM,
+                f"{code} should map to MOMENTUM, got {stage}"
+            )
+
     def test_all_codes_have_unique_values(self):
         """Ensure no duplicate reason code values"""
         values = [code.value for code in ReasonCode]
@@ -153,11 +180,11 @@ class TestReasonCodes(unittest.TestCase):
         )
 
     def test_stage_count(self):
-        """Verify we have exactly 6 stages (added EXECUTOR_CREATE)"""
+        """Verify we have exactly 7 stages (includes MOMENTUM)"""
         stages = list(Stage)
-        self.assertEqual(len(stages), 6, f"Expected 6 stages, got {len(stages)}")
+        self.assertEqual(len(stages), 8, f"Expected 8 stages, got {len(stages)}")
 
-        expected_stages = {"SMART_ENTRY", "MTF", "RISK", "EXECUTION", "REGIME", "EXECUTOR_CREATE"}
+        expected_stages = {"SMART_ENTRY", "MTF", "RISK", "EXECUTION", "REGIME", "MOMENTUM", "EXECUTOR_CREATE", "EDGE_GATE"}
         actual_stages = {stage.value for stage in stages}
 
         self.assertEqual(expected_stages, actual_stages, "Stage set mismatch")

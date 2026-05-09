@@ -657,5 +657,102 @@ class TestProfessionalRiskManager(unittest.TestCase):
         self.assertTrue(can_open, f"Should NOT pause with 60% WR, but got: {reason}")
 
 
+class TestHighWaterMarkReset(unittest.TestCase):
+    """
+    Tests for the ONDO-bug fix: high water mark must be reset when a new executor opens.
+
+    Bug: position_high_water_marks persisted from a previous executor.  When a new
+    executor opened the risk manager saw a large peak (from the old run) and an
+    already-negative drawdown, immediately firing PROFIT_LOCK and trapping the new
+    executor in a multi-hour stuck-close cycle.
+    """
+
+    def setUp(self):
+        self.risk_mgr = ProfessionalRiskManager(
+            max_daily_loss_pct=0.03,
+            max_positions=6,
+            atr_stop_multiplier=2.0,
+            min_stop_pct=0.02,
+            max_stop_pct=0.08,
+            time_based_stop_minutes=360,
+            time_stop_requires_stall=True,
+            price_stall_threshold_atr=0.3,
+            min_minutes_since_last_fill=45,
+            profit_lock_tiers=[
+                (0.01, 0.005, 0.0),   # Peak +1% → drawdown 0.5% → lock 0%
+            ],
+            min_rolling_pnl_pct=-0.02,
+            min_win_rate=0.35,
+            pause_cooldown_minutes=120,
+            resume_min_pnl_pct=0.0,
+        )
+
+    def _position(self, symbol, pnl_pct, time_held_minutes=0):
+        return PositionRisk(
+            symbol=symbol,
+            entry_price=Decimal("0.3194"),
+            current_price=Decimal("0.3194") * Decimal(str(1 + pnl_pct)),
+            unrealized_pnl_pct=pnl_pct,
+            time_held_minutes=time_held_minutes,
+            atr_pct=0.02,
+            initial_stop_pct=0.03,
+            current_stop_pct=0.03,
+            trailing_stop_distance_pct=0.0,
+            max_hold_time_minutes=360,
+            is_time_expired=False,
+            entry_confidence=0.7,
+        )
+
+    def test_fresh_executor_no_stale_peak(self):
+        """A brand-new executor with pnl=0 must not get PROFIT_LOCK."""
+        pos = self._position("ONDO-USD", pnl_pct=0.0)
+        action, _ = self.risk_mgr.should_exit_position(pos)
+        self.assertEqual(action, "HOLD")
+
+    def test_stale_peak_triggers_profit_lock_without_reset(self):
+        """Reproduce the bug: old peak left in place triggers immediate PROFIT_LOCK."""
+        # Simulate previous executor that reached +1.5% peak
+        self.risk_mgr.position_high_water_marks["ONDO-USD"] = 0.015
+
+        # New executor opens flat (pnl = 0%)
+        pos = self._position("ONDO-USD", pnl_pct=0.0)
+        action, reason = self.risk_mgr.should_exit_position(pos)
+        # Without fix, this fires PROFIT_LOCK (drawdown 1.5% from peak ≥ 0.5% threshold)
+        self.assertEqual(action, "PROFIT_LOCK", f"Expected PROFIT_LOCK without reset, got: {reason}")
+
+    def test_resetting_high_water_mark_prevents_spurious_profit_lock(self):
+        """After resetting the high water mark, a flat new executor stays HOLD."""
+        # Stale peak from previous run
+        self.risk_mgr.position_high_water_marks["ONDO-USD"] = 0.015
+
+        # Controller calls .pop() on the dict when creating a new executor (the fix)
+        self.risk_mgr.position_high_water_marks.pop("ONDO-USD", None)
+
+        # New executor opens flat
+        pos = self._position("ONDO-USD", pnl_pct=0.0)
+        action, _ = self.risk_mgr.should_exit_position(pos)
+        self.assertEqual(action, "HOLD")
+
+    def test_high_water_mark_cleared_by_record_trade_result(self):
+        """record_trade_result must clear the high water mark for the symbol."""
+        self.risk_mgr.position_high_water_marks["ONDO-USD"] = 0.015
+        self.risk_mgr.record_trade_result(
+            symbol="ONDO-USD", pnl_pct=0.005,
+            close_reason="PROFIT_LOCK", hold_time_minutes=60
+        )
+        self.assertNotIn("ONDO-USD", self.risk_mgr.position_high_water_marks)
+
+    def test_legitimate_profit_lock_still_fires(self):
+        """A genuine spike-then-pullback on the SAME executor still fires PROFIT_LOCK."""
+        # Executor running for 20 min, reached +1.5% peak
+        pos_peak = self._position("ONDO-USD", pnl_pct=0.015, time_held_minutes=5)
+        self.risk_mgr.should_exit_position(pos_peak)  # sets high water mark to 0.015
+
+        # Price pulls back to +0.0% (drawdown 1.5% from peak ≥ 0.5%)
+        pos_now = self._position("ONDO-USD", pnl_pct=0.0, time_held_minutes=6)
+        action, _ = self.risk_mgr.should_exit_position(pos_now)
+        self.assertEqual(action, "PROFIT_LOCK")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -29,7 +29,7 @@ STATE_TYPES = {
     "cancelled": OrderState.CANCELED,
 }
 
-SECONDS_TO_WAIT_TO_RECEIVE_MESSAGE = 20
+SECONDS_TO_WAIT_TO_RECEIVE_MESSAGE = 40  # must be > WS_HEARTBEAT_TIME_INTERVAL to avoid spurious timeouts
 WS_HEARTBEAT_TIME_INTERVAL = 30
 
 PUBLIC_ORDERBOOK_ENDPOINT = "/api/v2/spot/market/orderbook"

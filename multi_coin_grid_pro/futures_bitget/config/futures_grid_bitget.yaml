@@ -466,3 +466,28 @@ grid_suitability:
   min_grid_score: 0.30
   lookback_candles: 48
   range_efficiency_max: 0.70
+
+# ==============================================================================
+# MOMENTUM SLEEVE (Fase 2 — detect-only, geen orders)
+# ==============================================================================
+
+momentum_sleeve:
+  mode: detect_only
+  min_score_to_enter: 55
+  momentum_1h_min_pct: 0.5
+  momentum_4h_min_pct: 1.0
+  momentum_max_rsi: 80
+  momentum_min_volume_expansion: 1.0   # Verlaagd van 1.2 → 1.0: in CHOP is volume flat, niet uitbreidend
+  momentum_regime_gate:
+    - BULL
+    - CHOP
+  momentum_max_spread_pct: 0.5
+  momentum_max_wick_risk: 0.7
+  rejected_log_throttle_seconds: 300
+  scorer_weights:
+    trend_1h: 0.25
+    trend_4h: 0.30
+    volume_expansion: 0.20
+    relative_strength: 0.15
+    spread: 0.05
+    rsi_wick_risk: 0.05

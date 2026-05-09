@@ -23,26 +23,43 @@ try:
     from hummingbot.model import get_declarative_base
     from hummingbot.model.executors import Executors
 
-    # Get database path
-    db_path = Path(__file__).parent.parent / "data" / "hummingbot_trades.db"
-    if not db_path.exists():
-        # Try alternative location
-        db_path = Path(__file__).parent.parent / "hummingbot" / "data" / "hummingbot_trades.db"
+    data_dir = Path(__file__).parent.parent / "data"
 
-    if db_path.exists():
-        print(f"📊 Reading executor data from database: {db_path}")
+    # Candidate databases that contain the Executors table (newest hummingbot format uses .sqlite)
+    candidate_dbs = sorted(data_dir.glob("*.sqlite")) + sorted(data_dir.glob("*.db"))
+
+    executors = []
+    db_sources = []
+    for db_path in candidate_dbs:
+        try:
+            engine = create_engine(f'sqlite:///{db_path}', connect_args={"check_same_thread": False})
+            Base = get_declarative_base()
+            # Quick check: does Executors table exist?
+            with engine.connect() as conn:
+                from sqlalchemy import text
+                result = conn.execute(text(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='Executors'"
+                ))
+                if not result.fetchone():
+                    continue
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            rows = session.query(Executors).filter(
+                Executors.controller_id.like('%multi_coin_grid%')
+            ).order_by(Executors.timestamp.desc()).all()
+            if rows:
+                executors.extend(rows)
+                db_sources.append(str(db_path.name))
+            session.close()
+        except Exception:
+            continue
+
+    # Sort all executors newest first
+    executors.sort(key=lambda e: e.timestamp, reverse=True)
+
+    if db_sources:
+        print(f"📊 Reading executor data from: {', '.join(db_sources)}")
         print()
-
-        # Create database connection
-        engine = create_engine(f'sqlite:///{db_path}')
-        Base = get_declarative_base()
-        Session = sessionmaker(bind=engine)
-        session = Session()
-
-        # Get all executors for multi_coin_grid controller
-        executors = session.query(Executors).filter(
-            Executors.controller_id.like('%multi_coin_grid%')
-        ).order_by(Executors.timestamp.desc()).all()
 
         if executors:
             print(f"Found {len(executors)} executor(s) in database:")
@@ -106,14 +123,12 @@ try:
                 print()
                 print("➖ BOT IS BREAK-EVEN")
         else:
-            print("❌ No executors found in database")
+            print("❌ No executors found in any database")
             print("   The bot may not have created any executors yet, or")
             print("   the database is in a different location")
     else:
-        print(f"❌ Database not found at: {db_path}")
+        print(f"❌ No databases with Executors table found in: {data_dir}")
         print("   The bot may not have run yet, or database is elsewhere")
-
-    session.close()
 
 except ImportError as e:
     print(f"⚠️  Could not import database modules: {e}")

@@ -43,6 +43,11 @@ class EarlyStopReason(Enum):
     STRATEGY_SWITCH = 51           # Switching to different coin/strategy
     CONTROLLER_SHUTDOWN = 52       # Controller is shutting down
 
+    # Emergency exits
+    STOP_LOSS = 60                 # Controller stop is an explicit stop-loss unwind
+    HARD_STOP_EXIT = 61            # Controller hard-stop/emergency unwind
+    EMERGENCY_EXIT = 62            # Generic emergency unwind
+
 
 class CloseType(Enum):
     TIME_LIMIT = 1

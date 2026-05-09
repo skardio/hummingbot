@@ -196,11 +196,19 @@ def create_audit_from_executor(executor, close_reason: str) -> ExecutionAudit:
     Returns:
         ExecutionAudit ready to write
     """
-    from hummingbot.strategy_v2.models.executors import CLOSE_TYPE_PRIORITY
-    from hummingbot.strategy_v2.models.executors_info import ExecutorInfo
+    try:
+        from hummingbot.strategy_v2.models.executors import CLOSE_TYPE_PRIORITY
+        from hummingbot.strategy_v2.models.executors_info import ExecutorInfo
+    except ModuleNotFoundError:
+        # Unit tests for this pure audit helper can run without the full
+        # Hummingbot connector dependency stack installed.
+        CLOSE_TYPE_PRIORITY = {}
+        ExecutorInfo = None
+
+    is_executor_info = ExecutorInfo is not None and isinstance(executor, ExecutorInfo)
 
     # Handle both GridExecutor and ExecutorInfo
-    if isinstance(executor, ExecutorInfo):
+    if is_executor_info:
         # Working with ExecutorInfo (from executors_info list)
         end_ts = executor.close_timestamp if executor.close_timestamp else executor.timestamp
         start_ts = executor.timestamp
@@ -240,22 +248,34 @@ def create_audit_from_executor(executor, close_reason: str) -> ExecutionAudit:
         graceful_success = (unwind_phase == "GRACEFUL")
 
     # Financial metrics (safely convert Decimal to string)
-    # For ExecutorInfo, use standard attributes
-    if isinstance(executor, ExecutorInfo):
-        realized_pnl = str(executor.net_pnl_quote)
-        fees = str(executor.cum_fees_quote)
+    # GridExecutor.realized_pnl_quote/net_pnl_quote are already net of fees.
+    # Do not subtract cum_fees_quote again here; that was double-counting buy
+    # fees in audit output.
+    if is_executor_info:
+        custom_info = executor.custom_info or {}
+        realized_pnl = str(custom_info.get("realized_pnl_quote", executor.net_pnl_quote))
+        fees = str(custom_info.get("realized_fees_quote", executor.cum_fees_quote))
+        net_pnl = str(executor.net_pnl_quote)
     else:
-        realized_pnl = str(executor.cum_realized_pnl_quote) if hasattr(executor, 'cum_realized_pnl_quote') else "0"
-        fees = str(executor.cum_fees_quote) if hasattr(executor, 'cum_fees_quote') else "0"
-
-    # Calculate net PNL
-    try:
-        net_pnl = str(Decimal(realized_pnl) - Decimal(fees))
-    except Exception:
-        net_pnl = "0"
+        realized_value = getattr(executor, 'realized_pnl_quote', None)
+        if not isinstance(realized_value, (Decimal, int, float, str)):
+            realized_value = None
+        if realized_value is None and hasattr(executor, 'cum_realized_pnl_quote'):
+            realized_value = executor.cum_realized_pnl_quote
+        if realized_value is None:
+            realized_value = getattr(executor, 'net_pnl_quote', Decimal("0"))
+        realized_pnl = str(realized_value)
+        fees_value = executor.cum_fees_quote if hasattr(executor, 'cum_fees_quote') else Decimal("0")
+        if not isinstance(fees_value, (Decimal, int, float, str)):
+            fees_value = Decimal("0")
+        fees = str(fees_value)
+        net_value = executor.net_pnl_quote if hasattr(executor, 'net_pnl_quote') else realized_value
+        if not isinstance(net_value, (Decimal, int, float, str)):
+            net_value = realized_value
+        net_pnl = str(net_value)
 
     # Config snapshot (minimal - extend as needed)
-    if isinstance(executor, ExecutorInfo):
+    if is_executor_info:
         # ExecutorInfo: use config object
         config = executor.config
         config_snapshot = {
@@ -298,9 +318,9 @@ def create_audit_from_executor(executor, close_reason: str) -> ExecutionAudit:
         fees_quote=fees,
         net_pnl_quote=net_pnl,
         num_fills=len(filled_orders),
-        num_open_fills=len(executor.custom_info.get('open_fills', [])) if isinstance(executor, ExecutorInfo) and hasattr(executor, 'custom_info') else 0,
-        num_close_fills=len(executor.custom_info.get('close_fills', [])) if isinstance(executor, ExecutorInfo) and hasattr(executor, 'custom_info') else 0,
-        num_closed_levels=len(executor.custom_info.get('closed_levels', [])) if isinstance(executor, ExecutorInfo) and hasattr(executor, 'custom_info') else 0,
+        num_open_fills=len(executor.custom_info.get('open_fills', [])) if is_executor_info and hasattr(executor, 'custom_info') else 0,
+        num_close_fills=len(executor.custom_info.get('close_fills', [])) if is_executor_info and hasattr(executor, 'custom_info') else 0,
+        num_closed_levels=len(executor.custom_info.get('closed_levels', [])) if is_executor_info and hasattr(executor, 'custom_info') else 0,
         time_to_first_fill_sec=time_to_first_fill,
         time_to_last_fill_sec=time_to_last_fill,
         time_in_graceful_unwind_sec=time_in_graceful,

@@ -184,6 +184,7 @@ class EventLogger:
             config_hash: Hash of config for run tracking
             config_keys: Optional dict of key config values
         """
+        self.config_hash = config_hash  # Persist so all subsequent events carry the hash
         self._emit("config_loaded", {
             "config_hash": config_hash,
             "config_keys": config_keys or {}

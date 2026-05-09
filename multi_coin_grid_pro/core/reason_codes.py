@@ -22,7 +22,9 @@ class Stage(str, Enum):
     RISK = "RISK"
     EXECUTION = "EXECUTION"
     REGIME = "REGIME"
+    MOMENTUM = "MOMENTUM"
     EXECUTOR_CREATE = "EXECUTOR_CREATE"  # US-004: Budget allocation stage
+    EDGE_GATE = "EDGE_GATE"  # ST-12: Economic edge gate
 
 
 class ReasonCode(str, Enum):
@@ -84,6 +86,9 @@ class ReasonCode(str, Enum):
     ORDERBOOK_ERROR = "ORDERBOOK_ERROR"
     INSUFFICIENT_BUDGET = "INSUFFICIENT_BUDGET"  # US-004: Not enough free capital
 
+    # ===== EDGE_GATE (1 code) =====
+    EDGE_GATE_REJECTED = "EDGE_GATE_REJECTED"  # ST-12: Grid spread too small to cover fees
+
     # ===== EXIT (3 codes) =====
     STOP_LOSS = "STOP_LOSS"          # US-005: Stop-loss triggered
     TIME_STOP = "TIME_STOP"          # US-005: Max hold time exceeded
@@ -92,6 +97,22 @@ class ReasonCode(str, Enum):
     # ===== REGIME (2 codes) =====
     REGIME_BTC_DUMP = "REGIME_BTC_DUMP"
     REGIME_DUMP_COOLDOWN = "REGIME_DUMP_COOLDOWN"
+
+    # ===== MOMENTUM (14 codes) =====
+    MOMENTUM_SCORE_TOO_LOW = "MOMENTUM_SCORE_TOO_LOW"
+    MOMENTUM_REGIME_BLOCKED = "MOMENTUM_REGIME_BLOCKED"
+    MOMENTUM_CAPITAL_LIMIT = "MOMENTUM_CAPITAL_LIMIT"
+    MOMENTUM_POSITION_LIMIT = "MOMENTUM_POSITION_LIMIT"
+    MOMENTUM_COOLDOWN = "MOMENTUM_COOLDOWN"
+    MOMENTUM_DUPLICATE = "MOMENTUM_DUPLICATE"
+    MOMENTUM_RSI_TOO_HIGH = "MOMENTUM_RSI_TOO_HIGH"
+    MOMENTUM_VOLUME_TOO_LOW = "MOMENTUM_VOLUME_TOO_LOW"
+    MOMENTUM_SPREAD_TOO_WIDE = "MOMENTUM_SPREAD_TOO_WIDE"
+    MOMENTUM_WICK_RISK_TOO_HIGH = "MOMENTUM_WICK_RISK_TOO_HIGH"
+    MOMENTUM_STOP_LOSS = "MOMENTUM_STOP_LOSS"
+    MOMENTUM_TRAILING_STOP = "MOMENTUM_TRAILING_STOP"
+    MOMENTUM_TIME_STOP = "MOMENTUM_TIME_STOP"
+    MOMENTUM_REGIME_EXIT = "MOMENTUM_REGIME_EXIT"
 
 
 def get_stage_for_reason(reason: ReasonCode) -> Stage:
@@ -120,11 +141,28 @@ def get_stage_for_reason(reason: ReasonCode) -> Stage:
         ReasonCode.COOLDOWN_EXIT, ReasonCode.COOLDOWN_SWITCH, ReasonCode.COOLDOWN_LOSS_STREAK,
         ReasonCode.POSITION_LIMIT,
     }
+    edge_gate_codes = {ReasonCode.EDGE_GATE_REJECTED}
     execution_codes = {
         ReasonCode.BLACKLIST, ReasonCode.SLOT_FULL, ReasonCode.ALREADY_TRADING,
         ReasonCode.STARTUP_DELAY, ReasonCode.NOT_TRADEABLE, ReasonCode.ORDERBOOK_ERROR,
     }
     regime_codes = {ReasonCode.REGIME_BTC_DUMP, ReasonCode.REGIME_DUMP_COOLDOWN}
+    momentum_codes = {
+        ReasonCode.MOMENTUM_SCORE_TOO_LOW,
+        ReasonCode.MOMENTUM_REGIME_BLOCKED,
+        ReasonCode.MOMENTUM_CAPITAL_LIMIT,
+        ReasonCode.MOMENTUM_POSITION_LIMIT,
+        ReasonCode.MOMENTUM_COOLDOWN,
+        ReasonCode.MOMENTUM_DUPLICATE,
+        ReasonCode.MOMENTUM_RSI_TOO_HIGH,
+        ReasonCode.MOMENTUM_VOLUME_TOO_LOW,
+        ReasonCode.MOMENTUM_SPREAD_TOO_WIDE,
+        ReasonCode.MOMENTUM_WICK_RISK_TOO_HIGH,
+        ReasonCode.MOMENTUM_STOP_LOSS,
+        ReasonCode.MOMENTUM_TRAILING_STOP,
+        ReasonCode.MOMENTUM_TIME_STOP,
+        ReasonCode.MOMENTUM_REGIME_EXIT,
+    }
 
     if reason in smart_entry_codes:
         return Stage.SMART_ENTRY
@@ -132,9 +170,13 @@ def get_stage_for_reason(reason: ReasonCode) -> Stage:
         return Stage.MTF
     elif reason in risk_codes:
         return Stage.RISK
+    elif reason in edge_gate_codes:
+        return Stage.EDGE_GATE
     elif reason in execution_codes:
         return Stage.EXECUTION
     elif reason in regime_codes:
         return Stage.REGIME
+    elif reason in momentum_codes:
+        return Stage.MOMENTUM
     else:
         return Stage.EXECUTION  # Default fallback

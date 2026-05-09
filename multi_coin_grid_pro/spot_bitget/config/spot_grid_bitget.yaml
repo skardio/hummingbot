@@ -125,6 +125,8 @@ adaptive_filters:
     max_down_accel_pct: -15.0       # 🚀 -6→-15 (deep dips OK in bull)
     atr_min_pct: 0.05               # 🔧 HF-01 2026-04-04: 1.5→0.05 (restore BULL value)
     spike_5m_max_pct: 5.0           # 🚀 3.5→5 (big moves OK)
+    max_trend_24h_pct: 25.0         # FIX 2026-05-01: pumps normaal in BULL (baseline=15)
+    max_trend_4h_pct: 5.0           # FIX 2026-05-01: 4h rally OK in BULL (baseline=2.5)
     grid_spacing_mult: 1.2
     max_active_grids: 6             # 🚀 TASK 1.2: 3→6 (was 3)
     entry_confidence_min: 0.55      # T3-F3: 0.60→0.55
@@ -137,6 +139,8 @@ adaptive_filters:
     max_down_accel_pct: -4.0        # 🚀 -2.5→-4 (deeper dips OK)
     atr_min_pct: 0.06               # 🔧 HF-01 2026-04-04: 1.5→0.06 (restore CHOP value)
     spike_5m_max_pct: 3.0           # 🚀 2.5→3 (bigger moves)
+    max_trend_24h_pct: 15.0         # FIX 2026-05-01: baseline waarde (ranging market)
+    max_trend_4h_pct: 2.5           # FIX 2026-05-01: baseline waarde
     grid_spacing_mult: 0.8
     max_active_grids: 3             # 🚀 TASK 1.2: 2→3 (was 2)
     entry_confidence_min: 0.65      # T3-F3: 0.70→0.65
@@ -149,6 +153,8 @@ adaptive_filters:
     max_down_accel_pct: -3.0        # T3-F3: -2.0→-3.0 (ruimer voor dips)
     atr_min_pct: 0.08               # 🔧 HF-01 2026-04-04: 1.5→0.08 (restore BEAR value)
     spike_5m_max_pct: 2.0           # 🔧 FIX: 1.0→2.0 (allow bigger moves)
+    max_trend_24h_pct: 10.0         # FIX 2026-05-01: strenger in BEAR
+    max_trend_4h_pct: 2.0           # FIX 2026-05-01: strenger in BEAR
     grid_spacing_mult: 1.5
     max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid even in BEAR)
     entry_confidence_min: 0.80      # T3-F3: unchanged (was already 0.80)
@@ -443,7 +449,7 @@ fee_aware_filter:
   enabled: true
   taker_fee_pct: 0.20            # Bitget taker fee (lower than Kraken)
   maker_fee_pct: 0.10            # Bitget maker fee
-  fee_model: average             # worst_case (2×taker) | average (taker+maker) | best_case (2×maker)
+  fee_model: best_case           # 🔧 FIX 2026-05-02b: average→best_case (grid orders = limit/maker; maker+maker=0.20% RT)
   min_net_profit_pct: 0.2        # Min expected profit after fees
   # V2-04: Expected-Fill Hourly Profit Model
   hourly_profit_check_enabled: false  # false = shadow mode (logs only), true = blocks entry
@@ -470,7 +476,7 @@ idle_mode:
 economic_edge_gate:
   enabled: true
   min_edge_pct: 0.08             # Lower than Kraken (Bitget fees are lower)
-  include_spread_cost: true      # Factor in bid-ask spread cost
+  include_spread_cost: false     # 🔧 FIX 2026-05-02: disabled (spread cost was 0.15% extra; total now 0.33% vs 0.48%)
   include_slippage_buffer_pct: 0.03  # Lower slippage on Bitget (more liquid)
 
 # ==============================================================================
@@ -513,7 +519,7 @@ smart_entry_filter:
 
   # Volatiliteit / ATR
   max_atr_pct_for_grid: 7.0        # 🔧 FIX: 8→7 (profiles override for memes)
-  min_atr_pct_for_grid: 0.30       # 🔧 RE-01 2026-04: 0.15→0.30 (low-ATR coins don't reach TP, focus on volatile)
+  min_atr_pct_for_grid: 0.15       # 🔧 2026-04-29: 0.30→0.15 fallback (regime override: BULL=0.05, CHOP=0.06, BEAR=0.08 via adaptive_filters)
 
   # Short-term spikes
   max_5m_spike_pct: 4.0            # 🔧 FIX: 5→4 (profiles override for memes)
@@ -1448,8 +1454,11 @@ r_unit_quote: 5.0                  # 1R = $5
 capital_reserve_pct: 10.0         # 10% achtergehouden voor hoge-kwaliteit entries
 
 # Trailing TP: lock in profit when price rises past activation, exit if it drops back by delta
-trailing_stop_activation_pct: 0.02   # 🔧 TUNED 2026-04-02: 0.015→0.02 (trail only after 2%, more room to run)
-trailing_stop_delta_pct: 0.005       # 🔧 TUNED 2026-04-02: 0.007→0.005 (tighter trail, lock in gains faster)
+# trailing_stop_activation_pct: 0.05   # 🔧 HOTFIX 2026-05-05: 0.02→0.05 (trail pas actief na +5%, crash-bescherming)
+# trailing_stop_delta_pct: 0.03        # 🔧 HOTFIX 2026-05-05: 0.005→0.03 (3% ruimte, niet liquideren bij kleine dip)
+
+trailing_stop_activation_pct: 0.015   # Activeer bij +1.5% net/open P&L zodat winnaars eerder tracked worden
+trailing_stop_delta_pct: 0.010
 
 # Dynamic TP: scale take-profit with ATR (volatile coins get wider TP, quiet coins get tighter)
 dynamic_tp_enabled: true
@@ -1534,6 +1543,31 @@ min_startup_wait_seconds: 60       # 🚀 FIX: 90→60 (1 min startup delay)
 
 smart_switch_k: 2.0
 switch_cost_multiplier: 3.5          # 🔧 TUNED 2026-04-03: 2.5→3.5 (straf switching zwaarder af, fees + spread zijn reëel)
+
+# ==============================================================================
+# MOMENTUM SLEEVE (Fase 2 — detect-only, geen orders)
+# ==============================================================================
+
+momentum_sleeve:
+  mode: detect_only
+  min_score_to_enter: 55
+  momentum_1h_min_pct: 0.5
+  momentum_4h_min_pct: 1.0
+  momentum_max_rsi: 80
+  momentum_min_volume_expansion: 1.0   # Verlaagd van 1.2 → 1.0: in CHOP is volume flat, niet uitbreidend
+  momentum_regime_gate:
+    - BULL
+    - CHOP
+  momentum_max_spread_pct: 0.5
+  momentum_max_wick_risk: 0.7
+  rejected_log_throttle_seconds: 300
+  scorer_weights:
+    trend_1h: 0.25
+    trend_4h: 0.30
+    volume_expansion: 0.20
+    relative_strength: 0.15
+    spread: 0.05
+    rsi_wick_risk: 0.05
 
 # ==============================================================================
 # ==============================================================================

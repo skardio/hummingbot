@@ -176,7 +176,14 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
         self.assertEqual(self.base_cfg.max_atr_pct_for_grid, 8.0)
 
     def test_yaml_limits_clamp_adaptive(self):
-        """RE-01: Adaptive values clamped so they never loosen YAML limits"""
+        """RE-01: Adaptive values clamped so they never loosen YAML limits.
+
+        Note: min_atr_pct_for_grid is intentionally NOT in min_fields — regime is
+        allowed to lower it below the YAML baseline (HF-01 fix).
+        Note: rsi_buy_max is intentionally NOT clamped — BULL regime must be able to
+        raise it above the YAML baseline (e.g. baseline=65, BULL=76). The per-regime
+        YAML values already express the operator's intent.
+        """
         # Set YAML limits: RSI max 60, ATR min 0.30
         self.controller._yaml_smart_entry_limits = {
             'rsi_buy_max': 60.0,
@@ -188,8 +195,8 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
 
         # Adaptive tries to loosen all of them
         filters = {
-            'rsi_buy_max': 75.0,    # wants 75, YAML says max 60
-            'atr_min_pct': 0.05,    # wants 0.05, YAML says min 0.30
+            'rsi_buy_max': 75.0,    # wants 75 — NOT clamped (BULL regime can raise RSI max)
+            'atr_min_pct': 0.05,    # wants 0.05 — NOT clamped (regime can lower ATR min)
             'max_up_accel_pct': 8.0,  # wants 8, YAML says max 5
             'rsi_buy_min': 10.0,    # wants 10, YAML extreme_low says 18
             'max_down_accel_pct': -3.0,  # wants -3 (looser), YAML says -6
@@ -197,11 +204,15 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
 
         MultiCoinGridController._apply_adaptive_filters(self.controller, filters)
 
-        # All clamped to YAML limits
-        self.assertEqual(self.base_cfg.rsi_buy_max, 60.0)
-        self.assertEqual(self.base_cfg.min_atr_pct_for_grid, 0.30)
+        # rsi_buy_max: freely set by regime (BULL=76 > baseline=65 is valid)
+        self.assertEqual(self.base_cfg.rsi_buy_max, 75.0)
+        # ATR min: regime override allowed
+        self.assertEqual(self.base_cfg.min_atr_pct_for_grid, 0.05)
+        # accel max: still clamped to YAML ceiling
         self.assertEqual(self.base_cfg.max_up_accel_pct, 5.0)
+        # rsi extreme_low: clamped to YAML floor
         self.assertEqual(self.base_cfg.rsi_extreme_low, 18.0)
+        # down_accel: clamped (more negative = stricter = allowed; less negative = blocked)
         self.assertEqual(self.base_cfg.max_down_accel_pct, -6.0)
 
     def test_yaml_limits_allow_stricter(self):

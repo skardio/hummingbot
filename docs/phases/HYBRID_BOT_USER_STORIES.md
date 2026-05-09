@@ -53,6 +53,65 @@ US-F6 (echte momentum orders) → aparte executor, minimaal 30 dagen live_small 
 
 ---
 
+## Implementatiestatus 2026-04-28 — Fase 1 + Fase 2
+
+**Code status:** Fase 1 en Fase 2 zijn geïmplementeerd als detect-only uitbreiding. Fase 3+ is bewust niet gebouwd.
+
+**Gewijzigde code**
+- `multi_coin_grid_pro/controllers/multi_coin_grid_controller.py`
+  - Regime input kiest nu `BTC-{quote}` → `SOL-{quote}` → monitored alt fallback.
+  - BTC/SOL macro-trends worden apart gecachet voor regime/momentum context, zonder ze aan `monitored_coins` of grid-selectie toe te voegen.
+  - Slot manager gebruikt `_last_detected_regime` als fallback wanneer `market_regime_filter` geen bruikbaar regime geeft.
+  - `[REGIME_ROUTE]` log bevat `source`, `detected`, `normalized`, `slots`, `balance`.
+  - Eerste succesvolle regime detectie logt `REGIME (initial boot)`.
+  - Detect-only momentum scoring draait in de controller-cycle en logt allowed/rejected kandidaten.
+  - `momentum_sleeve` config wordt veilig gelezen als dict, Pydantic model of simpel object.
+- `multi_coin_grid_pro/controllers/multi_coin_grid_config.py`
+  - Minimale `momentum_sleeve` detect-only defaults toegevoegd.
+- `hummingbot/connector/exchange/kraken/kraken_auth.py`
+  - Kraken private API nonce gebruikt nu epoch-microseconds in plaats van epoch-milliseconds om lokale nonce-collisions te verkleinen.
+- `multi_coin_grid_pro/core/reason_codes.py`
+  - `Stage.MOMENTUM` en momentum reason codes toegevoegd.
+- `multi_coin_grid_pro/logic/momentum_candidate_scorer.py`
+  - Nieuwe pure `MomentumCandidate` + `MomentumCandidateScorer`.
+  - Volume expansion negeert zero-volume live ticker candles en gebruikt de laatste niet-nul candle tegenover een niet-nul baseline.
+- Tests toegevoegd in:
+  - `multi_coin_grid_pro/tests/unit/test_controller_methods.py`
+  - `multi_coin_grid_pro/tests/unit/test_momentum_candidate_scorer.py`
+  - `multi_coin_grid_pro/tests/core/test_reason_codes.py`
+  - `test/hummingbot/connector/exchange/kraken/test_kraken_auth.py`
+
+**Bewuste non-goals**
+- Geen `MomentumSleeveManager`.
+- Geen `CapitalAllocator`.
+- Geen paper posities.
+- Geen live-small.
+- Geen echte orders.
+- Geen `MomentumExecutor`.
+- Geen `GridExecutor` wijzigingen.
+- Geen wijzigingen aan grid entry thresholds.
+- Geen persistent momentum state.
+
+**Verificatie gedraaid**
+- `.venv/bin/pytest -q multi_coin_grid_pro/tests/unit/test_controller_methods.py::TestMomentumDetectOnlyController` → 4 passed
+- `.venv/bin/pytest -q multi_coin_grid_pro/tests/unit/test_controller_methods.py::TestRegimeRouting` → 8 passed
+- `.venv/bin/pytest -q multi_coin_grid_pro/tests/unit/test_momentum_candidate_scorer.py` → 12 passed
+- `.venv/bin/pytest -q multi_coin_grid_pro/tests/core/test_reason_codes.py` → 13 passed
+- `.venv/bin/pytest -q test/hummingbot/connector/exchange/kraken/test_kraken_auth.py` → 2 passed
+- `.venv/bin/flake8` op alle gewijzigde F1/F2 bestanden → schoon
+- `python -m py_compile` op controller, scorer en Kraken auth → OK
+
+**Nog te bewijzen in runtime**
+- Live log moet na een bot-start `REGIME (initial boot)` en `[REGIME_ROUTE]` tonen; BTC hoort stabiel als `btc_direct` of `btc_cached` regime input zichtbaar te blijven zolang BTC data laadbaar is.
+- Live detect-only log moet `[MOMENTUM_CANDIDATE_ALLOWED]` en/of `[MOMENTUM_CANDIDATE_REJECTED]` tonen zodra genoeg trend/indicator data beschikbaar is; volume rejects moeten opnieuw beoordeeld worden na de zero-volume hardening.
+- Fase 2 proof gate blijft: minimaal 48 uur detect-only data + handmatige operator-review.
+- Fase 3 blijft geblokkeerd tot die detect-only periode schoon is en Kraken nonce errors operationeel zijn uitgesloten.
+
+**Pad-opmerking**
+`hummingbot/multi_coin_grid_controllers` is een symlink naar `../multi_coin_grid_pro/controllers`; controller-sync vereist in deze checkout dus geen tweede patch.
+
+---
+
 ## Fase 1 — Regime Routing Fix
 
 > **Doel:** Regime detectie stuurt echt de slot manager en toekomstige momentum gate aan.
@@ -81,11 +140,11 @@ Alleen als geen van beide beschikbaar is, gebruik de bestaande altcoin-fallback.
 Log welke coin als regime-input wordt gebruikt bij elke detectie.
 
 **Acceptatiecriteria**
-- [ ] `_detect_current_regime()` probeert eerst `BTC-USD` direct uit `trend_calculator.trends`
-- [ ] Als BTC-USD niet beschikbaar: probeert `SOL-USD`
-- [ ] Als geen van beide: valt terug op bestaande `monitored_coins[0]` logica
-- [ ] Log bij startup: welke coin als regime-input gekozen is
-- [ ] Bestaande smoothing (3× bevestiging) blijft intact
+- [x] `_detect_current_regime()` probeert eerst `BTC-USD` direct uit `trend_calculator.trends`
+- [x] Als BTC-USD niet beschikbaar: probeert `SOL-USD`
+- [x] Als geen van beide: valt terug op bestaande `monitored_coins[0]` logica
+- [x] Log bij startup: welke coin als regime-input gekozen is
+- [x] Bestaande smoothing (3× bevestiging) blijft intact
 
 **Niet doen**
 - BTC niet toevoegen aan `monitored_coins` (andere betekenis)
@@ -119,11 +178,11 @@ else:
 ```
 
 **Acceptatiecriteria**
-- [ ] `_get_dynamic_slots_count()` gebruikt `_last_detected_regime` als fallback
-- [ ] Als `_last_detected_regime` is `None` (startup): gebruikt `"baseline"`
-- [ ] BULL regime → slot multiplier > 1.0 (meer slots)
-- [ ] BEAR regime → slot multiplier < 1.0 (minder slots)
-- [ ] Geen wijziging aan de smoothing of het regime detectie algoritme zelf
+- [x] `_get_dynamic_slots_count()` gebruikt `_last_detected_regime` als fallback
+- [x] Als `_last_detected_regime` is `None` (startup): gebruikt `"baseline"`
+- [x] BULL regime → slot multiplier > 1.0 (meer slots)
+- [x] BEAR regime → slot multiplier < 1.0 (minder slots)
+- [x] Geen wijziging aan de smoothing of het regime detectie algoritme zelf
 
 **Niet doen**
 - Geen bypass van de smoothing
@@ -160,11 +219,11 @@ Voeg ook een boot-log toe na de eerste succesvolle regime detectie:
 ```
 
 **Acceptatiecriteria**
-- [ ] `[REGIME_ROUTE]` log verschijnt bij elke aanroep van `_get_dynamic_slots_count()`
-- [ ] Log bevat: `source`, `detected`, `normalized`, `slots`, `balance`
-- [ ] Boot-log verschijnt na eerste succesvolle detectie (niet alleen bij wijziging)
-- [ ] Log niveau: `INFO` voor `[REGIME_ROUTE]`, `INFO` voor boot-log
-- [ ] Geen dubbele logs bij ongewijzigd regime (de bestaande `🌡️` log blijft alleen bij wijziging)
+- [x] `[REGIME_ROUTE]` log verschijnt bij elke aanroep van `_get_dynamic_slots_count()`
+- [x] Log bevat: `source`, `detected`, `normalized`, `slots`, `balance`
+- [x] Boot-log verschijnt na eerste succesvolle detectie (niet alleen bij wijziging)
+- [x] Log niveau: `INFO` voor `[REGIME_ROUTE]`, `INFO` voor boot-log
+- [x] Geen dubbele logs bij ongewijzigd regime (de bestaande `🌡️` log blijft alleen bij wijziging)
 
 **Niet doen**
 - Geen DEBUG logs voor deze flow (moet zichtbaar zijn in productie)
@@ -195,15 +254,15 @@ Drie unit tests in een nieuwe klasse `TestRegimeRouting`.
 | `test_detect_regime_falls_back_to_altcoin` | Geen BTC of SOL in trends | `monitored_coins[0]` wordt gekozen |
 
 **Acceptatiecriteria**
-- [ ] Alle 5 tests aanwezig en groen
-- [ ] Tests gebruiken geen netwerk of echte exchange
-- [ ] `flake8` slaagt op het testbestand
+- [x] Alle 5 tests aanwezig en groen
+- [x] Tests gebruiken geen netwerk of echte exchange
+- [x] `flake8` slaagt op het testbestand
 
 **Proof gate Fase 1**
 
 Na implementatie van US-F1-01 t/m F1-04 geldt Fase 1 als bewezen als:
-- [ ] Alle tests groen (inclusief bestaande 1641)
-- [ ] `flake8` slaagt
+- [x] Gerichte F1 tests groen
+- [x] `flake8` slaagt op gewijzigde bestanden
 - [ ] In de live log: `[REGIME_ROUTE]` zichtbaar per cycle
 - [ ] In de live log: `🌡️ REGIME (initial boot)` zichtbaar na restart
 - [ ] `regime=baseline` verdwenen uit `Dynamic slots:` debug logs
@@ -250,10 +309,10 @@ class MomentumCandidate:
 ```
 
 **Acceptatiecriteria**
-- [ ] Dataclass aanwezig met alle velden
-- [ ] Alle velden hebben een type annotatie
-- [ ] `primary_rejection_reason` is `None` als `entry_allowed=True`
-- [ ] `all_rejection_reasons` is lege lijst als `entry_allowed=True`
+- [x] Dataclass aanwezig met alle velden
+- [x] Alle velden hebben een type annotatie
+- [x] `primary_rejection_reason` is `None` als `entry_allowed=True`
+- [x] `all_rejection_reasons` is lege lijst als `entry_allowed=True`
 
 ---
 
@@ -309,12 +368,12 @@ MomentumScorer heeft andere thresholds en andere afwijzing-logica.
 | 9 (laagst) | `MOMENTUM_SCORE_TOO_LOW` |
 
 **Acceptatiecriteria**
-- [ ] `MomentumCandidateScorer.score(symbol, trend_obj, btc_trend_obj, spread, rsi, wick_risk, regime)` → `MomentumCandidate`
-- [ ] Alle gewichten zijn config-driven (geen magic constants)
-- [ ] `entry_allowed=False` + `primary_rejection_reason` (hoogste prioriteit) + `all_rejection_reasons` als een of meer criteria falen
-- [ ] `primary_rejection_reason` volgt de vaste prioriteittabel hierboven
-- [ ] Scorer is pure functie: geen netwerk, geen exchange calls
-- [ ] Werkt als `btc_trend_obj` is `None` (RS = 0.0, niet crashen)
+- [x] `MomentumCandidateScorer.score(symbol, trend_obj, btc_trend_obj, spread, rsi, wick_risk, regime)` → `MomentumCandidate`
+- [x] Alle gewichten zijn config-driven (geen magic constants)
+- [x] `entry_allowed=False` + `primary_rejection_reason` (hoogste prioriteit) + `all_rejection_reasons` als een of meer criteria falen
+- [x] `primary_rejection_reason` volgt de vaste prioriteittabel hierboven
+- [x] Scorer is pure functie: geen netwerk, geen exchange calls
+- [x] Werkt als `btc_trend_obj` is `None` (RS = 0.0, niet crashen)
 
 ---
 
@@ -345,11 +404,11 @@ MomentumScorer heeft andere thresholds en andere afwijzing-logica.
 - Coins die niet gescoord worden (geen trend data) genereren geen log
 
 **Acceptatiecriteria**
-- [ ] `[MOMENTUM_CANDIDATE_ALLOWED]` gelogd voor elke coin die scoort én wordt toegelaten
-- [ ] `[MOMENTUM_CANDIDATE_REJECTED]` gelogd voor elke coin die scoort maar afgewezen wordt (throttled: max 1× per coin per 5 min)
-- [ ] Log bevat `primary` en `all` rejection reasons
-- [ ] Log niveau: `INFO`
-- [ ] Momentum logs zijn duidelijk te onderscheiden van grid logs
+- [x] `[MOMENTUM_CANDIDATE_ALLOWED]` gelogd voor elke coin die scoort én wordt toegelaten
+- [x] `[MOMENTUM_CANDIDATE_REJECTED]` gelogd voor elke coin die scoort maar afgewezen wordt (throttled: max 1× per coin per 5 min)
+- [x] Log bevat `primary` en `all` rejection reasons
+- [x] Log niveau: `INFO`
+- [x] Momentum logs zijn duidelijk te onderscheiden van grid logs
 
 ---
 
@@ -388,9 +447,9 @@ class ReasonCode(str, Enum):
 ```
 
 **Acceptatiecriteria**
-- [ ] 1 nieuwe `Stage` waarde
-- [ ] 14 nieuwe `ReasonCode` waarden (10 entry + 4 exit)
-- [ ] `get_stage_for_reason()` werkt voor alle nieuwe codes
+- [x] 1 nieuwe `Stage` waarde
+- [x] 14 nieuwe `ReasonCode` waarden (10 entry + 4 exit)
+- [x] `get_stage_for_reason()` werkt voor alle nieuwe codes
 
 ---
 
@@ -415,14 +474,14 @@ class ReasonCode(str, Enum):
 | `test_all_weights_configurable` | custom gewichten via config | gewichten toegepast in score |
 
 **Acceptatiecriteria**
-- [ ] Alle 8 tests aanwezig en groen
-- [ ] Geen netwerk of exchange calls
-- [ ] `flake8` slaagt
+- [x] Alle 8 tests aanwezig en groen
+- [x] Geen netwerk of exchange calls
+- [x] `flake8` slaagt
 
 **Proof gate Fase 2**
 
-- [ ] Alle tests groen
-- [ ] `flake8` slaagt
+- [x] Gerichte scorer/controller/reason-code tests groen
+- [x] `flake8` slaagt op gewijzigde bestanden
 - [ ] In live log: `[MOMENTUM_CANDIDATE_ALLOWED]` en `[MOMENTUM_CANDIDATE_REJECTED]` zichtbaar
 - [ ] Minimaal 48 uur detect-only data verzameld
 - [ ] Handmatige review: wijst de scorer de juiste coins aan? (operator besluit)
@@ -812,15 +871,15 @@ Combineer met macro-regime (BTC) tot een `composite_regime`:
 
 | ID | Titel | Fase | Effort | Priority | Status |
 |----|-------|------|--------|----------|--------|
-| US-F1-01 | BTC als regime-input | 1 | S | P0 | ⬜ |
-| US-F1-02 | Slot manager ontvangt regime | 1 | XS | P0 | ⬜ |
-| US-F1-03 | REGIME_ROUTE logging | 1 | S | P1 | ⬜ |
-| US-F1-04 | Tests regime routing | 1 | M | P0 | ⬜ |
-| US-F2-01 | MomentumCandidate datamodel | 2 | S | P0 | ⬜ |
-| US-F2-02 | MomentumCandidateScorer | 2 | L | P0 | ⬜ |
-| US-F2-03 | Detect-only kandidaat logging | 2 | S | P0 | ⬜ |
-| US-F2-04 | Nieuwe reason codes | 2 | XS | P0 | ⬜ |
-| US-F2-05 | Tests MomentumCandidateScorer | 2 | M | P0 | ⬜ |
+| US-F1-01 | BTC als regime-input | 1 | S | P0 | DONE |
+| US-F1-02 | Slot manager ontvangt regime | 1 | XS | P0 | DONE |
+| US-F1-03 | REGIME_ROUTE logging | 1 | S | P1 | DONE |
+| US-F1-04 | Tests regime routing | 1 | M | P0 | DONE |
+| US-F2-01 | MomentumCandidate datamodel | 2 | S | P0 | DONE |
+| US-F2-02 | MomentumCandidateScorer | 2 | L | P0 | DONE |
+| US-F2-03 | Detect-only kandidaat logging | 2 | S | P0 | DONE |
+| US-F2-04 | Nieuwe reason codes | 2 | XS | P0 | DONE |
+| US-F2-05 | Tests MomentumCandidateScorer | 2 | M | P0 | DONE |
 | US-F3-01 | CapitalAllocator | 3 | M | P0 | ⬜ |
 | US-F3-02 | MomentumPosition datamodel | 3 | XS | P0 | ⬜ |
 | US-F3-03 | MomentumSleeveManager | 3 | XL | P0 | ⬜ |

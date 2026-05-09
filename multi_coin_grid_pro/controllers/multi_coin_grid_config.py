@@ -780,6 +780,35 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # Hybrid momentum sleeve: Phase 2 is detect-only scoring/logging.
+    momentum_sleeve: dict = Field(
+        default_factory=lambda: {
+            "mode": "detect_only",
+            "min_score_to_enter": 55,
+            "momentum_1h_min_pct": 0.5,
+            "momentum_4h_min_pct": 1.0,
+            "momentum_max_rsi": 80,
+            "momentum_min_volume_expansion": 1.2,
+            "momentum_regime_gate": ["BULL", "CHOP"],
+            "momentum_max_spread_pct": 0.5,
+            "momentum_max_wick_risk": 0.7,
+            "rejected_log_throttle_seconds": 300,
+            "scorer_weights": {
+                "trend_1h": 0.25,
+                "trend_4h": 0.30,
+                "volume_expansion": 0.20,
+                "relative_strength": 0.15,
+                "spread": 0.05,
+                "rsi_wick_risk": 0.05,
+            },
+        },
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Momentum sleeve config (detect-only dict): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     # Task 3.1: Dynamic Slot Manager (account-size and regime-aware slot scaling)
     dynamic_slots: dict = Field(
         default_factory=dict,

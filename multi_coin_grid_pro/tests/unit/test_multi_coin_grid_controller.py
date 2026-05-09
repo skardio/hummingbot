@@ -20,6 +20,7 @@ import pytest
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
 from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
+from hummingbot.strategy_v2.models.executors import EarlyStopReason
 from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, RunnableStatus
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -217,6 +218,52 @@ class TestMultiCoinGridController:
         # Verify
         assert stop_action is not None
         assert stop_action.keep_position is False  # Still False to ensure cleanup
+
+    async def test_stop_loss_stop_action_passes_emergency_reason(self, controller):
+        """Stop-loss exits must reach the executor as explicit emergency reasons."""
+        assert controller._early_stop_reason_from_stop_reason(
+            "stop_loss", emergency=True
+        ) == EarlyStopReason.STOP_LOSS
+        assert controller._early_stop_reason_from_stop_reason(
+            "hard_stop_exit", emergency=True
+        ) == EarlyStopReason.HARD_STOP_EXIT
+        assert controller._early_stop_reason_from_stop_reason(
+            "emergency_exit", emergency=True
+        ) == EarlyStopReason.EMERGENCY_EXIT
+
+    async def test_budget_allocation_does_not_double_count_reserved_capital(self, controller, mock_connector):
+        """Sizing uses effective balance, but BudgetAllocator receives raw balance."""
+        mock_connector.get_available_balance = Mock(return_value=Decimal("204.5098"))
+        controller.budget_allocator.reserve(
+            executor_id="rave-exec",
+            symbol="RAVE-USD",
+            amount=Decimal("83.05250625"),
+            grid_levels=3,
+            timestamp=0,
+        )
+
+        raw_balance, effective_balance, reserved = controller._get_quote_balances_for_allocation()
+
+        assert raw_balance == Decimal("204.5098")
+        assert reserved == Decimal("83.05250625")
+        assert effective_balance == Decimal("121.45729375")
+
+        # Old bug path: passing effective_balance into check_budget subtracts
+        # the same reservation again and blocks a valid second slot.
+        double_counted = controller.budget_allocator.check_budget(
+            total_balance=effective_balance,
+            required_quote=Decimal("57.69221453125"),
+            symbol="ONDO-USD-old-path",
+        )
+        assert double_counted.is_allowed is False
+
+        fixed = controller.budget_allocator.check_budget(
+            total_balance=raw_balance,
+            required_quote=Decimal("57.69221453125"),
+            symbol="ONDO-USD",
+        )
+        assert fixed.is_allowed is True
+        assert fixed.available_quote == Decimal("111.23180375")
 
     async def test_position_limits_check(self, controller):
         """Test position limits are enforced"""

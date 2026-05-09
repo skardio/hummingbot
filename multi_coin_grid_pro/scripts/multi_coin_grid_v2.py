@@ -16,6 +16,7 @@ from hummingbot.data_feed.candles_feed.data_types import CandlesConfig
 from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
 from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
 from hummingbot.strategy.strategy_v2_base import StrategyV2Base, StrategyV2ConfigBase
+from multi_coin_grid_pro.utils.log_archiver import archive_bot_logs
 
 
 class MultiCoinGridStrategyConfig(StrategyV2ConfigBase):
@@ -91,6 +92,12 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
             config = MultiCoinGridStrategyConfig()
         super().__init__(connectors, config)
         self.config = config
+
+        # Archive old logs from the previous run before writing new ones
+        try:
+            archive_bot_logs("kraken_eur")
+        except Exception:
+            pass  # Never block startup due to log archiving
 
         # Configure logging levels
         import logging
@@ -381,11 +388,13 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
         if self.executor_orchestrator:
             executors_report = self.executor_orchestrator.get_executors_report()
             active_executors = []
+            closed_executors = []
             for controller_id, executors_list in executors_report.items():
-                active_executors.extend([
-                    e for e in executors_list
-                    if e.is_active
-                ])
+                for e in executors_list:
+                    if e.is_active:
+                        active_executors.append(e)
+                    else:
+                        closed_executors.append(e)
 
             if active_executors:
                 lines.append("\n╔═══════════════════════════════════════════════════════════════╗")
@@ -406,6 +415,25 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
                         f"P&L: {pnl_display:>14} ║"
                     )
 
+                lines.append("╚═══════════════════════════════════════════════════════════════╝")
+
+            # Show recent closed executors (last 6, sorted by timestamp)
+            recent_closed = sorted(closed_executors, key=lambda x: x.timestamp, reverse=True)[:6]
+            if recent_closed:
+                lines.append("\n╔═══════════════════════════════════════════════════════════════╗")
+                lines.append("║             RECENT EXECUTORS (Last 6 closed)                 ║")
+                lines.append("╠═══════════════════════════════════════════════════════════════╣")
+                for executor in recent_closed:
+                    pnl_pct = float(executor.net_pnl_pct) * 100
+                    pnl_display = f"{pnl_pct:+.2f}%" if abs(pnl_pct) <= 50 else "N/A"
+                    close_type = (
+                        executor.close_type.name if executor.close_type else "RUNNING"
+                    )
+                    pair = getattr(executor, 'trading_pair', '?')
+                    pnl_q = float(executor.net_pnl_quote)
+                    lines.append(
+                        f"║ {pair:12} | P&L: {pnl_display:>8} ({pnl_q:>+7.2f}) | {close_type:>16} ║"
+                    )
                 lines.append("╚═══════════════════════════════════════════════════════════════╝")
 
         return "\n".join(lines)

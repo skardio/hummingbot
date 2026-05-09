@@ -39,11 +39,17 @@ _MANUAL_L2 = {
     "SOL", "DOT", "AVAX", "ADA", "LINK", "MATIC", "POL", "XRP", "LTC",
     "TRX", "ATOM", "NEAR", "OP", "ARB", "INJ", "SUI", "APT", "FTM", "S",
     "HBAR", "XLM", "VET", "ALGO", "FIL", "UNI", "AAVE", "CRV",
+    # Kraken USD universe -- actively traded by this bot
+    "TAO", "ONDO", "AKT", "HYPE", "DASH", "ORCA", "RENDER", "AERO",
+    "PENDLE", "BIO", "RAVE", "XDC", "MON", "ASSET", "CC", "PLAY",
+    "AKT", "SUI", "AVAX",  # already above, no harm repeating in set
 }
 
 _MANUAL_MEME = {
     "DOGE", "SHIB", "PEPE", "PENGU", "WIF", "BONK", "FLOKI", "POPCAT",
     "MEW", "TRUMP", "FARTCOIN",
+    # High-risk speculative (meme-tier risk)
+    "APE", "LUNA", "AI", "BCN",
 }
 
 _MANUAL_OVERRIDES: Dict[str, CoinBucket] = {

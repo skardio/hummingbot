@@ -32,7 +32,7 @@ ls -lt logs/logs_futures_grid_bitget_20*.log | head -1       # Bitget Futures
 # .log   = current/most recent (~2MB initially)
 # .log.1 = 1 rotation ago (~20MB each)
 # .log.2, .log.3, etc = progressively older
-# .log.10 = oldest retained
+# .log.200 = oldest retained
 
 # Example: Find log with specific timestamp range
 ls -la logs/logs_multi_coin_grid_v2_usd_2026-02-24*.log*

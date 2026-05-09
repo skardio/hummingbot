@@ -21,6 +21,7 @@ from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
 from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
 from hummingbot.strategy.strategy_v2_base import StrategyV2Base, StrategyV2ConfigBase
+from multi_coin_grid_pro.utils.log_archiver import archive_bot_logs
 
 
 def expand_env_vars(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,6 +114,12 @@ class MultiCoinGridStrategyV2USD(StrategyV2Base):
 
     def __init__(self, connectors: Dict[str, ConnectorBase]):
         super().__init__(connectors, MultiCoinGridStrategyConfig())
+
+        # Archive old logs from the previous run before writing new ones
+        try:
+            archive_bot_logs("kraken_usd")
+        except Exception:
+            pass  # Never block startup due to log archiving
 
         # Pre-load config for info display only
         try:

@@ -17,6 +17,7 @@ class KrakenAuthTests(TestCase):
     def setUp(self) -> None:
         self._api_key = "testApiKey"
         self._secret = "kQH5HW/8p1uGOVjbgWA7FunAmGO8lsSUXNsu3eow76sz84Q18fWxnyRzBHCd3pd5nE9qa99HAZtuZuj6F1huXg=="  # noqa: mock
+        KrakenAuth._last_tracking_nonce = 0
 
     def async_run_with_timeout(self, coroutine: Awaitable, timeout: float = 1):
         ret = asyncio.get_event_loop().run_until_complete(asyncio.wait_for(coroutine, timeout))
@@ -63,3 +64,13 @@ class KrakenAuthTests(TestCase):
         # self.assertEqual(now * 1e3, configured_request.params["timestamp"])
         self.assertEqual(str(expected_signature, 'utf-8'), configured_request.headers["API-Sign"])
         self.assertEqual(self._api_key, configured_request.headers["API-Key"])
+
+    @patch("hummingbot.connector.exchange.kraken.kraken_auth.time.time_ns")
+    def test_tracking_nonce_uses_microseconds_and_remains_monotonic(self, mocked_time_ns):
+        mocked_time_ns.return_value = 1_234_567_890_123_456_789
+
+        first_nonce = KrakenAuth.get_tracking_nonce()
+        second_nonce = KrakenAuth.get_tracking_nonce()
+
+        self.assertEqual("1234567890123456", first_nonce)
+        self.assertEqual("1234567890123457", second_nonce)

@@ -6,6 +6,7 @@ Tests for methods that are not yet covered by existing tests.
 
 import time
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -711,3 +712,307 @@ class TestOrderbookSubscriptionGuard:
         result = controller._check_smart_entry_filter("SOL-EUR")
 
         assert result is True, "Subscribed pair should reach normal evaluation"
+
+
+class TestRegimeRouting:
+    """Fase 1 regime routing tests with minimal controller stubs."""
+
+    class _SlotManager:
+        enabled = True
+
+        def __init__(self):
+            self.received_regime = None
+
+        def get_dynamic_slots(self, account_balance_eur, current_regime, static_fallback):
+            self.received_regime = current_regime
+            return {"BULL": 6, "BEAR": 1, "baseline": static_fallback}.get(current_regime, 4)
+
+    class _RegimeDetector:
+        def __init__(self):
+            self.metrics_calls = []
+
+        def calculate_metrics(self, trend_data, candles_1h, candles_4h):
+            self.metrics_calls.append(trend_data)
+            return {"trend_data": trend_data}
+
+        def detect_regime(self, metrics):
+            return SimpleNamespace(
+                regime="BULL",
+                score=8.0,
+                confidence=0.9,
+                duration_minutes=15,
+                reason="test regime",
+            )
+
+    def _controller_stub(self):
+        ctl = object.__new__(MultiCoinGridController)
+        ctl.config = SimpleNamespace(quote_asset="USD")
+        ctl.max_simultaneous_coins = 4
+        ctl.market_regime_filter = None
+        ctl._last_detected_regime = None
+        ctl._last_regime_input_pair = None
+        ctl._last_regime_input_source = None
+        ctl._regime_macro_trends = {}
+        ctl.dynamic_slot_manager = self._SlotManager()
+        ctl._calculate_portfolio_value = MagicMock(return_value=Decimal("1000"))
+        ctl.logger = MagicMock(return_value=MagicMock())
+        return ctl
+
+    @staticmethod
+    def _trend(trend_1h=1.0, trend_4h=2.0, trend_24h=3.0):
+        return SimpleNamespace(
+            trend_60m=trend_1h,
+            trend_240m=trend_4h,
+            trend_1440m=trend_24h,
+            consensus_trend_pct=trend_4h,
+            candles=[],
+        )
+
+    def test_slot_manager_receives_bull_regime(self):
+        ctl = self._controller_stub()
+        ctl._last_detected_regime = "BULL"
+
+        slots = ctl._get_dynamic_slots_count()
+
+        assert slots == 6
+        assert ctl.dynamic_slot_manager.received_regime == "BULL"
+        route_logs = [
+            call.args[0] for call in ctl.logger.return_value.info.call_args_list
+            if call.args and "[REGIME_ROUTE]" in call.args[0]
+        ]
+        assert route_logs
+        assert "slots=6" in route_logs[-1]
+        assert "balance=1000" in route_logs[-1]
+
+    def test_slot_manager_receives_bear_regime(self):
+        ctl = self._controller_stub()
+        ctl._last_detected_regime = "BEAR"
+
+        slots = ctl._get_dynamic_slots_count()
+
+        assert slots == 1
+        assert ctl.dynamic_slot_manager.received_regime == "BEAR"
+
+    def test_slot_manager_falls_back_to_baseline_when_none(self):
+        ctl = self._controller_stub()
+        ctl._last_detected_regime = None
+
+        slots = ctl._get_dynamic_slots_count()
+
+        assert slots == 4
+        assert ctl.dynamic_slot_manager.received_regime == "baseline"
+
+    @pytest.mark.asyncio
+    async def test_detect_regime_prefers_btc_over_altcoin(self):
+        ctl = self._controller_stub()
+        ctl.regime_detector = self._RegimeDetector()
+        ctl.monitored_coins = ["APE-USD"]
+        ctl.trend_calculator = SimpleNamespace(
+            trends={
+                "BTC-USD": self._trend(1.5, 2.5, 4.0),
+                "APE-USD": self._trend(9.0, 9.0, 9.0),
+            }
+        )
+
+        result = await ctl._detect_current_regime()
+
+        assert result.regime == "BULL"
+        assert ctl._last_regime_input_pair == "BTC-USD"
+        assert ctl._last_regime_input_source == "btc_direct"
+
+    @pytest.mark.asyncio
+    async def test_detect_regime_falls_back_to_sol(self):
+        ctl = self._controller_stub()
+        ctl.regime_detector = self._RegimeDetector()
+        ctl.monitored_coins = ["APE-USD"]
+        ctl.trend_calculator = SimpleNamespace(
+            trends={
+                "SOL-USD": self._trend(1.0, 2.0, 3.0),
+                "APE-USD": self._trend(9.0, 9.0, 9.0),
+            }
+        )
+
+        result = await ctl._detect_current_regime()
+
+        assert result.regime == "BULL"
+        assert ctl._last_regime_input_pair == "SOL-USD"
+        assert ctl._last_regime_input_source == "sol_direct"
+
+    @pytest.mark.asyncio
+    async def test_detect_regime_uses_cached_btc_when_direct_missing(self):
+        ctl = self._controller_stub()
+        ctl.regime_detector = self._RegimeDetector()
+        ctl.monitored_coins = ["APE-USD"]
+        ctl._regime_macro_trends = {"BTC-USD": self._trend(1.5, 2.5, 4.0)}
+        ctl.trend_calculator = SimpleNamespace(
+            trends={
+                "APE-USD": self._trend(9.0, 9.0, 9.0),
+            }
+        )
+
+        result = await ctl._detect_current_regime()
+
+        assert result.regime == "BULL"
+        assert ctl._last_regime_input_pair == "BTC-USD"
+        assert ctl._last_regime_input_source == "btc_cached"
+
+    @pytest.mark.asyncio
+    async def test_detect_regime_falls_back_to_altcoin(self):
+        ctl = self._controller_stub()
+        ctl.regime_detector = self._RegimeDetector()
+        ctl.monitored_coins = ["APE-USD"]
+        ctl.trend_calculator = SimpleNamespace(trends={"APE-USD": self._trend(0.5, 1.0, 1.5)})
+
+        result = await ctl._detect_current_regime()
+
+        assert result.regime == "BULL"
+        assert ctl._last_regime_input_pair == "APE-USD"
+        assert ctl._last_regime_input_source == "monitored_fallback"
+
+    @pytest.mark.asyncio
+    async def test_regime_macro_trends_cached_outside_grid_trends(self):
+        ctl = self._controller_stub()
+        ctl.monitored_coins = ["APE-USD"]
+        btc_trend = self._trend(1.0, 2.0, 3.0)
+        sol_trend = self._trend(0.5, 1.0, 1.5)
+
+        async def update_all_trends(symbols, orderbook_config=None):
+            assert symbols == ["BTC-USD", "SOL-USD"]
+            ctl.trend_calculator.trends["BTC-USD"] = btc_trend
+            ctl.trend_calculator.trends["SOL-USD"] = sol_trend
+            ctl.trend_calculator._debug_info = {"top_10": [("BTC-USD", 9.0)]}
+
+        ctl.trend_calculator = SimpleNamespace(
+            trends={},
+            _debug_info={"top_10": [("APE-USD", 1.0)]},
+            load_historical_data=AsyncMock(),
+            update_all_trends_v2=AsyncMock(side_effect=update_all_trends),
+        )
+
+        await ctl._ensure_regime_macro_trends(load_history=False, update_prices=True)
+
+        assert ctl._regime_macro_trends["BTC-USD"] is btc_trend
+        assert ctl._regime_macro_trends["SOL-USD"] is sol_trend
+        assert "BTC-USD" not in ctl.trend_calculator.trends
+        assert "SOL-USD" not in ctl.trend_calculator.trends
+        assert ctl.trend_calculator._debug_info == {"top_10": [("APE-USD", 1.0)]}
+
+
+class TestMomentumDetectOnlyController:
+    """Detect-only controller helper tests: logging throttle and no-crash paths."""
+
+    @staticmethod
+    def _controller_stub(now=1000.0, momentum_sleeve=None):
+        if momentum_sleeve is None:
+            momentum_sleeve = {
+                "mode": "detect_only",
+                "rejected_log_throttle_seconds": 300,
+            }
+        ctl = object.__new__(MultiCoinGridController)
+        ctl.config = SimpleNamespace(
+            quote_asset="USD",
+            momentum_sleeve=momentum_sleeve,
+        )
+        ctl.market_data_provider = SimpleNamespace(time=MagicMock(return_value=now))
+        ctl._momentum_rejected_log_ts = {}
+        ctl.logger = MagicMock(return_value=MagicMock())
+        return ctl
+
+    @staticmethod
+    def _candidate(symbol="APE-USD"):
+        return SimpleNamespace(
+            symbol=symbol,
+            score=42.0,
+            trend_1h=1.0,
+            trend_4h=2.0,
+            volume_expansion=0.8,
+            relative_strength=0.0,
+            spread_pct=0.1,
+            rsi=55.0,
+            regime_at_score="CHOP",
+            entry_allowed=False,
+            primary_rejection_reason="MOMENTUM_VOLUME_TOO_LOW",
+            all_rejection_reasons=["MOMENTUM_VOLUME_TOO_LOW"],
+        )
+
+    def test_momentum_rejected_log_is_throttled(self):
+        ctl = self._controller_stub(now=1000.0)
+        candidate = self._candidate()
+
+        ctl._log_momentum_candidate(candidate)
+        ctl._log_momentum_candidate(candidate)
+
+        info_calls = ctl.logger.return_value.info.call_args_list
+        rejected_logs = [
+            call.args[0] for call in info_calls
+            if call.args and "[MOMENTUM_CANDIDATE_REJECTED]" in call.args[0]
+        ]
+        assert len(rejected_logs) == 1
+
+        ctl.market_data_provider.time.return_value = 1301.0
+        ctl._log_momentum_candidate(candidate)
+        rejected_logs = [
+            call.args[0] for call in ctl.logger.return_value.info.call_args_list
+            if call.args and "[MOMENTUM_CANDIDATE_REJECTED]" in call.args[0]
+        ]
+        assert len(rejected_logs) == 2
+
+    def test_momentum_detect_only_accepts_object_config(self):
+        ctl = self._controller_stub(
+            momentum_sleeve=SimpleNamespace(
+                mode="detect_only",
+                rejected_log_throttle_seconds=300,
+            )
+        )
+        candidate = self._candidate()
+        ctl.momentum_candidate_scorer = MagicMock()
+        ctl.momentum_candidate_scorer.score.return_value = candidate
+        trend = SimpleNamespace(candles=[1] * 14)
+        ctl.trend_calculator = SimpleNamespace(
+            trends={"APE-USD": trend},
+            _debug_info={},
+            get_trend=MagicMock(return_value=trend),
+        )
+        ctl._calculate_smart_entry_indicators = MagicMock(
+            return_value=SimpleNamespace(rsi_14=55.0, wick_ratio=0.5)
+        )
+        ctl.pair_spreads = {"APE-USD": 0.001}
+        ctl._last_detected_regime = "CHOP"
+
+        ctl._log_momentum_candidates_detect_only(["APE-USD"])
+
+        ctl.momentum_candidate_scorer.score.assert_called_once()
+        ctl.logger.return_value.warning.assert_not_called()
+
+    def test_momentum_detect_only_empty_symbols_no_crash(self):
+        ctl = self._controller_stub()
+        ctl.momentum_candidate_scorer = MagicMock()
+        ctl.trend_calculator = SimpleNamespace(trends={}, _debug_info={})
+
+        ctl._log_momentum_candidates_detect_only([])
+
+        ctl.logger.return_value.warning.assert_not_called()
+
+    def test_momentum_detect_only_bad_scorer_no_crash(self):
+        ctl = self._controller_stub()
+        ctl.momentum_candidate_scorer = MagicMock()
+        ctl.momentum_candidate_scorer.score.side_effect = RuntimeError("boom")
+        trend = SimpleNamespace(candles=[1] * 14)
+        ctl.trend_calculator = SimpleNamespace(
+            trends={"APE-USD": trend},
+            _debug_info={},
+            get_trend=MagicMock(return_value=trend),
+        )
+        ctl._calculate_smart_entry_indicators = MagicMock(
+            return_value=SimpleNamespace(rsi_14=55.0, wick_ratio=0.5)
+        )
+        ctl.pair_spreads = {"APE-USD": 0.001}
+        ctl._last_detected_regime = "CHOP"
+
+        ctl._log_momentum_candidates_detect_only(["APE-USD"])
+
+        warning_logs = [
+            call.args[0] for call in ctl.logger.return_value.warning.call_args_list
+            if call.args
+        ]
+        assert any("Momentum detect-only scoring skipped" in msg for msg in warning_logs)

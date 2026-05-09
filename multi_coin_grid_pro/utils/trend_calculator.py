@@ -251,6 +251,8 @@ class TrendCalculator:
         self.trend_lookback_mid_minutes = 240  # 4 hours
         self.trend_lookback_long_minutes = 1440  # 24 hours
         self._historical_data_loaded = False  # Track if we've loaded historical data
+        # Symbols that don't exist on the exchange — never retry after first failure
+        self._permanently_failed_symbols: set = set()
 
     async def load_historical_data(self, symbols: List[str]) -> None:
         """
@@ -265,9 +267,12 @@ class TrendCalculator:
         min_candles_required = 14  # SmartEntry v2 minimum
         symbols_to_load = [
             s for s in symbols
-            if s not in self.trends
-            or not self.trends[s].candles
-            or len(self.trends[s].candles) < min_candles_required
+            if s not in self._permanently_failed_symbols
+            and (
+                s not in self.trends
+                or not self.trends[s].candles
+                or len(self.trends[s].candles) < min_candles_required
+            )
         ]
 
         if not symbols_to_load:
@@ -398,7 +403,14 @@ class TrendCalculator:
                     await asyncio.sleep(0.5)
 
                 except Exception as e:
-                    logger.warning(f"  ❌ Failed to load {symbol}: {e}")
+                    err_str = str(e)
+                    if "does not have market symbol" in err_str or "does not support" in err_str:
+                        self._permanently_failed_symbols.add(symbol)
+                        logger.warning(
+                            f"  ❌ Failed to load {symbol}: {e} — permanently skipping (not on exchange)"
+                        )
+                    else:
+                        logger.warning(f"  ❌ Failed to load {symbol}: {e}")
                     failed_loads.append(symbol)
                     continue
 
@@ -1042,11 +1054,18 @@ class TrendCalculator:
             logger.info(
                 f"✅ Batch update complete: {successful_updates}/{len(converted_symbols)} trends updated successfully")
             if failed_updates:
-                logger.warning(f"❌ Failed batch updates ({len(failed_updates)}): {', '.join(failed_updates[:5])}" + (
-                    f" (+{len(failed_updates) - 5} more)" if len(failed_updates) > 5 else ""))
-
-                # If most updates failed and retry is enabled, try one more time after a delay
                 failure_rate = len(failed_updates) / len(converted_symbols)
+                # Only warn if significant failure rate — small/known failures are DEBUG only
+                if failure_rate >= 0.2:
+                    logger.warning(
+                        f"❌ Failed batch updates ({len(failed_updates)}): {', '.join(failed_updates[:5])}"
+                        + (f" (+{len(failed_updates) - 5} more)" if len(failed_updates) > 5 else "")
+                    )
+                else:
+                    logger.debug(
+                        f"⚠️ Minor batch update misses ({len(failed_updates)}): {', '.join(failed_updates[:5])}"
+                        + (f" (+{len(failed_updates) - 5} more)" if len(failed_updates) > 5 else "")
+                    )
                 if retry_on_failure and failure_rate > 0.5 and successful_updates < 5:
                     logger.warning(f"⚠️ High failure rate ({failure_rate:.0%}), retrying after 2s delay...")
                     await asyncio.sleep(2.0)

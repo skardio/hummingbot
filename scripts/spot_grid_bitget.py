@@ -20,6 +20,7 @@ from multi_coin_grid_pro.scripts.multi_coin_grid_v2 import MultiCoinGridStrategy
 from multi_coin_grid_pro.spot_bitget.config_manager import SpotGridBitgetConfigManager
 from multi_coin_grid_pro.spot_bitget.config_schema import SpotGridBitgetConfig
 from multi_coin_grid_pro.spot_bitget.controller import SpotGridBitgetController
+from multi_coin_grid_pro.utils.log_archiver import archive_bot_logs
 
 
 class BitgetSpotGridStrategyConfig(MultiCoinGridStrategyConfig):
@@ -53,6 +54,14 @@ class BitgetSpotGridStrategy(MultiCoinGridStrategyV2):
     CONTROLLER_CONFIG_CLASS = SpotGridBitgetConfig
     CONFIG_FALLBACK_DIR = Path(__file__).parent.parent / "spot_bitget" / "config"
     CONFIG_FALLBACK_EXT = ".yaml"
+
+    def __init__(self, connectors: Dict[str, ConnectorBase], config=None):
+        # Archive old Bitget logs before this run starts
+        try:
+            archive_bot_logs("bitget")
+        except Exception:
+            pass  # Never block startup due to log archiving
+        super().__init__(connectors, config)
 
     # Markets are set dynamically, but define default for initialization
     markets: Dict[str, Set[str]] = {

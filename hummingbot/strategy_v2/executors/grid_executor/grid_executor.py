@@ -23,6 +23,7 @@ from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecut
 from hummingbot.strategy_v2.models.base import RunnableStatus
 from hummingbot.strategy_v2.models.executors import CloseType, EarlyStopReason, TrackedOrder
 from hummingbot.strategy_v2.utils.distributions import Distributions
+from multi_coin_grid_pro.logic.exit_safety import fee_aware_exit_decision, realized_net_pnl
 
 # Story C1: Log Throttling - prevent executor spam
 try:
@@ -90,6 +91,8 @@ class GridExecutor(ExecutorBase):
         self.realized_buy_size_quote = Decimal("0")
         self.realized_sell_size_quote = Decimal("0")
         self.realized_imbalance_quote = Decimal("0")
+        self.realized_buy_fees_quote = Decimal("0")
+        self.realized_sell_fees_quote = Decimal("0")
         self.realized_fees_quote = Decimal("0")
         self.realized_pnl_quote = Decimal("0")
         self.realized_pnl_pct = Decimal("0")
@@ -740,6 +743,12 @@ class GridExecutor(ExecutorBase):
         since_last_fill = (now - self._last_fill_timestamp) if self._last_fill_timestamp else age_sec
         since_last_progress = (now - self._last_progress_timestamp) if self._last_progress_timestamp else age_sec
 
+        def fee_aware_close_allowed(close_type: CloseType, current_price: Optional[Decimal], stage: str) -> bool:
+            guard = getattr(self, "_fee_aware_close_allowed", None)
+            if guard is None:
+                return True
+            return guard(close_type, current_price=current_price, stage=stage)
+
         # Log summary every 30 seconds (rate limited)
         if now - self._last_timeout_summary_log >= 30:
             open_orders_count = len(self.levels_by_state.get(GridLevelStates.OPEN_ORDER_PLACED, []))
@@ -845,6 +854,12 @@ class GridExecutor(ExecutorBase):
                     f"unrealized_pnl={float(unrealized_pnl_pct):.2f}% | "
                     f"Grid deadlocked - forcing unwind"
                 )
+                if not fee_aware_close_allowed(
+                    CloseType.NO_PROGRESS_TIMEOUT,
+                    current_price=getattr(self, "mid_price", None),
+                    stage="no_progress_stalled",
+                ):
+                    return False
                 self._timeout_close_triggered = True
                 self._timeout_close_type = CloseType.NO_PROGRESS_TIMEOUT
                 self.start_forced_close(CloseType.NO_PROGRESS_TIMEOUT)
@@ -891,6 +906,12 @@ class GridExecutor(ExecutorBase):
                     f"ATR check: {atr_check_status} | "
                     f"Grid stalled with adverse PnL - starting unwind"
                 )
+                if not fee_aware_close_allowed(
+                    CloseType.NO_PROGRESS_TIMEOUT,
+                    current_price=getattr(self, "mid_price", None),
+                    stage="no_progress_adverse",
+                ):
+                    return False
                 self._timeout_close_triggered = True
                 self._timeout_close_type = CloseType.NO_PROGRESS_TIMEOUT
                 # Story B1: Start two-phase unwind protocol (graceful → aggressive)
@@ -908,6 +929,12 @@ class GridExecutor(ExecutorBase):
                         f"unrealized_pnl={float(unrealized_pnl_pct):.2f}% | "
                         f"Position was OK but extension limit reached - forcing unwind"
                     )
+                    if not fee_aware_close_allowed(
+                        CloseType.NO_PROGRESS_TIMEOUT,
+                        current_price=getattr(self, "mid_price", None),
+                        stage="no_progress_max_extension",
+                    ):
+                        return False
                     self._timeout_close_triggered = True
                     self._timeout_close_type = CloseType.NO_PROGRESS_TIMEOUT
                     self.start_forced_close(CloseType.NO_PROGRESS_TIMEOUT)
@@ -937,6 +964,12 @@ class GridExecutor(ExecutorBase):
                 f"age={age_sec / 60:.1f}m >= {max_hold_time / 60:.1f}m | "
                 f"Maximum hold time exceeded - forcing rotation"
             )
+            if not fee_aware_close_allowed(
+                CloseType.HARD_CAP_TIME_LIMIT,
+                current_price=getattr(self, "mid_price", None),
+                stage="hard_cap_time_limit",
+            ):
+                return False
             self._timeout_close_triggered = True
             self._timeout_close_type = CloseType.HARD_CAP_TIME_LIMIT
             # Story B1: Start two-phase unwind protocol (graceful → aggressive)
@@ -1193,6 +1226,22 @@ class GridExecutor(ExecutorBase):
             quantized_amount = self.connectors[self.config.connector_name].quantize_order_amount(
                 self.config.trading_pair, inventory
             )
+
+            close_reason = self._unwind_close_reason or self.close_type
+            if not self._fee_aware_close_allowed(
+                close_reason,
+                current_price=adjusted_price,
+                stage="graceful_unwind",
+            ):
+                self._unwind_phase = "NONE"
+                self._unwind_close_reason = None
+                self._timeout_close_triggered = False
+                self._timeout_close_type = None
+                self._closing_in_progress = False
+                self._close_order_id = None
+                self.close_type = None
+                self._status = RunnableStatus.RUNNING
+                return
 
             # 🔧 FIX: Try to place order regardless of size - let exchange reject if needed
             if quantized_amount <= Decimal("0"):
@@ -1799,9 +1848,19 @@ class GridExecutor(ExecutorBase):
         :param reason: Optional EarlyStopReason to explain WHY the executor stopped early (US-006).
         :return: None
         """
+        effective_reason = reason or self._early_stop_reason
         self.cancel_open_orders()
         self._status = RunnableStatus.SHUTTING_DOWN
-        self.close_type = CloseType.POSITION_HOLD if keep_position else CloseType.EARLY_STOP
+        if keep_position:
+            self.close_type = CloseType.POSITION_HOLD
+        elif effective_reason in {
+            EarlyStopReason.STOP_LOSS,
+            EarlyStopReason.HARD_STOP_EXIT,
+            EarlyStopReason.EMERGENCY_EXIT,
+        }:
+            self.close_type = CloseType.STOP_LOSS
+        else:
+            self.close_type = CloseType.EARLY_STOP
 
         # US-006: Store detailed early stop reason
         if reason is not None:
@@ -2367,6 +2426,177 @@ class GridExecutor(ExecutorBase):
             slippage = Decimal("0")
         return buy_side + sell_side + slippage
 
+    def _expected_exit_fee_rate(self) -> Decimal:
+        """Expected fee rate for forced/non-emergency close orders.
+
+        Forced exits are not guaranteed maker orders even when submitted as
+        LIMIT. Kraken can fill marketable limits as taker, so use the taker fee
+        for break-even protection unless a caller explicitly overrides it in
+        custom_info.
+        """
+        custom_info = self.config.custom_info or {}
+        override = custom_info.get("fee_aware_exit_fee_rate")
+        if override is not None:
+            rate = Decimal(str(override))
+            return rate / Decimal("100") if rate > Decimal("1") else rate
+
+        _maker_fee, taker_fee = self._get_fee_rates()
+        return taker_fee
+
+    @staticmethod
+    def _fraction_from_config(value, default: Decimal = Decimal("0")) -> Decimal:
+        if value is None:
+            return default
+        threshold = Decimal(str(value))
+        return threshold if threshold > Decimal("0") else default
+
+    @staticmethod
+    def _percent_from_config(value, default: Decimal = Decimal("0")) -> Decimal:
+        if value is None:
+            return default
+        threshold = Decimal(str(value))
+        if threshold <= Decimal("0"):
+            return default
+        return threshold / Decimal("100")
+
+    def _required_take_profit_net_pct(self) -> Decimal:
+        """Minimum net P&L fraction required for global TAKE_PROFIT close."""
+        custom_info = self.config.custom_info or {}
+        required = Decimal("0")
+
+        if custom_info.get("dynamic_tp_enabled"):
+            required = max(
+                required,
+                self._fraction_from_config(custom_info.get("dynamic_tp_min_pct")),
+            )
+
+        required = max(
+            required,
+            self._percent_from_config(custom_info.get("min_grid_profit_pct")),
+            self._percent_from_config(custom_info.get("fee_aware_min_net_profit_pct")),
+        )
+
+        return required
+
+    def _is_fee_guarded_close_type(self, close_type: Optional[CloseType]) -> bool:
+        return close_type in {
+            CloseType.TIME_LIMIT,
+            CloseType.HARD_CAP_TIME_LIMIT,
+            CloseType.NO_PROGRESS_TIMEOUT,
+            CloseType.TRAILING_STOP,
+            CloseType.EARLY_STOP,
+            CloseType.SWITCH,
+        }
+
+    def _position_dust_threshold(self) -> Decimal:
+        try:
+            return getattr(self.trading_rules, "min_order_size", Decimal("0")) or Decimal("0")
+        except Exception:
+            return Decimal("0")
+
+    def _position_fully_realized(self) -> bool:
+        """True when only realized P&L should be reported.
+
+        A filled close order can leave tiny dust. For P&L purposes that dust
+        must not keep the original buy fees in open-position fees, otherwise
+        buy fees are counted once in realized_fees_quote and again in
+        position_fees_quote.
+        """
+        if self.close_type == CloseType.POSITION_HOLD:
+            return False
+        if self.realized_sell_size_quote <= Decimal("0"):
+            return False
+        return self.position_size_base <= self._position_dust_threshold()
+
+    @staticmethod
+    def calculate_realized_net_pnl(
+        realized_sell_quote: Decimal,
+        realized_buy_quote: Decimal,
+        realized_buy_fees_quote: Decimal,
+        realized_sell_fees_quote: Decimal,
+    ) -> Decimal:
+        """Canonical Kraken-style realized net P&L formula."""
+        return realized_net_pnl(
+            realized_sell_quote=realized_sell_quote,
+            realized_buy_quote=realized_buy_quote,
+            realized_buy_fees_quote=realized_buy_fees_quote,
+            realized_sell_fees_quote=realized_sell_fees_quote,
+        )
+
+    def _fee_aware_break_even_snapshot(
+        self,
+        current_price: Optional[Decimal] = None,
+    ) -> Dict[str, Decimal]:
+        price = current_price if current_price is not None else self.mid_price
+        if price is not None and not isinstance(price, Decimal):
+            price = Decimal(str(price))
+        if price is None or (hasattr(price, "is_nan") and price.is_nan()) or price <= Decimal("0"):
+            price = self.position_break_even_price
+
+        position_size_base = self.position_size_base
+        if position_size_base <= Decimal("0"):
+            return {
+                "avg_entry": self.position_break_even_price,
+                "break_even": Decimal("0"),
+                "expected_exit_fee": Decimal("0"),
+                "expected_exit_fee_rate": self._expected_exit_fee_rate(),
+                "current_price": price,
+            }
+
+        exit_fee_rate = self._expected_exit_fee_rate()
+        decision = fee_aware_exit_decision(
+            side=self.config.side.name,
+            avg_entry=self.position_break_even_price,
+            position_size_base=position_size_base,
+            buy_fees_quote=self.position_fees_quote,
+            current_price=price,
+            expected_exit_fee_rate=exit_fee_rate,
+        )
+
+        return {
+            "avg_entry": decision.avg_entry,
+            "break_even": decision.break_even,
+            "expected_exit_fee": decision.expected_exit_fee,
+            "expected_exit_fee_rate": decision.expected_exit_fee_rate,
+            "current_price": price,
+        }
+
+    def _fee_aware_close_allowed(
+        self,
+        close_type: Optional[CloseType],
+        current_price: Optional[Decimal] = None,
+        stage: str = "close",
+    ) -> bool:
+        """Block non-emergency forced exits below fee-aware break-even."""
+        if not self._is_fee_guarded_close_type(close_type):
+            return True
+
+        snapshot = self._fee_aware_break_even_snapshot(current_price=current_price)
+        price = snapshot["current_price"]
+        break_even = snapshot["break_even"]
+
+        if self.position_size_base <= Decimal("0") or break_even <= Decimal("0"):
+            allowed = True
+        elif self.config.side == TradeType.BUY:
+            allowed = price >= break_even
+        else:
+            allowed = price <= break_even
+
+        log_payload = (
+            f"avg_entry={snapshot['avg_entry']:.10f}, "
+            f"break_even={break_even:.10f}, "
+            f"expected_exit_fee={snapshot['expected_exit_fee']:.8f}, "
+            f"current_price={price:.10f}, "
+            f"proposed_close_reason={close_type.name if close_type else 'UNKNOWN'}, "
+            f"allowed={allowed}"
+        )
+        if allowed:
+            self.logger().info(f"🧮 FEE_AWARE_EXIT_CHECK {stage}: {log_payload}")
+        else:
+            self.logger().warning(f"🛡️ FEE_AWARE_EXIT_BLOCKED {stage}: {log_payload}")
+
+        return allowed
+
     def get_take_profit_price(self, level: GridLevel):
         return level.price * (1 + level.take_profit) if self.config.side == TradeType.BUY else level.price * (1 - level.take_profit)
 
@@ -2796,9 +3026,21 @@ class GridExecutor(ExecutorBase):
             self.close_type = CloseType.POSITION_HOLD if self.config.keep_position else CloseType.STOP_LOSS
             return True
         elif self.is_expired:
+            if not self._fee_aware_close_allowed(
+                CloseType.TIME_LIMIT,
+                current_price=self.mid_price,
+                stage="triple_barrier_time_limit",
+            ):
+                return False
             self.close_type = CloseType.TIME_LIMIT
             return True
         elif self.trailing_stop_condition():
+            if not self._fee_aware_close_allowed(
+                CloseType.TRAILING_STOP,
+                current_price=self.mid_price,
+                stage="triple_barrier_trailing_stop",
+            ):
+                return False
             self.close_type = CloseType.TRAILING_STOP
             return True
         elif self.take_profit_condition():
@@ -2843,17 +3085,58 @@ class GridExecutor(ExecutorBase):
         # Shutdown path uses aggressive/market orders → taker fee + slippage.
         self.update_position_metrics()
         if self.position_size_quote <= Decimal("0"):
-            return True  # nothing to sell, let the executor clean up
+            log_key = f"global_tp_no_position_{self.config.id}"
+            should_emit = not HAS_LOG_THROTTLE or should_log(log_key, interval_sec=60)
+            if should_emit:
+                trading_pair = getattr(self.config, "trading_pair", "unknown")
+                self.logger().info(
+                    f"TAKE_PROFIT_SKIPPED_NO_POSITION: pair={trading_pair}, "
+                    f"current_price={self.mid_price:.10f}, filled_quote={self.position_size_quote:.10f}"
+                )
+            return False
 
         _maker_fee, taker_fee = self._get_fee_rates()
         estimated_sell_fee_pct = taker_fee + Decimal("0.0005")  # taker + slippage
         estimated_sell_fees = self.position_size_base * self.mid_price * estimated_sell_fee_pct
         net_pnl_after_fees = self.position_pnl_quote - estimated_sell_fees
+        net_pnl_pct_after_fees = net_pnl_after_fees / self.position_size_quote
+        required_net_pnl_pct = self._required_take_profit_net_pct()
 
-        if net_pnl_after_fees <= Decimal("0"):
-            return False  # not profitable after fees — let per-level TP handle it
+        if self.position_break_even_price > Decimal("0"):
+            avg_entry = self.position_break_even_price
+        elif self.position_size_base > Decimal("0"):
+            avg_entry = self.position_size_quote / self.position_size_base
+        else:
+            avg_entry = Decimal("0")
 
-        return True
+        if avg_entry > Decimal("0"):
+            if self.config.side == TradeType.BUY:
+                gross_price_change_pct = (self.mid_price - avg_entry) / avg_entry
+            else:
+                gross_price_change_pct = (avg_entry - self.mid_price) / avg_entry
+        else:
+            gross_price_change_pct = Decimal("0")
+
+        allowed = net_pnl_after_fees > Decimal("0") and net_pnl_pct_after_fees >= required_net_pnl_pct
+        log_payload = (
+            f"avg_entry={avg_entry:.10f}, "
+            f"current_price={self.mid_price:.10f}, "
+            f"gross_pct={gross_price_change_pct * Decimal('100'):.4f}, "
+            f"expected_fees_pct={estimated_sell_fee_pct * Decimal('100'):.4f}, "
+            f"net_pct={net_pnl_pct_after_fees * Decimal('100'):.4f}, "
+            f"required_tp_pct={required_net_pnl_pct * Decimal('100'):.4f}, "
+            f"allowed={allowed}"
+        )
+
+        log_key = f"global_tp_fee_aware_{self.config.id}"
+        should_emit = not HAS_LOG_THROTTLE or should_log(log_key, interval_sec=60)
+        if should_emit:
+            if allowed:
+                self.logger().info(f"🧮 TAKE_PROFIT_FEE_AWARE_ALLOWED: {log_payload}")
+            else:
+                self.logger().info(f"⏸️ TAKE_PROFIT_FEE_AWARE_BLOCKED: {log_payload}")
+
+        return allowed
 
     def stop_loss_condition(self):
         """
@@ -2919,6 +3202,20 @@ class GridExecutor(ExecutorBase):
             # We use TIME_LIMIT as it triggers market order path
             close_type = CloseType.HARD_CAP_TIME_LIMIT  # Forces market order
             self._force_aggressive_close = False  # Reset flag
+
+        guard_price = price
+        if guard_price is not None and hasattr(guard_price, "is_nan") and guard_price.is_nan():
+            guard_price = None
+
+        if not self._fee_aware_close_allowed(
+            close_type,
+            current_price=guard_price if guard_price is not None else getattr(self, "mid_price", None),
+            stage="place_close_order",
+        ):
+            self._closing_in_progress = False
+            if self._status == RunnableStatus.CLOSING:
+                self._status = RunnableStatus.RUNNING
+            return
 
         # PHASE 1+3: DOUBLE SELL GUARD - Prevent duplicate close orders
         if self._closing_in_progress:
@@ -3492,6 +3789,8 @@ class GridExecutor(ExecutorBase):
             "realized_buy_size_quote": self.realized_buy_size_quote,
             "realized_sell_size_quote": self.realized_sell_size_quote,
             "realized_imbalance_quote": self.realized_imbalance_quote,
+            "realized_buy_fees_quote": self.realized_buy_fees_quote,
+            "realized_sell_fees_quote": self.realized_sell_fees_quote,
             "realized_fees_quote": self.realized_fees_quote,
             "realized_pnl_quote": self.realized_pnl_quote,
             "realized_pnl_pct": self.realized_pnl_pct,
@@ -4037,8 +4336,22 @@ class GridExecutor(ExecutorBase):
             close_order_size_base = self._close_order.executed_amount_base if self._close_order and self._close_order.is_done else Decimal(
                 "0")
             self.position_size_base = executed_amount_base - close_order_size_base
+            if self.position_size_base < Decimal("0"):
+                self.position_size_base = Decimal("0")
             self.position_size_quote = self.position_size_base * self.position_break_even_price
-            self.position_fees_quote = Decimal(sum([level.active_open_order.cum_fees_quote for level in open_filled_levels]))
+            total_open_fees_quote = Decimal(sum([level.active_open_order.cum_fees_quote for level in open_filled_levels]))
+            dust_threshold = self._position_dust_threshold()
+            if self.position_size_base <= dust_threshold:
+                self.position_size_base = Decimal("0")
+                self.position_size_quote = Decimal("0")
+                self.position_fees_quote = Decimal("0")
+                self.position_pnl_quote = Decimal("0")
+                self.position_pnl_pct = Decimal("0")
+                self.close_liquidity_placed = Decimal("0")
+
+            remaining_ratio = self.position_size_base / executed_amount_base if executed_amount_base > Decimal("0") else Decimal("0")
+            remaining_ratio = max(Decimal("0"), min(Decimal("1"), remaining_ratio))
+            self.position_fees_quote = total_open_fees_quote * remaining_ratio
             self.position_pnl_quote = side_multiplier * ((self.mid_price - self.position_break_even_price) / self.position_break_even_price) * self.position_size_quote - self.position_fees_quote
             self.position_pnl_pct = self.position_pnl_quote / self.position_size_quote if self.position_size_quote > 0 else Decimal(
                 "0")
@@ -4061,29 +4374,29 @@ class GridExecutor(ExecutorBase):
         if len(regular_filled_orders) == 0:
             self._reset_metrics()
             return
-        if self._open_fee_in_base:
-            self.realized_buy_size_quote = sum([
-                Decimal(order["executed_amount_quote"]) - Decimal(order["cumulative_fee_paid_quote"])
-                for order in regular_filled_orders if order["trade_type"] == TradeType.BUY.name
-            ])
-        else:
-            self.realized_buy_size_quote = sum([
-                Decimal(order["executed_amount_quote"])
-                for order in regular_filled_orders if order["trade_type"] == TradeType.BUY.name
-            ])
+        self.realized_buy_size_quote = sum([
+            Decimal(order["executed_amount_quote"])
+            for order in regular_filled_orders if order["trade_type"] == TradeType.BUY.name
+        ])
         self.realized_sell_size_quote = sum([
             Decimal(order["executed_amount_quote"])
             for order in regular_filled_orders if order["trade_type"] == TradeType.SELL.name
         ])
         self.realized_imbalance_quote = self.realized_buy_size_quote - self.realized_sell_size_quote
-        self.realized_fees_quote = sum([
+        self.realized_buy_fees_quote = sum([
             Decimal(order["cumulative_fee_paid_quote"])
-            for order in regular_filled_orders
+            for order in regular_filled_orders if order["trade_type"] == TradeType.BUY.name
         ])
-        self.realized_pnl_quote = (
-            self.realized_sell_size_quote -
-            self.realized_buy_size_quote -
-            self.realized_fees_quote
+        self.realized_sell_fees_quote = sum([
+            Decimal(order["cumulative_fee_paid_quote"])
+            for order in regular_filled_orders if order["trade_type"] == TradeType.SELL.name
+        ])
+        self.realized_fees_quote = self.realized_buy_fees_quote + self.realized_sell_fees_quote
+        self.realized_pnl_quote = self.calculate_realized_net_pnl(
+            realized_sell_quote=self.realized_sell_size_quote,
+            realized_buy_quote=self.realized_buy_size_quote,
+            realized_buy_fees_quote=self.realized_buy_fees_quote,
+            realized_sell_fees_quote=self.realized_sell_fees_quote,
         )
         self.realized_pnl_pct = (
             self.realized_pnl_quote / self.realized_buy_size_quote
@@ -4095,6 +4408,8 @@ class GridExecutor(ExecutorBase):
         self.realized_buy_size_quote = Decimal("0")
         self.realized_sell_size_quote = Decimal("0")
         self.realized_imbalance_quote = Decimal("0")
+        self.realized_buy_fees_quote = Decimal("0")
+        self.realized_sell_fees_quote = Decimal("0")
         self.realized_fees_quote = Decimal("0")
         self.realized_pnl_quote = Decimal("0")
         self.realized_pnl_pct = Decimal("0")
@@ -4105,6 +4420,8 @@ class GridExecutor(ExecutorBase):
 
         :return: The net pnl in quote asset.
         """
+        if self._position_fully_realized():
+            return self.realized_pnl_quote
         return self.position_pnl_quote + self.realized_pnl_quote if self.close_type != CloseType.POSITION_HOLD else self.realized_pnl_quote
 
     def get_cum_fees_quote(self) -> Decimal:
@@ -4113,6 +4430,8 @@ class GridExecutor(ExecutorBase):
 
         :return: The cumulative fees in quote asset.
         """
+        if self._position_fully_realized():
+            return self.realized_fees_quote
         return self.position_fees_quote + self.realized_fees_quote if self.close_type != CloseType.POSITION_HOLD else self.realized_fees_quote
 
     @property
@@ -4125,22 +4444,37 @@ class GridExecutor(ExecutorBase):
         matched_volume = self.realized_buy_size_quote + self.realized_sell_size_quote
         return self.position_size_quote + matched_volume if self.close_type != CloseType.POSITION_HOLD else matched_volume
 
+    def _net_pnl_pct_denominator_quote(self) -> Decimal:
+        """
+        Return the capital base for P&L percentage reporting.
+
+        filled_amount_quote is a volume metric. Once a grid closes it includes
+        both buy and sell notional, which halves the displayed percentage for
+        round trips. P&L percentage should be measured against deployed entry
+        notional instead: realized buy notional plus any still-open position
+        notional.
+        """
+        if self.close_type == CloseType.POSITION_HOLD:
+            return self.realized_buy_size_quote
+        return self.realized_buy_size_quote + self.position_size_quote
+
     def get_net_pnl_pct(self) -> Decimal:
         """
         Calculate the net pnl percentage
 
-        DEFENSIVE: Prevents absurd values when filled_amount is tiny (precision bug)
-        Returns 0 if filled_amount < $1 (sub-dollar position = meaningless %)
+        DEFENSIVE: Prevents absurd values when entry notional is tiny (precision bug)
+        Returns 0 if entry notional < $1 (sub-dollar position = meaningless %)
         Also caps result at ±100% (anything beyond that is likely a calculation error)
 
         :return: The net pnl percentage.
         """
-        if self.filled_amount_quote <= Decimal("1"):
+        pnl_denominator_quote = self._net_pnl_pct_denominator_quote()
+        if pnl_denominator_quote <= Decimal("1"):
             # Position too small to calculate meaningful percentage
             # (prevents -2162.46% or -92.44% display bugs from micro-fills)
             return Decimal("0")
 
-        pnl_pct = self.get_net_pnl_quote() / self.filled_amount_quote
+        pnl_pct = self.get_net_pnl_quote() / pnl_denominator_quote
 
         # Sanity check: cap at ±100% - anything higher is a calculation bug
         # (e.g., from fees being larger than position due to precision issues)
