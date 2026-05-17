@@ -93,6 +93,43 @@ class TestQualityGateBlacklist:
         assert "BTC-USD" in passed_pairs
 
 
+class TestQualityGateMarketQuality:
+    def test_min_volume_rejects_low_volume_before_ranking(self):
+        candidates = [
+            ("BTC-USD", 5_000_000, 0.001),
+            ("MICRO-USD", 50_000, 0.001),
+        ]
+        cfg = QualityGateConfig(min_24h_volume=500_000)
+        result = apply_quality_gate(candidates, "USD", config=cfg)
+        passed_pairs = {p for p, _, _ in result.passed}
+        assert "BTC-USD" in passed_pairs
+        assert "MICRO-USD" not in passed_pairs
+        assert result.rejected["MICRO-USD"] == "LOW_VOLUME"
+
+    def test_max_spread_rejects_wide_fractional_spread(self):
+        candidates = [
+            ("BTC-USD", 5_000_000, 0.001),  # 0.1%
+            ("WIDE-USD", 5_000_000, 0.008),  # 0.8%
+        ]
+        cfg = QualityGateConfig(max_spread_pct=0.5)
+        result = apply_quality_gate(candidates, "USD", config=cfg)
+        passed_pairs = {p for p, _, _ in result.passed}
+        assert "BTC-USD" in passed_pairs
+        assert "WIDE-USD" not in passed_pairs
+        assert result.rejected["WIDE-USD"] == "WIDE_SPREAD"
+
+    def test_max_spread_handles_percent_input_above_one(self):
+        candidates = [
+            ("OK-USD", 5_000_000, 0.4),
+            ("WIDE-USD", 5_000_000, 1.2),
+        ]
+        cfg = QualityGateConfig(max_spread_pct=0.5)
+        result = apply_quality_gate(candidates, "USD", config=cfg)
+        passed_pairs = {p for p, _, _ in result.passed}
+        assert "OK-USD" not in passed_pairs  # 0.4 fraction means 40%
+        assert "WIDE-USD" not in passed_pairs
+
+
 class TestQualityGateStats:
     def test_stats_populated(self, sample_candidates):
         result = apply_quality_gate(sample_candidates, "USD")

@@ -101,9 +101,9 @@ grep "gate_passed" logs/events/events_*.jsonl | tail -20
 -- trade_fee is JSON with {currency, amount} structure
 SELECT datetime(timestamp/1000, 'unixepoch', 'localtime') as time,
        trade_type, base_asset,
-       amount/1000000000.0 as qty,
+       amount/100000000.0 as qty,
        price/100000000.0 as px,
-       (amount/1000000000.0)*(price/100000000.0) as value,
+       (amount/100000000.0)*(price/100000000.0) as value,
        order_id
 FROM TradeFill WHERE base_asset='BTC' ORDER BY timestamp DESC LIMIT 20;
 ```
@@ -122,6 +122,12 @@ SELECT id, datetime(timestamp, 'unixepoch', 'localtime') as start_time,
        status, is_active, net_pnl_quote, filled_amount_quote,
        json_extract(config, '$.trading_pair') as pair
 FROM Executors ORDER BY timestamp DESC LIMIT 10;
+```
+
+**ST-06b post-run consistency report**:
+```bash
+python multi_coin_grid_pro/scripts/post_run_sqlite_report.py --bot kraken-usd --hours 24
+python multi_coin_grid_pro/scripts/post_run_sqlite_report.py --bot bitget --hours 24
 ```
 
 ### Cooldown Databases

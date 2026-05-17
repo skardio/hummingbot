@@ -13,6 +13,8 @@ Each coin can have custom thresholds via coin_profiles in config.
 """
 import logging
 import sys
+import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -80,6 +82,44 @@ class SmartEntryBaseConfig:
     market_exhaustion_cooldown_min: int = 30
     market_exhaustion_telegram: bool = False
     market_exhaustion_actions: list = None
+    # Story 3.2: RSI hysteresis (block@buy_max, unblock@buy_max-gap after recovery_min)
+    rsi_hysteresis_enabled: bool = True
+    rsi_hysteresis_gap: float = 4.0          # RSI must drop this far below buy_max to start recovery
+    rsi_hysteresis_recovery_min: float = 5.0  # Minutes RSI must stay in unlock zone before entry
+    # Story 3.1: Smooth dynamic RSI threshold via rolling median
+    rsi_smoothing_enabled: bool = True
+    rsi_smoothing_window: int = 20            # Samples (~10 min at 30s tick)
+    # Story 4.1: Exhausted momentum filter
+    exhausted_momentum_enabled: bool = False  # Opt-in; enable in YAML after testing
+    exhausted_momentum_24h_min_pct: float = 8.0   # 24h move >= this = already pumped
+    exhausted_momentum_1h_max_pct: float = 1.0    # 1h trend must be < this to confirm cooling
+
+    def validate(self) -> None:
+        """Story 7.1: Validate config on startup. Raises ValueError on invalid combinations."""
+        errors = []
+        if self.rsi_buy_max >= self.rsi_block_min:
+            errors.append(
+                f"rsi_buy_max ({self.rsi_buy_max}) must be < rsi_block_min ({self.rsi_block_min})"
+            )
+        if self.rsi_extreme_low >= self.rsi_buy_max:
+            errors.append(
+                f"rsi_extreme_low ({self.rsi_extreme_low}) must be < rsi_buy_max ({self.rsi_buy_max})"
+            )
+        if self.rsi_hysteresis_gap <= 0:
+            errors.append(f"rsi_hysteresis_gap ({self.rsi_hysteresis_gap}) must be > 0")
+        if self.rsi_hysteresis_recovery_min < 0:
+            errors.append(
+                f"rsi_hysteresis_recovery_min ({self.rsi_hysteresis_recovery_min}) must be >= 0"
+            )
+        if self.rsi_smoothing_window < 1:
+            errors.append(f"rsi_smoothing_window ({self.rsi_smoothing_window}) must be >= 1")
+        if self.max_atr_pct_for_grid <= self.min_atr_pct_for_grid:
+            errors.append(
+                f"max_atr_pct_for_grid ({self.max_atr_pct_for_grid}) must be > "
+                f"min_atr_pct_for_grid ({self.min_atr_pct_for_grid})"
+            )
+        if errors:
+            raise ValueError("SmartEntryBaseConfig validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
 
 class SmartEntryFilter:
@@ -124,6 +164,16 @@ class SmartEntryFilter:
         self.exchange_connector = exchange_connector
         self.connector_name = connector_name
         self.event_logger = event_logger  # EPIC v3.4: Store event logger
+
+        # Story 7.1: Validate config on startup — fail fast with clear error
+        self.base_cfg.validate()
+
+        # Story 3.2: Per-symbol RSI hysteresis state
+        self._rsi_blocked: Dict[str, bool] = {}          # True = blocked, waiting for RSI recovery
+        self._rsi_unblocked_at: Dict[str, float] = {}    # monotonic timestamp when RSI entered unlock zone
+
+        # Story 3.1: Per-symbol rolling RSI threshold history for median smoothing
+        self._rsi_threshold_history: Dict[str, deque] = {}
 
         self.logger.info("=" * 80)
         self.logger.info("🧠 SmartEntryFilter v2.0 initialized")
@@ -327,6 +377,52 @@ class SmartEntryFilter:
             self.logger.debug(traceback.format_exc())
             return True, f"Depth check failed (allowing entry): {e}", 0.0, 0.0
 
+    def _get_smoothed_rsi_buy_max(self, symbol: str, raw_threshold: float) -> float:
+        """Story 3.1: Return median of recent rsi_buy_max values to damp threshold oscillation."""
+        if not getattr(self.base_cfg, 'rsi_smoothing_enabled', True):
+            return raw_threshold
+        window = getattr(self.base_cfg, 'rsi_smoothing_window', 20)
+        if symbol not in self._rsi_threshold_history:
+            self._rsi_threshold_history[symbol] = deque(maxlen=window)
+        self._rsi_threshold_history[symbol].append(raw_threshold)
+        samples = sorted(self._rsi_threshold_history[symbol])
+        n = len(samples)
+        mid = n // 2
+        if n % 2 == 0:
+            return (samples[mid - 1] + samples[mid]) / 2
+        return samples[mid]
+
+    def _peek_smoothed_rsi_threshold(self, symbol: str, raw_threshold: float) -> float:
+        """Story 6.1: Read current median without mutating history (for logging only)."""
+        if symbol not in self._rsi_threshold_history:
+            return raw_threshold
+        samples = sorted(self._rsi_threshold_history[symbol])
+        n = len(samples)
+        if n == 0:
+            return raw_threshold
+        mid = n // 2
+        return (samples[mid - 1] + samples[mid]) / 2 if n % 2 == 0 else samples[mid]
+
+    def _log_entry_decision(
+        self,
+        symbol: str,
+        ind: "CandleIndicators",
+        smoothed_threshold: float,
+        allowed: bool,
+        reason: str,
+    ) -> None:
+        """Story 6.1: Log structured entry decision context after every allows_entry evaluation."""
+        vwap_dev = float((ind.price - ind.vwap) / ind.vwap * 100) if ind.vwap > 0 else 0.0
+        decision = "APPROVED" if allowed else "REJECTED"
+        self.logger.info(
+            "[ENTRY_DECISION] %s | %s | rsi=%.1f threshold=%.1f | "
+            "trends: 5m=%+.1f%% 1h=%+.1f%% 4h=%+.1f%% 24h=%+.1f%% | "
+            "vwap_dev=%+.2f%% atr=%.2f%% | %s",
+            symbol, decision, ind.rsi_14, smoothed_threshold,
+            ind.change_5m_pct, ind.trend_1h_pct, ind.trend_4h_pct, ind.trend_24h_pct,
+            vwap_dev, ind.atr_pct, reason,
+        )
+
     def _get_effective_cfg(self, symbol: str) -> Dict[str, Any]:
         """
         Get effective configuration for a symbol (base + profile overrides)
@@ -376,32 +472,41 @@ class SmartEntryFilter:
         order_size_eur: Optional[float] = None,
         bid_price: Optional[float] = None,
         ask_price: Optional[float] = None,
+        vwap_slope_15m_pct: Optional[float] = None,
+        accel_5m_pct: Optional[float] = None,
+        accel_15m_pct: Optional[float] = None,
+        regime: str = "CHOP",
+    ) -> Tuple[bool, str, Optional[PairDecisionTrace]]:
+        """Story 6.1: Wrapper — evaluates entry and logs full context for every decision."""
+        result = self._evaluate_entry(
+            symbol, ind, exchange, trace_enabled, order_size_eur,
+            bid_price, ask_price, vwap_slope_15m_pct, accel_5m_pct, accel_15m_pct, regime,
+        )
+        allowed, reason, _ = result
+        raw_threshold = self._get_effective_cfg(symbol)["rsi_buy_max"]
+        smoothed = self._peek_smoothed_rsi_threshold(symbol, raw_threshold)
+        self._log_entry_decision(symbol, ind, smoothed, allowed, reason)
+        return result
+
+    def _evaluate_entry(
+        self,
+        symbol: str,
+        ind: CandleIndicators,
+        exchange: str = "unknown",
+        trace_enabled: bool = False,
+        order_size_eur: Optional[float] = None,
+        bid_price: Optional[float] = None,
+        ask_price: Optional[float] = None,
         vwap_slope_15m_pct: Optional[float] = None,  # EPIC v3.4 Story 6
         accel_5m_pct: Optional[float] = None,  # EPIC v3.4 Story 6
         accel_15m_pct: Optional[float] = None,  # EPIC v3.4 Story 6
         regime: str = "CHOP",  # EPIC v3.4 Story 6
     ) -> Tuple[bool, str, Optional[PairDecisionTrace]]:
         """
-        Check if entry is allowed for this symbol based on indicators
-
-        Args:
-            symbol: Trading pair (e.g., "ATOM-EUR")
-            ind: CandleIndicators with all technical data
-            exchange: Exchange name (for trace)
-            trace_enabled: Enable decision tracing
-            order_size_eur: Order size for depth checks
-            bid_price: Optional bid price override
-            ask_price: Optional ask price override
-            vwap_slope_15m_pct: VWAP momentum slope (EPIC v3.4)
-            accel_5m_pct: 5-minute price acceleration (EPIC v3.4)
-            accel_15m_pct: 15-minute price acceleration (EPIC v3.4)
-            regime: Market regime (BULL/CHOP/BEAR) (EPIC v3.4)
+        Inner evaluation — all filter logic lives here. Called by allows_entry wrapper.
 
         Returns:
             Tuple of (allowed: bool, reason: str, trace: Optional[PairDecisionTrace])
-            - If allowed=True, reason explains why entry is OK
-            - If allowed=False, reason explains which filter blocked it
-            - trace: Optional decision trace (None if trace_enabled=False)
         """
         # Create trace (zero overhead if disabled)
         # Fix #1: Generate correlation_id here (single source of truth per evaluation)
@@ -472,20 +577,79 @@ class SmartEntryFilter:
                 return False, f"🧠 {symbol}: NO BUY – orderbook data unavailable (fail-closed)", trace
 
         # 1) RSI Regime Checks
-        # Use rsi_block_min (max overbought threshold) - allows coin profiles to override
+        # 1a) Hard absolute block (rsi_block_min, e.g. 77) — no hysteresis, immediate
         rsi_block_ok = trace_range_check(trace, "rsi_block", ind.rsi_14, 0, cfg["rsi_block_min"])
         if not rsi_block_ok:
+            self._rsi_blocked[symbol] = True
+            self._rsi_unblocked_at.pop(symbol, None)
             trace.finalize(accepted=False, rejected_by="rsi_block", final_reason="overbought")
             trace.reason_code = ReasonCode.RSI_OVERBOUGHT.value
             trace.stage = Stage.SMART_ENTRY.value
             return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} >= {cfg['rsi_block_min']} (overbought)", trace
 
-        rsi_buy_ok = trace_percentage_check(trace, "rsi_buy_max", ind.rsi_14, cfg["rsi_buy_max"], "<=")
-        if not rsi_buy_ok:
-            trace.finalize(accepted=False, rejected_by="rsi_buy_max", final_reason="overbought")
-            trace.reason_code = ReasonCode.RSI_OVERBOUGHT.value
-            trace.stage = Stage.SMART_ENTRY.value
-            return False, f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} > {cfg['rsi_buy_max']} (overbought)", trace
+        # 1b) Dynamic threshold with Story 3.1 smoothing + Story 3.2 hysteresis
+        smoothed_threshold = self._get_smoothed_rsi_buy_max(symbol, cfg["rsi_buy_max"])
+        hysteresis_enabled = getattr(self.base_cfg, 'rsi_hysteresis_enabled', True)
+        hysteresis_gap = getattr(self.base_cfg, 'rsi_hysteresis_gap', 4.0)
+        recovery_min = getattr(self.base_cfg, 'rsi_hysteresis_recovery_min', 5.0)
+        unlock_threshold = smoothed_threshold - hysteresis_gap
+        currently_blocked = self._rsi_blocked.get(symbol, False)
+
+        if hysteresis_enabled:
+            if ind.rsi_14 > smoothed_threshold:
+                # RSI above buy_max → enter/stay blocked, reset recovery timer
+                self._rsi_blocked[symbol] = True
+                self._rsi_unblocked_at.pop(symbol, None)
+                trace.add_check("rsi_buy_max", ind.rsi_14, smoothed_threshold, False, "<=")
+                trace.finalize(accepted=False, rejected_by="rsi_buy_max", final_reason="overbought")
+                trace.reason_code = ReasonCode.RSI_OVERBOUGHT.value
+                trace.stage = Stage.SMART_ENTRY.value
+                return False, (
+                    f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} > {smoothed_threshold:.1f} (overbought)"
+                ), trace
+            elif currently_blocked:
+                if ind.rsi_14 <= unlock_threshold:
+                    # RSI in unlock zone — start or check recovery timer
+                    if symbol not in self._rsi_unblocked_at:
+                        self._rsi_unblocked_at[symbol] = time.monotonic()
+                    elapsed_min = (time.monotonic() - self._rsi_unblocked_at[symbol]) / 60.0
+                    if elapsed_min < recovery_min:
+                        trace.add_check("rsi_buy_max", ind.rsi_14, smoothed_threshold, False, "<=")
+                        trace.finalize(accepted=False, rejected_by="rsi_buy_max",
+                                       final_reason="RSI recovery cooldown after overbought")
+                        trace.reason_code = ReasonCode.RSI_HYSTERESIS_BLOCKED.value
+                        trace.stage = Stage.SMART_ENTRY.value
+                        return False, (
+                            f"🧠 {symbol}: NO BUY – RSI recovery cooldown "
+                            f"({elapsed_min:.1f}m / {recovery_min:.0f}m required after overbought, "
+                            f"unlock={unlock_threshold:.1f})"
+                        ), trace
+                    # Recovery complete — unblock
+                    self._rsi_blocked[symbol] = False
+                    self._rsi_unblocked_at.pop(symbol, None)
+                else:
+                    # RSI between unlock_threshold and smoothed_threshold while blocked → stay blocked
+                    trace.add_check("rsi_buy_max", ind.rsi_14, smoothed_threshold, False, "<=")
+                    trace.finalize(accepted=False, rejected_by="rsi_buy_max",
+                                   final_reason="RSI hysteresis (not cooled enough)")
+                    trace.reason_code = ReasonCode.RSI_HYSTERESIS_BLOCKED.value
+                    trace.stage = Stage.SMART_ENTRY.value
+                    return False, (
+                        f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} hysteresis "
+                        f"(must drop to {unlock_threshold:.1f} first)"
+                    ), trace
+            # Not blocked: RSI <= smoothed_threshold → record as passed
+            trace.add_check("rsi_buy_max", ind.rsi_14, smoothed_threshold, True, "<=")
+        else:
+            # Hysteresis disabled — simple threshold check
+            rsi_buy_ok = trace_percentage_check(trace, "rsi_buy_max", ind.rsi_14, smoothed_threshold, "<=")
+            if not rsi_buy_ok:
+                trace.finalize(accepted=False, rejected_by="rsi_buy_max", final_reason="overbought")
+                trace.reason_code = ReasonCode.RSI_OVERBOUGHT.value
+                trace.stage = Stage.SMART_ENTRY.value
+                return False, (
+                    f"🧠 {symbol}: NO BUY – RSI {ind.rsi_14:.1f} > {smoothed_threshold:.1f} (overbought)"
+                ), trace
 
         rsi_extreme_ok = trace_percentage_check(trace, "rsi_extreme", ind.rsi_14, cfg["rsi_extreme_low"], ">=")
         if not rsi_extreme_ok:
@@ -600,6 +764,21 @@ class SmartEntryFilter:
             return False, f"🧠 {symbol}: NO BUY – 24h trend {
                 ind.trend_24h_pct:+.2f}% < {
                 cfg['min_trend_24h_pct']}% (capitulation zone)", trace
+
+        # 7b) Story 4.1: Exhausted momentum — big 24h move + weak/negative 1h = likely at peak
+        if getattr(self.base_cfg, 'exhausted_momentum_enabled', False):
+            exh_24h_min = getattr(self.base_cfg, 'exhausted_momentum_24h_min_pct', 8.0)
+            exh_1h_max = getattr(self.base_cfg, 'exhausted_momentum_1h_max_pct', 1.0)
+            if ind.trend_24h_pct >= exh_24h_min and ind.trend_1h_pct < exh_1h_max:
+                trace.finalize(accepted=False, rejected_by="exhausted_momentum",
+                               final_reason="momentum likely exhausted at peak")
+                trace.reason_code = ReasonCode.EXHAUSTED_MOMENTUM.value
+                trace.stage = Stage.SMART_ENTRY.value
+                return False, (
+                    f"🧠 {symbol}: NO BUY – EXHAUSTED_MOMENTUM "
+                    f"(24h={ind.trend_24h_pct:+.1f}% >= {exh_24h_min}%, "
+                    f"1h={ind.trend_1h_pct:+.1f}% < {exh_1h_max}%)"
+                ), trace
 
         # All checks passed!
         # Fix #2: Stage already set at trace creation, no reason_code on success

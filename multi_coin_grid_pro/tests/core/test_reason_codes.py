@@ -18,9 +18,9 @@ class TestReasonCodes(unittest.TestCase):
     """Test suite for ReasonCode enum and utilities"""
 
     def test_reason_code_count(self):
-        """Verify we have exactly 53 rejection codes (includes Phase 2 momentum codes)"""
+        """Verify we have exactly 55 rejection codes (includes Phase 2 momentum codes + ST-07 REGIME_BEAR_BLOCKED)"""
         codes = list(ReasonCode)
-        self.assertEqual(len(codes), 54, f"Expected 54 codes, got {len(codes)}")
+        self.assertEqual(len(codes), 59, f"Expected 59 codes, got {len(codes)}")
 
         # Verify no APPROVED code exists
         code_values = [code.value for code in codes]
@@ -182,9 +182,9 @@ class TestReasonCodes(unittest.TestCase):
     def test_stage_count(self):
         """Verify we have exactly 7 stages (includes MOMENTUM)"""
         stages = list(Stage)
-        self.assertEqual(len(stages), 8, f"Expected 8 stages, got {len(stages)}")
+        self.assertEqual(len(stages), 9, f"Expected 9 stages, got {len(stages)}")
 
-        expected_stages = {"SMART_ENTRY", "MTF", "RISK", "EXECUTION", "REGIME", "MOMENTUM", "EXECUTOR_CREATE", "EDGE_GATE"}
+        expected_stages = {"SMART_ENTRY", "MTF", "RISK", "EXECUTION", "REGIME", "MOMENTUM", "EXECUTOR_CREATE", "EDGE_GATE", "COIN_SELECTION"}
         actual_stages = {stage.value for stage in stages}
 
         self.assertEqual(expected_stages, actual_stages, "Stage set mismatch")

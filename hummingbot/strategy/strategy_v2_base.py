@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import inspect
 import os
+import time
 from decimal import Decimal
 from typing import Callable, Dict, List, Optional, Set
 
@@ -187,6 +188,7 @@ class StrategyV2Base(ScriptStrategyBase):
     def __init__(self, connectors: Dict[str, ConnectorBase], config: Optional[StrategyV2ConfigBase] = None):
         super().__init__(connectors, config)
         self.config = config
+        self.strategy_start_time = time.time()
 
         # Initialize empty dictionaries to hold controllers and unified controller reports
         self.controllers: Dict[str, ControllerBase] = {}

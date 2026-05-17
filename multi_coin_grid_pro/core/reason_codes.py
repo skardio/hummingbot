@@ -25,6 +25,7 @@ class Stage(str, Enum):
     MOMENTUM = "MOMENTUM"
     EXECUTOR_CREATE = "EXECUTOR_CREATE"  # US-004: Budget allocation stage
     EDGE_GATE = "EDGE_GATE"  # ST-12: Economic edge gate
+    COIN_SELECTION = "COIN_SELECTION"  # Trend filter / coin ranking stage
 
 
 class ReasonCode(str, Enum):
@@ -64,6 +65,8 @@ class ReasonCode(str, Enum):
     NO_ORDERBOOK_DATA = "NO_ORDERBOOK_DATA"  # Orderbook snapshot unavailable
     STALE_PRICE = "STALE_PRICE"  # US-008: Price data too old
     STALE_ORDERBOOK = "STALE_ORDERBOOK"  # US-008: Orderbook data too old
+    EXHAUSTED_MOMENTUM = "EXHAUSTED_MOMENTUM"  # Story 4.1: Big 24h move + weak 1h = likely at peak
+    RSI_HYSTERESIS_BLOCKED = "RSI_HYSTERESIS_BLOCKED"  # Story 3.2: RSI still in recovery cooldown
 
     # ===== MTF (2 codes) =====
     MTF_INSUFFICIENT = "MTF_INSUFFICIENT"
@@ -94,9 +97,14 @@ class ReasonCode(str, Enum):
     TIME_STOP = "TIME_STOP"          # US-005: Max hold time exceeded
     PROFIT_LOCK = "PROFIT_LOCK"      # US-005: Profit lock triggered (drawdown from peak)
 
-    # ===== REGIME (2 codes) =====
+    # ===== REGIME (3 codes) =====
     REGIME_BTC_DUMP = "REGIME_BTC_DUMP"
     REGIME_DUMP_COOLDOWN = "REGIME_DUMP_COOLDOWN"
+    REGIME_BEAR_BLOCKED = "REGIME_BEAR_BLOCKED"
+
+    # ===== COIN_SELECTION (2 codes) =====
+    TREND_TOO_LOW = "TREND_TOO_LOW"          # No coin meets minimum trend threshold
+    NO_QUALIFYING_COIN = "NO_QUALIFYING_COIN"  # All coins filtered out before SmartEntry
 
     # ===== MOMENTUM (14 codes) =====
     MOMENTUM_SCORE_TOO_LOW = "MOMENTUM_SCORE_TOO_LOW"
@@ -134,6 +142,7 @@ def get_stage_for_reason(reason: ReasonCode) -> Stage:
         ReasonCode.DEPTH_INSUFFICIENT, ReasonCode.ORDERBOOK_UNAVAILABLE,
         ReasonCode.NO_PRICE_DATA, ReasonCode.NO_ORDERBOOK_DATA,
         ReasonCode.STALE_PRICE, ReasonCode.STALE_ORDERBOOK,  # US-008
+        ReasonCode.EXHAUSTED_MOMENTUM, ReasonCode.RSI_HYSTERESIS_BLOCKED,  # Post-mortem 2026-05-12
     }
     mtf_codes = {ReasonCode.MTF_INSUFFICIENT, ReasonCode.MTF_CRASH_DETECTED}
     risk_codes = {
@@ -146,7 +155,11 @@ def get_stage_for_reason(reason: ReasonCode) -> Stage:
         ReasonCode.BLACKLIST, ReasonCode.SLOT_FULL, ReasonCode.ALREADY_TRADING,
         ReasonCode.STARTUP_DELAY, ReasonCode.NOT_TRADEABLE, ReasonCode.ORDERBOOK_ERROR,
     }
-    regime_codes = {ReasonCode.REGIME_BTC_DUMP, ReasonCode.REGIME_DUMP_COOLDOWN}
+    regime_codes = {
+        ReasonCode.REGIME_BTC_DUMP,
+        ReasonCode.REGIME_DUMP_COOLDOWN,
+        ReasonCode.REGIME_BEAR_BLOCKED,
+    }
     momentum_codes = {
         ReasonCode.MOMENTUM_SCORE_TOO_LOW,
         ReasonCode.MOMENTUM_REGIME_BLOCKED,

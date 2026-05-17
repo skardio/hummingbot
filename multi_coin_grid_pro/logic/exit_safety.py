@@ -37,6 +37,19 @@ def position_tracking_cleanup_allowed(status_name: str, is_active: bool) -> bool
     return status_name == "TERMINATED" and not is_active
 
 
+def fee_aware_timeout_bypass_allowed(
+    close_reason: str,
+    blocked_for_sec: float,
+    bypass_after_sec: float,
+) -> bool:
+    """Allow stale no-progress exits to break fee-aware limbo after a max wait."""
+    return (
+        close_reason == "NO_PROGRESS_TIMEOUT"
+        and bypass_after_sec > 0
+        and blocked_for_sec >= bypass_after_sec
+    )
+
+
 def fee_aware_exit_decision(
     side: str,
     avg_entry: Decimal,

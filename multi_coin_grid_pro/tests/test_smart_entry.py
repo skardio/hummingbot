@@ -543,5 +543,349 @@ class TestSmartEntryFilter(unittest.TestCase):
             )
 
 
+class TestRSIHysteresisAndSmoothing(unittest.TestCase):
+    """
+    Regression tests for post-mortem 2026-05-12.
+
+    Story 3.2: RSI hysteresis — block at rsi_buy_max, only unblock after RSI drops
+               rsi_hysteresis_gap points below buy_max AND stays there for recovery_min.
+    Story 3.1: Threshold smoothing — median of last N samples prevents single-candle
+               threshold swings from opening entries.
+    Story 8.1: INJ-USD regression — bot must NOT buy when RSI drops rapidly after
+               being overbought for an extended period.
+    """
+
+    def _make_cfg(self, rsi_buy_max=75.0, rsi_block_min=77.0,
+                  hysteresis_enabled=True, hysteresis_gap=4.0, recovery_min=5.0,
+                  smoothing_enabled=True, smoothing_window=20,
+                  exhausted_momentum_enabled=False):
+        return SmartEntryBaseConfig(
+            rsi_buy_max=rsi_buy_max,
+            rsi_extreme_low=20.0,
+            rsi_block_min=rsi_block_min,
+            vwap_max_deviation_pct=20.0,   # wide — not under test
+            min_wick_ratio=0.0,            # disabled — not under test
+            max_atr_pct_for_grid=99.0,
+            min_atr_pct_for_grid=0.0,
+            max_5m_spike_pct=99.0,
+            max_down_accel_pct=-99.0,
+            max_up_accel_pct=99.0,
+            max_trend_24h_pct=99.0,
+            min_trend_24h_pct=-99.0,
+            slippage_check_enabled=False,
+            depth_check_enabled=False,
+            require_price=False,
+            require_orderbook=False,
+            rsi_hysteresis_enabled=hysteresis_enabled,
+            rsi_hysteresis_gap=hysteresis_gap,
+            rsi_hysteresis_recovery_min=recovery_min,
+            rsi_smoothing_enabled=smoothing_enabled,
+            rsi_smoothing_window=smoothing_window,
+            exhausted_momentum_enabled=exhausted_momentum_enabled,
+            exhausted_momentum_24h_min_pct=8.0,
+            exhausted_momentum_1h_max_pct=1.0,
+        )
+
+    def _make_ind(self, rsi, trend_1h=1.0, trend_4h=0.5, trend_24h=3.0, price=5.0):
+        from decimal import Decimal
+        return CandleIndicators(
+            price=Decimal(str(price)),
+            rsi_14=rsi,
+            vwap=Decimal(str(price)),
+            atr_pct=1.0,
+            wick_ratio=0.5,
+            trend_1h_pct=trend_1h,
+            trend_4h_pct=trend_4h,
+            trend_24h_pct=trend_24h,
+            change_5m_pct=0.1,
+        )
+
+    def test_story_8_1_inj_regression_overbought_then_rapid_drop(self):
+        """
+        Story 8.1 — INJ-USD regression case 2026-05-12 16:05-16:15.
+
+        Scenario: RSI stays above 77 for ~70 minutes (correctly blocked), then
+        crashes to 63.7 within 90 seconds. Without hysteresis the bot would have
+        entered immediately. With hysteresis + recovery_min, the entry must stay
+        blocked for at least recovery_min minutes after RSI drops below the unlock
+        threshold.
+        """
+        logger = logging.getLogger("test_inj")
+        logger.setLevel(logging.CRITICAL)
+        cfg = self._make_cfg(rsi_buy_max=75.0, rsi_block_min=77.0,
+                             hysteresis_enabled=True, hysteresis_gap=4.0, recovery_min=5.0,
+                             smoothing_enabled=False)  # smoothing off to isolate hysteresis
+        f = SmartEntryFilter(cfg, {}, logger)
+
+        # Step 1: RSI at 78.5 (above block_min=77) → blocked
+        ind_overbought = self._make_ind(rsi=78.5)
+        allowed, reason, _ = f.allows_entry("INJ-USD", ind_overbought)
+        self.assertFalse(allowed, "RSI 78.5 >= block_min 77 must be blocked")
+        self.assertTrue(f._rsi_blocked.get("INJ-USD", False), "Symbol must be marked blocked")
+
+        # Step 2: RSI drops to 63.7 (< unlock threshold 75-4=71) — entry must still be blocked
+        # because recovery_min (5 min) has not elapsed yet (we call it immediately after step 1)
+        ind_crashed = self._make_ind(rsi=63.7)
+        allowed2, reason2, _ = f.allows_entry("INJ-USD", ind_crashed)
+        self.assertFalse(allowed2,
+                         f"Entry must be blocked in recovery cooldown, got: {reason2}")
+        self.assertIn("recovery cooldown", reason2,
+                      f"Reason must mention recovery cooldown, got: {reason2}")
+
+    def test_hysteresis_no_flip_flop_at_threshold_boundary(self):
+        """
+        Story 3.2 — once blocked, RSI oscillating just below buy_max must not
+        open entry until it drops below (buy_max - gap).
+
+        buy_max=75, gap=4, unlock=71.
+        RSI at 73.5 (< buy_max=75 but > unlock=71) must NOT unblock.
+        """
+        logger = logging.getLogger("test_hysteresis")
+        logger.setLevel(logging.CRITICAL)
+        cfg = self._make_cfg(rsi_buy_max=75.0, rsi_block_min=77.0,
+                             hysteresis_enabled=True, hysteresis_gap=4.0, recovery_min=0.0,
+                             smoothing_enabled=False)
+        f = SmartEntryFilter(cfg, {}, logger)
+
+        # Get blocked first
+        f.allows_entry("ATOM-USD", self._make_ind(rsi=76.0))   # above buy_max → blocked
+        self.assertTrue(f._rsi_blocked.get("ATOM-USD", False))
+
+        # RSI at 73.5 — below buy_max but above unlock threshold (71) → still blocked
+        allowed, reason, _ = f.allows_entry("ATOM-USD", self._make_ind(rsi=73.5))
+        self.assertFalse(allowed, f"RSI 73.5 in hysteresis zone must stay blocked: {reason}")
+        self.assertIn("hysteresis", reason.lower(),
+                      f"Reason must mention hysteresis, got: {reason}")
+
+    def test_hysteresis_unblocks_after_sufficient_drop_and_recovery(self):
+        """
+        Story 3.2 — when recovery_min=0, entry is allowed as soon as RSI drops
+        below unlock threshold. Tests the clean unblock path.
+        """
+        logger = logging.getLogger("test_unblock")
+        logger.setLevel(logging.CRITICAL)
+        cfg = self._make_cfg(rsi_buy_max=75.0, rsi_block_min=77.0,
+                             hysteresis_enabled=True, hysteresis_gap=4.0, recovery_min=0.0,
+                             smoothing_enabled=False)
+        f = SmartEntryFilter(cfg, {}, logger)
+
+        # Block
+        f.allows_entry("BTC-USD", self._make_ind(rsi=76.0))
+        self.assertTrue(f._rsi_blocked.get("BTC-USD", False))
+
+        # RSI drops to 68 (< unlock=71), recovery_min=0 → should unblock immediately
+        allowed, reason, _ = f.allows_entry("BTC-USD", self._make_ind(rsi=68.0))
+        self.assertTrue(allowed, f"After sufficient drop with recovery_min=0, entry should be allowed: {reason}")
+        self.assertFalse(f._rsi_blocked.get("BTC-USD", False), "Block state must be cleared")
+
+    def test_story_3_1_smoothing_prevents_single_candle_threshold_drop(self):
+        """
+        Story 3.1 — a single candle where rsi_buy_max drops from 75 to 63
+        must not open entry when previous samples were at 75.
+
+        Without smoothing: threshold=63, RSI=62 → allowed.
+        With smoothing (median of 10 samples at 75 + 1 at 63): median≈75 → blocked.
+        """
+        logger = logging.getLogger("test_smooth")
+        logger.setLevel(logging.CRITICAL)
+        # Config: rsi_buy_max=75, hysteresis off to isolate smoothing effect
+        cfg = self._make_cfg(rsi_buy_max=75.0, rsi_block_min=90.0,
+                             hysteresis_enabled=False,
+                             smoothing_enabled=True, smoothing_window=10)
+        f = SmartEntryFilter(cfg, {}, logger)
+
+        # Prime history with 9 samples at threshold=75
+        for _ in range(9):
+            f._get_smoothed_rsi_buy_max("SOL-USD", 75.0)
+
+        # One outlier sample at 63 (simulates a coin-profile override dropping threshold)
+        smoothed = f._get_smoothed_rsi_buy_max("SOL-USD", 63.0)
+
+        # Median of [63, 75, 75, 75, 75, 75, 75, 75, 75, 75] = 75.0
+        self.assertGreater(smoothed, 70.0,
+                           f"Smoothed threshold must be near 75, not {smoothed} (single outlier must not dominate)")
+
+    def test_story_4_1_exhausted_momentum_blocks_inj_profile(self):
+        """
+        Story 4.1 — INJ profile: 24h=+11.71%, 1h=+1.90%.
+        With threshold 24h>=8% AND 1h<1%: 1h=1.90 is NOT < 1%, so this specific
+        case does NOT block (by design — requires both conditions).
+
+        Separately test the exact blocking condition: 24h=+10%, 1h=+0.5%.
+        """
+        logger = logging.getLogger("test_exhausted")
+        logger.setLevel(logging.CRITICAL)
+        cfg = self._make_cfg(exhausted_momentum_enabled=True,
+                             rsi_block_min=90.0,    # disable hard RSI block
+                             hysteresis_enabled=False,
+                             smoothing_enabled=False)
+        f = SmartEntryFilter(cfg, {}, logger)
+
+        # Case 1: 24h=10%, 1h=0.5% → SHOULD block (exhausted)
+        ind_exhausted = self._make_ind(rsi=50.0, trend_1h=0.5, trend_24h=10.0)
+        allowed, reason, _ = f.allows_entry("INJ-USD", ind_exhausted)
+        self.assertFalse(allowed, f"Exhausted momentum must block: {reason}")
+        self.assertIn("EXHAUSTED_MOMENTUM", reason)
+
+        # Case 2: 24h=10%, 1h=1.5% (strong 1h) → must NOT block
+        ind_still_running = self._make_ind(rsi=50.0, trend_1h=1.5, trend_24h=10.0)
+        allowed2, reason2, _ = f.allows_entry("INJ-USD", ind_still_running)
+        self.assertTrue(allowed2,
+                        f"Strong 1h should not be blocked by exhausted filter: {reason2}")
+
+        # Case 3: 24h=5% (below 8% threshold) + 1h=0.5% → must NOT block
+        ind_small_move = self._make_ind(rsi=50.0, trend_1h=0.5, trend_24h=5.0)
+        allowed3, reason3, _ = f.allows_entry("INJ-USD", ind_small_move)
+        self.assertTrue(allowed3,
+                        f"Small 24h move must not trigger exhausted filter: {reason3}")
+
+    def test_hysteresis_disabled_is_backward_compatible(self):
+        """Story 3.2 — when hysteresis disabled, simple threshold check applies (old behaviour)."""
+        logger = logging.getLogger("test_disabled")
+        logger.setLevel(logging.CRITICAL)
+        cfg = self._make_cfg(rsi_buy_max=75.0, rsi_block_min=90.0,
+                             hysteresis_enabled=False, smoothing_enabled=False)
+        f = SmartEntryFilter(cfg, {}, logger)
+
+        # RSI just above buy_max → blocked
+        allowed, _, _ = f.allows_entry("BTC-USD", self._make_ind(rsi=75.5))
+        self.assertFalse(allowed)
+
+        # RSI just below buy_max → allowed (no hysteresis, no prior block state)
+        allowed2, _, _ = f.allows_entry("BTC-USD", self._make_ind(rsi=74.9))
+        self.assertTrue(allowed2)
+
+
+class TestConfigValidation(unittest.TestCase):
+    """Story 7.1 — SmartEntryBaseConfig.validate() fails fast on bad config."""
+
+    def _base_cfg(self, **overrides):
+        defaults = dict(
+            rsi_buy_max=60.0, rsi_extreme_low=25.0, rsi_block_min=70.0,
+            vwap_max_deviation_pct=3.0, min_wick_ratio=0.25,
+            max_atr_pct_for_grid=6.0, min_atr_pct_for_grid=0.5,
+            max_5m_spike_pct=2.5, max_down_accel_pct=-1.0, max_up_accel_pct=1.5,
+            max_trend_24h_pct=8.0, min_trend_24h_pct=-12.0,
+            slippage_check_enabled=False, depth_check_enabled=False,
+            require_price=False, require_orderbook=False,
+        )
+        defaults.update(overrides)
+        return SmartEntryBaseConfig(**defaults)
+
+    def test_valid_config_does_not_raise(self):
+        """A correct config passes validation without error."""
+        cfg = self._base_cfg()
+        cfg.validate()  # must not raise
+
+    def test_rsi_buy_max_must_be_below_block_min(self):
+        """rsi_buy_max >= rsi_block_min is invalid."""
+        cfg = self._base_cfg(rsi_buy_max=70.0, rsi_block_min=70.0)
+        with self.assertRaises(ValueError) as ctx:
+            cfg.validate()
+        self.assertIn("rsi_buy_max", str(ctx.exception))
+
+    def test_rsi_extreme_low_must_be_below_buy_max(self):
+        """rsi_extreme_low >= rsi_buy_max is invalid."""
+        cfg = self._base_cfg(rsi_extreme_low=65.0, rsi_buy_max=60.0)
+        with self.assertRaises(ValueError) as ctx:
+            cfg.validate()
+        self.assertIn("rsi_extreme_low", str(ctx.exception))
+
+    def test_hysteresis_gap_must_be_positive(self):
+        """rsi_hysteresis_gap <= 0 is invalid."""
+        cfg = self._base_cfg()
+        cfg.rsi_hysteresis_gap = 0.0
+        with self.assertRaises(ValueError) as ctx:
+            cfg.validate()
+        self.assertIn("rsi_hysteresis_gap", str(ctx.exception))
+
+    def test_atr_range_must_be_ordered(self):
+        """max_atr must be > min_atr."""
+        cfg = self._base_cfg(min_atr_pct_for_grid=5.0, max_atr_pct_for_grid=3.0)
+        with self.assertRaises(ValueError) as ctx:
+            cfg.validate()
+        self.assertIn("max_atr_pct_for_grid", str(ctx.exception))
+
+    def test_multiple_errors_reported_together(self):
+        """All validation errors are collected and reported at once."""
+        cfg = self._base_cfg(rsi_extreme_low=72.0, rsi_buy_max=70.0, rsi_block_min=70.0)
+        with self.assertRaises(ValueError) as ctx:
+            cfg.validate()
+        msg = str(ctx.exception)
+        self.assertIn("rsi_buy_max", msg)
+        self.assertIn("rsi_extreme_low", msg)
+
+    def test_invalid_config_raises_on_filter_init(self):
+        """SmartEntryFilter.__init__ must reject an invalid config."""
+        logger = logging.getLogger("test_val")
+        logger.setLevel(logging.CRITICAL)
+        cfg = self._base_cfg(rsi_buy_max=70.0, rsi_block_min=70.0)
+        with self.assertRaises(ValueError):
+            SmartEntryFilter(cfg, {}, logger)
+
+
+class TestEntryContextLogging(unittest.TestCase):
+    """Story 6.1 — allows_entry logs structured entry context for every decision."""
+
+    def _make_cfg(self):
+        return SmartEntryBaseConfig(
+            rsi_buy_max=60.0, rsi_extreme_low=25.0, rsi_block_min=70.0,
+            vwap_max_deviation_pct=3.0, min_wick_ratio=0.25,
+            max_atr_pct_for_grid=6.0, min_atr_pct_for_grid=0.5,
+            max_5m_spike_pct=2.5, max_down_accel_pct=-1.0, max_up_accel_pct=1.5,
+            max_trend_24h_pct=8.0, min_trend_24h_pct=-12.0,
+            slippage_check_enabled=False, depth_check_enabled=False,
+            require_price=False, require_orderbook=False,
+        )
+
+    def _make_ind(self, rsi=50.0):
+        return CandleIndicators(
+            price=Decimal("10.0"), rsi_14=rsi, vwap=Decimal("9.9"),
+            atr_pct=2.5, wick_ratio=0.5,
+            trend_1h_pct=0.3, trend_4h_pct=0.2, trend_24h_pct=1.0,
+            change_5m_pct=0.1,
+        )
+
+    def test_approved_decision_is_logged(self):
+        """BUY_APPROVED must emit a log record containing ENTRY_DECISION."""
+        logger = logging.getLogger("test_log_approved")
+        with self.assertLogs(logger, level="INFO") as cm:
+            f = SmartEntryFilter(self._make_cfg(), {}, logger)
+            f.allows_entry("ETH-EUR", self._make_ind(rsi=50.0))
+        messages = "\n".join(cm.output)
+        self.assertIn("ENTRY_DECISION", messages)
+        self.assertIn("ETH-EUR", messages)
+        self.assertIn("APPROVED", messages)
+
+    def test_rejected_decision_is_logged(self):
+        """BUY_REJECTED must emit a log record containing ENTRY_DECISION."""
+        logger = logging.getLogger("test_log_rejected")
+        with self.assertLogs(logger, level="INFO") as cm:
+            f = SmartEntryFilter(self._make_cfg(), {}, logger)
+            f.allows_entry("ETH-EUR", self._make_ind(rsi=68.0))  # above buy_max → reject
+        messages = "\n".join(cm.output)
+        self.assertIn("ENTRY_DECISION", messages)
+        self.assertIn("REJECTED", messages)
+
+    def test_log_contains_rsi_and_trend_fields(self):
+        """Log must contain RSI value and trend percentages."""
+        logger = logging.getLogger("test_log_fields")
+        with self.assertLogs(logger, level="INFO") as cm:
+            f = SmartEntryFilter(self._make_cfg(), {}, logger)
+            f.allows_entry("SOL-EUR", self._make_ind(rsi=45.0))
+        messages = "\n".join(cm.output)
+        self.assertIn("rsi=", messages)
+        self.assertIn("threshold=", messages)
+        self.assertIn("trends:", messages)
+        self.assertIn("vwap_dev=", messages)
+        self.assertIn("atr=", messages)
+
+    def test_evaluate_entry_is_internal(self):
+        """_evaluate_entry should not be called directly by callers — only via allows_entry."""
+        f = SmartEntryFilter(self._make_cfg(), {})
+        self.assertTrue(hasattr(f, "_evaluate_entry"), "_evaluate_entry must exist")
+        self.assertTrue(hasattr(f, "allows_entry"), "allows_entry must exist")
+
+
 if __name__ == "__main__":
     unittest.main()

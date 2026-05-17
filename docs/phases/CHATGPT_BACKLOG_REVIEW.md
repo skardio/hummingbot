@@ -10,40 +10,60 @@
 
 | Status | Aantal | Correctie na staged-code audit |
 |--------|--------|-------------------------------|
-| ✅ Aantoonbaar actief in productiepad | 7 | Vooral bestaande risk/liquidity/regime checks + Dynamic TP |
-| 🟡 Module aanwezig of primair pad deels aangesloten | 12 | Let op: multi-coin vervolglus mist veel nieuwe gates |
-| ❌ Niet geïmplementeerd of niet aangesloten | 4 | Item 13 gross turnover, item 16 ranker-hook, item 21 dashboard, plus delen van item 2 |
+| ✅ Aantoonbaar actief in productiepad | 17 | Incl. register_close_trade wiring, capital_reserve_pct, MetaCoinRanker, ST-02 universe gate, gedeelde entry-gates, ST-05a funnel, ST-05b soft unwind wiring en ST-06b SQLite flush/post-run basis (2026-05-09) |
+| 🟡 Module aanwezig of primair pad deels aangesloten | 4 | Vooral dashboarding en scoremodel-restgaps |
+| ❌ Niet geïmplementeerd of niet aangesloten | 3 | Item 13 gross turnover, item 21 dashboard, Monte Carlo operationalisering |
 | 🗑️ Schrappen / niet prioriteit | 4 | Ongewijzigd |
 
 ## Audit 2026-04-28 — Claims "gebouwd" vs. staged werkelijkheid
 
 | Item | Claim in dit document | Werkelijkheid in staged changes |
 |------|-----------------------|---------------------------------|
-| Item 1 | Gebouwd + controller | 🟡 `EntryGateway` is er en draait in het primaire entrypad, maar de multi-coin vervolglus gebruikt hem niet. Exit-type cooldown bestaat, maar closed-trade PnL wordt niet via `risk_manager.register_close_trade()` gevoed. |
-| Item 3 | Daily kill switch klaar | 🟡 Logic en pre-entry checks bestaan, maar controller registreert gerealiseerde PnL niet in `GlobalRiskManager`; daardoor blijven per-coin -1R/-2R checks in live pad leeg. |
-| Item 5 | Volledig scoremodel | 🟡 Scorer bestaat en draait in primair entrypad, maar geen fakeout/slippage component. `depth_multiple=1.0` en `btc_1h_pct=0.0` zijn hard-coded. |
+| Item 1 | Gebouwd + controller | ✅ **2026-05-09**: `register_close_trade()` voedt exit-type cooldown/failed-cycle state én `EntryGateway` draait nu via één gedeelde admission-helper voor slot 1 en de multi-coin vervolglus. |
+| Item 3 | Daily kill switch klaar | 🟡 Logic + pre-entry checks bestaan. ✅ **2026-05-09**: gerealiseerde close-PnL wordt nu naar `GlobalRiskManager.register_close_trade()` gestuurd via `_sync_risk_state()` — per-coin -1R/-2R checks zijn live actief. |
+| Item 5 | Volledig scoremodel | 🟡 Scorer draait nu in alle entry-slots met echte RSI uit candles, spread%, orderbook depth multiple, ATR% en BTC 1h trend. Restgap: geen fakeout/slippage component. |
 | Item 6 | ATR calibrator actief | 🟡 Calibrator registreert ATR en logt suggesties; hij past grid multipliers nog niet automatisch toe. |
-| Item 8 | Quality sizing actief | 🟡 Actief in primair entrypad. Niet in multi-coin vervolglus; bucket-check gebeurt bovendien vóór quality-upsize. |
-| Item 9/10 | Bucket exposure actief | 🟡 Bucket tracker bestaat en werkt in primair pad, maar multi-coin vervolglus doet geen `can_add()`. Dit is bucket-blocking, geen size-down. |
+| Item 8 | Quality sizing actief | ✅ Quality sizing draait via gedeelde admission-helper voor slot 1/2/3 en wordt na resize opnieuw door EntryGateway gevalideerd. |
+| Item 9/10 | Bucket exposure actief | 🟡 Bucket tracker draait nu in alle entrypaden en checkt ná quality sizing. Dit is nog bucket-blocking, geen size-down. |
 | Item 13 | Gebouwd | ❌ Gross daily turnover per coin is niet gebouwd. Alleen bucket-exposure bestaat. |
-| Item 14 | Trade labeling volledig | 🟡 In-memory labels worden toegevoegd bij close, maar `TradeLabelStore` wordt niet gebruikt en meerdere velden zijn placeholders (`timestamp_open`, regime, MFE/MAE, cycle). |
-| Item 15/17 | Session edge / coin-session block | 🟡 SessionEdgeDetector is actief in primair entrypad en filtert per coin, maar gebruikt alleen in-memory labels en draait niet in de multi-coin vervolglus. |
-| Item 16 | Meta ranking ingehangen | ❌ `MetaCoinRanker` is alleen geïnstantieerd; controller roept `.rank()` / `.get_preferred_coins()` nergens aan. |
+| Item 14 | Trade labeling volledig | 🟡 `TradeLabelStore` wordt geïnitialiseerd, labels worden bij startup geladen en bij close persistent opgeslagen. Restgap: MFE/MAE blijven placeholders. |
+| Item 15/17 | Session edge / coin-session block | ✅ SessionEdgeDetector gebruikt persistente labels en draait via gedeelde admission-helper voor alle entry-slots. |
+| Item 16 | Meta ranking ingehangen | ✅ **2026-05-09**: `MetaCoinRanker.rank()` aangeroepen na grid-suitability filter; `top_coins` hergesorteerd op historische win-rate/PnL vóór `pick_first_inactive()`. |
 | Item 18 | Fill monitor volledig | 🟡 Monitor bestaat, maar controller registreert één synthetische close-sample met config start/end price, niet elke echte fill. |
-| Item 19 | Reserve architectuur | 🟡 Config en helper bestaan, maar controller gebruikt `capital_reserve_pct` / `get_deployable_balance()` niet. |
+| Item 19 | Reserve architectuur | ✅ **2026-05-09**: `get_deployable_balance()` nu aangeroepen na `_get_quote_balances_for_allocation()`; `available_balance` verminderd met `capital_reserve_pct` vóór doorgave aan `calculate_optimal_allocation()`. |
 | Item 20 | Niet geïmplementeerd | 🟡 Monte Carlo tool + tests bestaan in staged changes; nog geen operationele runbook/data-koppeling. |
 
 ---
 
 ## ✅ Al Geïmplementeerd — Niet opnieuw bouwen
 
+### ST-02 — Universe Quality Gate vóór ranking
+**Status: ✅ INGEHANGEN (2026-05-09)**
+- `utils/universe_quality_gate.py` filtert stablecoins, leveraged/inverse tokens, wrapped duplicates, blacklist, lage 24h-volume en brede spreads.
+- Controller past de gate toe vóór `trend_calculator.get_top_n_coins()` en dus vóór GridScore ranking.
+- Logs tonen hoeveel coins vóór ranking afvallen met reden-tellingen.
+- Update 2026-05-09: `PLAY-USD` staat op de Kraken USD blacklist na structurele `SPREAD_TOO_WIDE` concentratie in live events.
+
+### ST-05a / ST-06a — Funnel en selectie-observability
+**Status: ✅ EERSTE PRODUCTIESLICE ACTIEF (2026-05-09)**
+- `_log_selection_trace()` logt per tick monitored pool, active grids, qualifying/top coins, rejection counts en selected/no-selection outcome.
+- `ExecutionFunnelTracker` telt rolling considered, allowed, rejected, approved en started, inclusief `started/approved`.
+- DecisionLogger krijgt selection-funnel snapshots wanneer structured observability aan staat.
+- Restgap: automatische run-over-run analyse.
+
+### ST-05b — Timeout soft unwind
+**Status: ✅ TECHNISCH AANGESLOTEN (2026-05-09)**
+- `NO_PROGRESS_TIMEOUT` start de bestaande B1 two-phase unwind: eerst `GRACEFUL` limit close, daarna pas `AGGRESSIVE` slippage-guarded close.
+- Controller geeft `close_grace_sec`, `aggressive_close_method` en `aggressive_close_slippage_guard_pct` door aan de executor.
+- Update 2026-05-09: fee-aware exit guard krijgt een timeout-bypass voor `NO_PROGRESS_TIMEOUT` na `fee_aware_timeout_bypass_sec` of automatisch na 2× `no_progress_timeout_sec`, zodat een slot niet eindeloos in `FEE_AWARE_EXIT_BLOCKED` blijft hangen.
+- Restgap: live bewijs dat timeout-loss kleiner wordt dan de forced-exit baseline.
+
 ### Item 4 — Hard Pre-Trade Risk Gateway
-**Status: GROTENDEELS KLAAR**
+**Status: ✅ CENTRAAL ACTIEF (2026-05-09)**
 - `GlobalRiskManager.can_open_trade()` blokkeert op: max exposure, exit cooldown, switch cooldown
 - `SmartEntryFilter` controleert: spread, orderboekdiepte, RSI, regime
 - `MarketRegimeFilter` blokkeert bij BTC dump
-- `EntryGateway` is toegevoegd voor het primaire entrypad
-- ❗ Niet één centraal entry point: de multi-coin vervolglus omzeilt de nieuwe gateway nog
+- `EntryGateway` is toegevoegd en draait via gedeelde admission-helper voor primaire entry en multi-coin vervolglus
 
 ### Item 6 — Adaptive Grid Width
 **Status: GEDEELTELIJK GEÏMPLEMENTEERD + ATR CALIBRATOR TELEMETRIE**
@@ -73,15 +93,15 @@
 
 ### Item 1 — Re-entry Control Engine
 **Wat er is:** stop-loss cooldown via `last_switch_time` + `min_switch_interval_seconds` (5 min). Exit cooldown in `GlobalRiskManager`.
-**Wat er nieuw is:** `EntryGateway` (`core/entry_gateway.py`) gebouwd en in het primaire entrypad gehangen. `ExitType` + per-type cooldown bestaat in `GlobalRiskManager`.
-**Wat ontbreekt:** niet alle entrypaden gebruiken `EntryGateway`; de multi-coin vervolglus omzeilt hem. De close-PnL route roept `risk_manager.register_close_trade()` niet aan, waardoor exit-type cooldown, failed-cycle state en daily coin PnL niet volledig end-to-end gevoed worden.
-**Status: GEDEELTELIJK GEÏMPLEMENTEERD**
+**Wat er nieuw is:** `EntryGateway` (`core/entry_gateway.py`) gebouwd, close-PnL wordt geregistreerd, en alle nieuwe entry-slots gebruiken dezelfde admission-helper.
+**Wat ontbreekt:** geen groot production gap meer; restpunten zitten in observability en latere pattern-aware cooldowns.
+**Status: ✅ IN PRODUCTIEPAD**
 
 ### Item 2 — State-Aware Re-entry Machine
 **Wat er is:** basisachtige exit-tracking via `_last_exit_time` en `note_exit()`.
-**Wat er nieuw is:** `GlobalRiskManager` heeft helpers voor failed-cycle count en lock na 2 losses.
-**Wat ontbreekt:** geen expliciete state machine (WIN_EXIT / LOSS_EXIT / 2_FAILED_CYCLES). In controller wordt close-PnL niet naar `register_close_trade()` gestuurd, dus de failed-cycle lock wordt in live close-pad niet betrouwbaar gevuld.
-**Echte gap:** medium — state-model en close-wiring ontbreken.
+**Wat er nieuw is:** `GlobalRiskManager` heeft expliciete `CoinCycleState` (`READY`, `WIN_EXIT`, `LOSS_EXIT`, `TWO_FAILED_CYCLES`) plus `get_coin_cycle_status()`. Close-PnL voedt de state via `register_close_trade()`, en de controller blokkeert `TWO_FAILED_CYCLES` vroeg in de gedeelde admission-helper.
+**Wat ontbreekt:** alleen uitgebreidere reporting/visualisatie van states.
+**Status: ✅ AFGEROND VOOR RE-ENTRY LOCK**
 
 ### Item 3 — Daily Coin Kill Switch
 **Wat er is:** `GlobalRiskManager` tracks per-coin gerealiseerde PnL.
@@ -90,18 +110,20 @@
 **Status: GEDEELTELIJK / BUG IN WIRING**
 
 ### Item 5 — Trade Quality Filter (scoremodel)
-**Status: GEDEELTELIJK GEBOUWD + PRIMAIR PAD INGEHANGEN (2026-04-26)**
+**Status: GEDEELTELIJK GEBOUWD + ALLE ENTRY-SLOTS INGEHANGEN (2026-05-09)**
 - `TradeQualityScorer` (`scoring/trade_quality_scorer.py`) geeft 0–100 score op: regime, RSI, spread, diepte, volatiliteit, BTC-trend
 - `quality_size_multiplier()` converteert score naar positie-multiplier (0.5x–1.25x)
-- Ingehangen vóór `_create_grid_action()` in het primaire entrypad — score opgeslagen als `self._quality_score`
-- ❗ Geen fakeout/slippage component. In controller zijn `rsi=50.0`, `depth_multiple=1.0` en `btc_1h_pct=0.0` hard-coded.
+- Ingehangen in gedeelde admission-helper vóór `_create_grid_action()` voor primaire en multi-coin vervolglus
+- ✅ Inputs zijn niet langer blind constants: RSI komt uit candles, spread uit cached pair spread, depth uit orderbook, ATR uit candles/fallback-volatility, BTC-trend uit `BTC-{quote}` 1h trend
+- ❗ Geen fakeout/slippage component.
 
 ### Item 9 — Inventory-Aware Sizing
-**Status: GEDEELTELIJK GEBOUWD + PRIMAIR PAD INGEHANGEN (2026-04-26)**
+**Status: GEDEELTELIJK GEBOUWD + ALLE ENTRY-SLOTS INGEHANGEN (2026-05-09)**
 - `BucketExposureTracker` (`core/risk_buckets.py`) groepeert coins in bucket-categorieën (meme/L1/altcoin/stablecoin)
 - `can_add(coin, notional)` blokkeert als bucket-cap bereikt is
-- Ingehangen vóór `_create_grid_action()` in het primaire entrypad — blokkeert entry als bucket vol is
-- ❗ Geen size-down bij bucket-cap; alleen block. Multi-coin vervolglus doet geen `can_add()` en quality-upsize gebeurt na de bucket-check.
+- Ingehangen in gedeelde admission-helper — blokkeert entry als bucket vol is
+- ✅ Check draait nu ná quality sizing en ook in de multi-coin vervolglus
+- ❗ Geen size-down bij bucket-cap; alleen block.
 
 ### Item 10 — Portfolio Exposure Engine
 **Wat er is:** max open allocations, max per-coin notional in `GlobalRiskManager`.
@@ -129,36 +151,37 @@
 **Restgap:** geen echte scale-out logica; dit is dynamische TP, geen volledige position-management layer.
 
 ### Item 8 — Position Sizing op Kwaliteit
-**Status: GEDEELTELIJK GEBOUWD + PRIMAIR PAD INGEHANGEN (2026-04-26)**
+**Status: ✅ ALLE ENTRY-SLOTS INGEHANGEN (2026-05-09)**
 - `quality_size_multiplier(score, halved)` in `scoring/trade_quality_scorer.py`
 - Score <40 → 0.5x, 40-60 → 0.75x, 60-80 → 1.0x, >=80 → 1.25x
-- Ingehangen na entry gateway, vóór `_create_grid_action()` in primair entrypad
-- ❗ Niet toegepast in de multi-coin vervolglus
+- Ingehangen via gedeelde admission-helper vóór `_create_grid_action()` in primair entrypad én multi-coin vervolglus
+- Na resize volgt opnieuw EntryGateway-validatie zodat upsize niet langs risk caps glipt
 
 ### Item 14 — Learn From Logs Engine (trade labeling)
-**Status: GEDEELTELIJK GEBOUWD + IN-MEMORY INGEHANGEN (2026-04-26)**
+**Status: 🟡 PERSISTENTIE INGEHANGEN (2026-05-09)**
 - `TradeLabel` dataclass + `TradeLabelStore` bestaan
-- Controller vult een in-memory buffer `self._trade_labels` (max 500) bij terminated executors
-- ❗ `TradeLabelStore` wordt niet geïnitialiseerd of aangeroepen door de controller
-- ❗ Meerdere velden zijn placeholders: `timestamp_open=_now_ts-3600`, `regime=""`, `depth_at_entry=0.0`, `mfe_pct=0.0`, `mae_pct=0.0`, `cycle_number=1`
+- Controller laadt bij startup recente labels uit `data/trade_labels_<instance>.db`
+- Controller schrijft bij close naar in-memory buffer én `TradeLabelStore`
+- ✅ `timestamp_open`, sessie, regime, spread, depth, quality, reentry en cycle-number worden uit entry-context gevuld
+- ❗ MFE/MAE blijven placeholders.
 
 ### Item 15 — Session Edge Detection
-**Status: GEDEELTELIJK GEBOUWD + PRIMAIR PAD INGEHANGEN (2026-04-26)**
+**Status: ✅ ALLE ENTRY-SLOTS + PERSISTENTE LABELS (2026-05-09)**
 - `SessionEdgeDetector` (`core/session_edge_detector.py`) analyseert TradeLabel history per sessie (Asia/EU/US/weekend)
 - `session_from_utc()` bepaalt huidige sessie
-- Ingehangen vóór `_create_grid_action()` in primair entrypad — blokkeert entry als sessie historisch slecht presteert voor die coin
-- ❗ Gebruikt alleen in-memory labels van de huidige runtime en draait niet in de multi-coin vervolglus
+- Ingehangen in gedeelde admission-helper — blokkeert entry als sessie historisch slecht presteert voor die coin
+- Gebruikt bij startup geladen `TradeLabelStore` labels en draait ook in de multi-coin vervolglus
 
 ### Item 16 — Meta Ranking Engine
-**Status: MODULE GEBOUWD, NIET INGEHANGEN (2026-04-28)**
+**Status: ✅ INGEHANGEN (2026-05-09)**
 - `MetaCoinRanker` (`core/meta_coin_ranker.py`) rankt coins op historische PnL + win rate uit TradeLabel buffer
 - `.rank(labels)` geeft gesorteerde lijst terug
-- ❌ Controller instantieert `self.meta_ranker`, maar roept `.rank()` / `.get_preferred_coins()` nergens aan. Coin selectie gebruikt ranking dus nog niet.
+- ✅ Controller roept `.rank(self._trade_labels)` aan na grid-suitability filter; `top_coins` hergesorteerd op score vóór `pick_first_inactive()`. Faalt stil als er < `min_trades=5` trades per coin zijn.
 
 ### Item 17 — Session + Coin Auto Block
 **Gap:** geen `coin × sessie` combinatie tracking.
 **Prioriteit:** LAAG — vereist data van item 15 first.
-**Update (2026-04-28):** SessionEdgeDetector filtert per coin en sessie in primair entrypad. Nog niet persistent en niet in multi-coin vervolglus.
+**Update (2026-05-09):** SessionEdgeDetector filtert per coin en sessie in alle entrypaden en gebruikt persistente TradeLabelStore history. Specifieke coin×sessie metrics blijven een later analysepunt.
 
 ### Item 18 — Fill Quality Monitor
 **Status: MODULE GEBOUWD + BEPERKT INGEHANGEN (2026-04-26)**
@@ -168,8 +191,11 @@
 - ❗ Niet elke echte fill wordt geregistreerd; controller gebruikt config start/end price als proxy, niet werkelijke fill-prijzen
 
 ### Item 19 — Capital Efficiency Layer
-**Gap:** `capital_reserve_pct` config en `GlobalRiskManager.get_deployable_balance()` bestaan, maar controller gebruikt ze niet in allocatie.
-**Prioriteit:** LAAG — pas relevant bij échte opportunity-kosten.
+**Status: ✅ INGEHANGEN (2026-05-09)**
+- `capital_reserve_pct` (default 10%) wordt nu toegepast: `get_deployable_balance()` vermindert `available_balance` vóór `calculate_optimal_allocation()`.
+- 2026-05-09 follow-up: dit geldt nu voor het primaire slot én de multi-coin vervolglus.
+- Bij 10% reserve op €300 = €270 deployable. Debug-log toont verschil.
+- Nog te doen: budget_allocator gebruikt nog `raw_available_balance` voor de interne check — consistent houden bij hogere schaal.
 
 ### Item 20 — Monte Carlo Risk Test
 **Status: TOOL GEBOUWD, NOG NIET OPERATIONEEL IN PROCES**
@@ -180,6 +206,7 @@
 ### Item 21 — Execution Quality Dashboard
 **Gap:** geen unified dashboard. Alles verspreid over logs.
 **Prioriteit:** LAAG — operationeel comfort, geen direct PnL impact.
+**Statusupdate 2026-05-09:** bewust niet vandaag gebouwd; eerst entry-gates en persistente labels afgerond. Dashboard blijft later item.
 
 ---
 
@@ -198,7 +225,7 @@ Al gedeeltelijk opgelost. Hoeft geen apart project te worden — valt onder item
 ### Item 10 — Risk Buckets (meme beta / L1 / smallcap)
 **Fase:** Architectuur nu, activeren bij >€5k
 Bij €25k met 10+ coins simultaan is bucket-exposure een harde vereiste. Zonder dit is vijf meme-coins tegelijk één geconcentreerde bet, niet diversificatie.
-**Wat te doen nu:** maak de bucket-check consistent in alle entrypaden, check opnieuw na quality sizing, en beslis of bucket-cap moet blokkeren of size reduceren. Integratie in `GlobalRiskManager` is nog niet gedaan.
+**Wat te doen nu:** bucket-check is consistent in alle entrypaden en draait ná quality sizing. Later nog beslissen of bucket-cap moet blokkeren of size reduceren. Integratie in `GlobalRiskManager` is nog niet gedaan.
 
 ### Item 19 — Capital Efficiency Reserve
 **Fase:** Activeren bij >€10k
@@ -208,7 +235,7 @@ Bij hogere kapitaalschalen is permanent volledig deployed zijn suboptimaal — b
 ### Item 20 — Monte Carlo Risk Test
 **Fase:** Uitvoeren na 500+ trades (genoeg historische data)
 Bij €25k wil je weten of het systeem een drawdown-reeks van 10 losers overleeft zonder margin call. Zonder dit is schalen blind vertrouwen.
-**Wat te doen nu:** tool bestaat; maak trade-label persistence echt en voeg een runbook/command toe voor periodieke analyse.
+**Wat te doen nu:** trade-label persistence is actief. Later nog runbook/command toevoegen voor periodieke Monte Carlo analyse.
 
 ---
 
@@ -219,29 +246,34 @@ Bij €25k wil je weten of het systeem een drawdown-reeks van 10 losers overleef
 
 | Prio | Item | Omschrijving | Status |
 |------|------|-------------|--------|
-| **P1** | Item 1 (gap) | Exit-type differentiatie in cooldown (TP=15m, SL=4h, trend=block) | 🟡 Module + primair EntryGateway-pad; close-PnL en multi-coin pad missen |
-| **P2** | Item 3 | Daily coin kill switch (-1R halve size, -2R block) | 🟡 Logic + pre-entry check; gerealiseerde PnL wordt niet gevoed |
+| **P1** | Item 1 (gap) | Exit-type differentiatie in cooldown (TP=15m, SL=4h, trend=block) | ✅ Close-PnL gevoed en EntryGateway gedeeld over alle entry-slots (2026-05-09) |
+| **P2** | Item 3 | Daily coin kill switch (-1R halve size, -2R block) | ✅ Live gevoed via `register_close_trade()` (2026-05-09); per-coin teller actief |
 | **P3** | Item 7 | Dynamic TP (bounce-strength scale-out) | ✅ Dynamic TP actief; geen scale-out |
-| **P4** | Item 14 | Trade labeling (regime, spread, reentry, MFE/MAE → in-memory buffer) | 🟡 In-memory basis; store en echte contextvelden missen |
-| **P5** | Item 2 | State-aware re-entry (2 failed cycles → coin lock) | 🟡 Helpers bestaan; geen volledige state machine en niet live gevoed |
-| **P6** | Item 9 | BucketExposureTracker (bucket-cap block) | 🟡 Primair pad; blokkeert i.p.v. size-down; multi-coin pad mist check |
-| **P7** | Item 8 | Quality-based sizing (na score-systeem) | 🟡 Actief in primair pad; niet in multi-coin pad |
-| **P8** | Item 15/16 | Session edge + coin ranking | 🟡 Session edge primair pad; ❌ ranker niet gebruikt |
+| **P4** | Item 14 | Trade labeling (regime, spread, reentry, MFE/MAE → in-memory buffer) | 🟡 Store + echte contextvelden actief; MFE/MAE missen |
+| **P5** | Item 2 | State-aware re-entry (2 failed cycles → coin lock) | ✅ Expliciete `CoinCycleState`; live gevoed via close-PnL en gehandhaafd in admission-helper |
+| **P6** | Item 9 | BucketExposureTracker (bucket-cap block) | 🟡 Alle entrypaden; blokkeert i.p.v. size-down |
+| **P7** | Item 8 | Quality-based sizing (na score-systeem) | ✅ Alle entrypaden |
+| **P8** | Item 15/16 | Session edge + coin ranking | ✅ Session edge alle entrypaden + persistente labels; MetaCoinRanker reordert `top_coins` |
 | **P9** | Item 18 | Fill quality monitor | 🟡 Beperkte close-proxy, geen echte per-fill monitoring |
-| **P10** | Item 5 (score) | Geaggregeerde 0–100 trade quality score | 🟡 Scorer actief primair pad; inputs deels hard-coded |
+| **P10** | Item 5 (score) | Geaggregeerde 0–100 trade quality score | 🟡 Scorer alle entrypaden; inputs live behalve fakeout/slippage |
+| **P11** | ST-06b | SQLite executor/fill basis + post-run analyse | ✅ Directe executor flush + initial/live snapshots + `post_run_sqlite_report.py` |
 
 ### Resterende backlog (nog niet geïmplementeerd)
 
 | Item | Omschrijving | Prioriteit |
 |------|-------------|-----------|
-| Item 1/2/3 | Close-PnL naar `risk_manager.register_close_trade()` sturen zodat cooldowns, failed cycles en daily coin kill switch live data krijgen | HOOG |
-| Item 2 | State machine (WIN_EXIT/LOSS_EXIT/2_FAILED) volledig | MEDIUM |
+| Item 1/2/3 | ~~Close-PnL naar `risk_manager.register_close_trade()`~~ | ✅ KLAAR (2026-05-09) |
+| Item 2 | ~~State machine (WIN_EXIT/LOSS_EXIT/2_FAILED) volledig~~ | ✅ KLAAR (2026-05-09) |
+| ST-05a/ST-06a | ~~Funnel + selection trace eerste productieslice~~ | ✅ KLAAR (2026-05-09); run-over-run analyse later |
+| ST-05b | ~~NO_PROGRESS_TIMEOUT soft unwind wiring~~ | ✅ KLAAR (2026-05-09); live verliesvalidatie later |
+| ST-06b | ~~Executor/fill SQLite logging fix + basale post-run analyse~~ | ✅ KLAAR (2026-05-10); live snapshots + mismatch/error-classificatie toegevoegd; historische gaten blijven historisch |
+| ST-07 | ~~Definitief BEAR-beleid kiezen~~ | ✅ KLAAR (2026-05-09): conditioneel BEAR-light |
 | Item 13 | Gross daily turnover teller per coin | LAAG |
-| Item 16 | `MetaCoinRanker` echt gebruiken in coin selectie | MEDIUM |
-| Item 19 | `capital_reserve_pct` toepassen in allocatie/budget | LAAG |
+| Item 16 | ~~`MetaCoinRanker` echt gebruiken in coin selectie~~ | ✅ KLAAR (2026-05-09) |
+| Item 19 | ~~`capital_reserve_pct` toepassen in allocatie/budget~~ | ✅ KLAAR (2026-05-09) |
 | Item 20 | Monte Carlo tool koppelen aan persistente labels + runbook | LAAG (na 500+ trades) |
 | Item 21 | Execution quality dashboard | LAAG |
-| Cross-cutting | Nieuwe gates ook toepassen in multi-coin vervolglus | HOOG |
+| Cross-cutting | ~~Nieuwe gates ook toepassen in multi-coin vervolglus~~ | ✅ KLAAR (2026-05-09) |
 
 ---
 

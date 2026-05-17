@@ -209,6 +209,17 @@ class TestMomentumIndicatorService:
         assert slope is None
         assert "no_vwap" in reason
 
+    def test_vwap_slope_calculation_unavailable_label(self, service, sample_candles):
+        """Test VWAP slope calculation issue uses a non-error reason label."""
+        candles = list(sample_candles)
+        candles[-1] = {**candles[-1], "vwap": "bad"}
+
+        slope, reason = service._calculate_vwap_slope(candles, window_minutes=5)
+
+        assert slope is None
+        assert reason == "calculation_unavailable_5m"
+        assert "error" not in reason
+
     def test_acceleration_positive(self, service):
         """Test price acceleration - increasing."""
         candles = []
@@ -269,6 +280,21 @@ class TestMomentumIndicatorService:
 
         assert accel is None
         assert reason == "insufficient_history_for_15m"
+
+    def test_acceleration_calculation_unavailable_label(self, service, sample_candles):
+        """Test acceleration calculation issue uses a non-error reason label."""
+        candles = list(sample_candles)
+        candles[-6] = {**candles[-6], "close": "bad"}
+
+        accel, reason = service._calculate_acceleration(
+            candles=candles,
+            current_price=105.0,
+            window_minutes=5
+        )
+
+        assert accel is None
+        assert reason == "calculation_unavailable_5m"
+        assert "error" not in reason
 
     def test_dual_window_slopes(self, service, sample_candles):
         """Test both 5m and 15m slope calculations."""

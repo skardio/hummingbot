@@ -23,7 +23,11 @@ from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecut
 from hummingbot.strategy_v2.models.base import RunnableStatus
 from hummingbot.strategy_v2.models.executors import CloseType, EarlyStopReason, TrackedOrder
 from hummingbot.strategy_v2.utils.distributions import Distributions
-from multi_coin_grid_pro.logic.exit_safety import fee_aware_exit_decision, realized_net_pnl
+from multi_coin_grid_pro.logic.exit_safety import (
+    fee_aware_exit_decision,
+    fee_aware_timeout_bypass_allowed,
+    realized_net_pnl,
+)
 
 # Story C1: Log Throttling - prevent executor spam
 try:
@@ -156,6 +160,11 @@ class GridExecutor(ExecutorBase):
         self._timeout_close_triggered = False  # Guard: prevent double close from timeouts
         self._timeout_close_type = None  # Which timeout triggered: NO_FILL / NO_PROGRESS / HARD_CAP
         self._force_aggressive_close = False  # Bounded close: escalate to market order after grace period
+        self._fee_aware_blocked_since: Dict[str, float] = {}
+        self._fee_aware_block_log_ts: Dict[str, float] = {}
+        # Story 2.1: Rapid grid-fill detection
+        self._first_buy_fill_ts: Optional[float] = None   # Timestamp of first buy fill
+        self._rapid_fill_detected: bool = False           # All buys filled within rapid_fill_window_sec
         # ==============================================================================
 
         # ==============================================================================
@@ -802,7 +811,11 @@ class GridExecutor(ExecutorBase):
         #   1. Time elapsed AND
         #   2. Unrealized loss > threshold (avoid stopping break-even/winning positions)
         #   EXCEPTION: If grid is stalled (has inventory but 0 working orders), always trigger
-        if no_progress_timeout > 0 and since_last_progress >= no_progress_timeout:
+        # Story 2.2: Halve timeout when rapid fill detected (falling knife indicator)
+        effective_no_progress_timeout = no_progress_timeout
+        if self._rapid_fill_detected and no_progress_timeout > 0:
+            effective_no_progress_timeout = no_progress_timeout / 2
+        if effective_no_progress_timeout > 0 and since_last_progress >= effective_no_progress_timeout:
             # Get PnL-aware thresholds from config
             timeout_min_loss_pct = custom_info.get('no_progress_min_loss_pct', 1.5)  # Default -1.5%
             timeout_atr_multiplier = custom_info.get('no_progress_atr_multiplier', 0.0)  # Default 0 = disabled
@@ -849,7 +862,8 @@ class GridExecutor(ExecutorBase):
                 )
                 self.logger().warning(
                     f"⏰ NO_PROGRESS_TIMEOUT triggered (STALLED): {self.config.trading_pair} | "
-                    f"since_progress={since_last_progress / 60:.1f}m >= {no_progress_timeout / 60:.1f}m | "
+                    f"since_progress={since_last_progress / 60:.1f}m >= {effective_no_progress_timeout / 60:.1f}m"
+                    f"{' [RAPID_GRID_FILL_SHORT_TIMEOUT]' if self._rapid_fill_detected else ''} | "
                     f"inventory={float(self.position_size_base):.4f} orders=({stall_detail}) | "
                     f"unrealized_pnl={float(unrealized_pnl_pct):.2f}% | "
                     f"Grid deadlocked - forcing unwind"
@@ -901,8 +915,9 @@ class GridExecutor(ExecutorBase):
             if has_adverse_pnl and has_adverse_move:
                 self.logger().warning(
                     f"⏰ NO_PROGRESS_TIMEOUT triggered (PRO): {self.config.trading_pair} | "
-                    f"since_progress={since_last_progress / 60:.1f}m >= {no_progress_timeout / 60:.1f}m | "
-                    f"unrealized_pnl={float(unrealized_pnl_pct):.2f}% (threshold: -{timeout_min_loss_pct}%) ✓ | "
+                    f"since_progress={since_last_progress / 60:.1f}m >= {effective_no_progress_timeout / 60:.1f}m"
+                    f"{' [RAPID_GRID_FILL_SHORT_TIMEOUT]' if self._rapid_fill_detected else ''} | "
+                    f"unrealized_pnl={float(unrealized_pnl_pct):.2f}% (threshold: -{timeout_min_loss_pct}%) \u2713 | "
                     f"ATR check: {atr_check_status} | "
                     f"Grid stalled with adverse PnL - starting unwind"
                 )
@@ -1859,6 +1874,13 @@ class GridExecutor(ExecutorBase):
             EarlyStopReason.EMERGENCY_EXIT,
         }:
             self.close_type = CloseType.STOP_LOSS
+        elif effective_reason in {
+            EarlyStopReason.NO_PROGRESS_TIMEOUT,
+            EarlyStopReason.NO_FILL_TIMEOUT,
+        }:
+            # Use NO_PROGRESS_TIMEOUT so the fee-aware guard gets the correct
+            # timeout-bypass window (2× no_progress_timeout) instead of blocking forever.
+            self.close_type = CloseType.NO_PROGRESS_TIMEOUT
         else:
             self.close_type = CloseType.EARLY_STOP
 
@@ -2322,10 +2344,22 @@ class GridExecutor(ExecutorBase):
                             f"Attempting order anyway (exchange will verify)."
                         )
 
-                # Case 3: Neither connector nor internal shows sufficient balance
+                # Case 3: Neither connector nor internal shows sufficient balance.
+                # Before concluding "sold externally", retry a few times — balance
+                # unlock on Kraken can take several seconds after a cancel/fill event.
                 elif connector_balance < min_order_size and internal_inventory < min_order_size:
+                    self._balance_mismatch_attempts += 1
+                    if self._balance_mismatch_attempts <= 3:
+                        self.logger().warning(
+                            f"⏳ Executor {self.config.id[:8]}... No balance visible yet "
+                            f"(connector={connector_balance}, internal={internal_inventory} {base_asset}) "
+                            f"— attempt {self._balance_mismatch_attempts}/3, waiting for balance unlock"
+                        )
+                        level.reset_close_order()
+                        return  # Retry on next control_task cycle
                     self.logger().error(
-                        f"❌ Executor {self.config.id[:8]}... No balance available: "
+                        f"❌ Executor {self.config.id[:8]}... No balance after "
+                        f"{self._balance_mismatch_attempts} retries: "
                         f"connector={connector_balance}, internal={internal_inventory} {base_asset}. "
                         f"Position was likely sold externally. Terminating."
                     )
@@ -2488,6 +2522,24 @@ class GridExecutor(ExecutorBase):
             CloseType.SWITCH,
         }
 
+    def _fee_aware_timeout_bypass_after_sec(self, close_type: Optional[CloseType]) -> float:
+        """Return max fee-guard wait for timeout closes; 0 means auto."""
+        if close_type != CloseType.NO_PROGRESS_TIMEOUT:
+            return 0.0
+
+        custom_info = self.config.custom_info or {}
+        configured = custom_info.get("fee_aware_timeout_bypass_sec")
+        if configured is not None:
+            try:
+                configured_sec = float(configured)
+                if configured_sec > 0:
+                    return configured_sec
+            except (TypeError, ValueError):
+                pass
+
+        no_progress_timeout = float(custom_info.get("no_progress_timeout_sec", 3600) or 3600)
+        return max(0.0, no_progress_timeout * 2.0)
+
     def _position_dust_threshold(self) -> Decimal:
         try:
             return getattr(self.trading_rules, "min_order_size", Decimal("0")) or Decimal("0")
@@ -2582,18 +2634,45 @@ class GridExecutor(ExecutorBase):
         else:
             allowed = price <= break_even
 
+        close_name = close_type.name if close_type else "UNKNOWN"
+        block_key = close_name
+        if not hasattr(self, "_fee_aware_blocked_since"):
+            self._fee_aware_blocked_since = {}
+        if not hasattr(self, "_fee_aware_block_log_ts"):
+            self._fee_aware_block_log_ts = {}
+
         log_payload = (
             f"avg_entry={snapshot['avg_entry']:.10f}, "
             f"break_even={break_even:.10f}, "
             f"expected_exit_fee={snapshot['expected_exit_fee']:.8f}, "
             f"current_price={price:.10f}, "
-            f"proposed_close_reason={close_type.name if close_type else 'UNKNOWN'}, "
+            f"proposed_close_reason={close_name}, "
             f"allowed={allowed}"
         )
         if allowed:
+            self._fee_aware_blocked_since.pop(block_key, None)
+            self._fee_aware_block_log_ts.pop(block_key, None)
             self.logger().info(f"🧮 FEE_AWARE_EXIT_CHECK {stage}: {log_payload}")
         else:
-            self.logger().warning(f"🛡️ FEE_AWARE_EXIT_BLOCKED {stage}: {log_payload}")
+            now = float(getattr(self._strategy, "current_timestamp", 0.0) or 0.0)
+            blocked_since = self._fee_aware_blocked_since.setdefault(block_key, now)
+            blocked_for = max(0.0, now - blocked_since)
+            bypass_after = self._fee_aware_timeout_bypass_after_sec(close_type)
+
+            if fee_aware_timeout_bypass_allowed(close_name, blocked_for, bypass_after):
+                self.logger().warning(
+                    f"🧯 FEE_AWARE_TIMEOUT_BYPASS {stage}: {log_payload}, "
+                    f"blocked_for={blocked_for:.0f}s >= bypass_after={bypass_after:.0f}s"
+                )
+                return True
+
+            last_log = self._fee_aware_block_log_ts.get(block_key, 0.0)
+            if now - last_log >= 60.0:
+                self._fee_aware_block_log_ts[block_key] = now
+                self.logger().warning(
+                    f"🛡️ FEE_AWARE_EXIT_BLOCKED {stage}: {log_payload}, "
+                    f"blocked_for={blocked_for:.0f}s, bypass_after={bypass_after:.0f}s"
+                )
 
         return allowed
 
@@ -3794,6 +3873,7 @@ class GridExecutor(ExecutorBase):
             "realized_fees_quote": self.realized_fees_quote,
             "realized_pnl_quote": self.realized_pnl_quote,
             "realized_pnl_pct": self.realized_pnl_pct,
+            "position_size_base": self.position_size_base,
             "position_size_quote": self.position_size_quote,
             "position_fees_quote": self.position_fees_quote,
             "break_even_price": self.position_break_even_price,
@@ -4040,6 +4120,26 @@ class GridExecutor(ExecutorBase):
         # STORY A1: Update last_fill_timestamp (any fill = activity)
         self._last_fill_timestamp = self._strategy.current_timestamp
 
+        # Story 2.1: Track first buy fill and detect rapid-fill window
+        if event.trade_type == TradeType.BUY:
+            now = self._last_fill_timestamp
+            if self._first_buy_fill_ts is None:
+                # First buy fill: record timestamp, defer rapid-fill check to next fill
+                self._first_buy_fill_ts = now
+            elif not self._rapid_fill_detected:
+                # 2nd+ buy fill: check if all levels filled within window
+                custom_info = self.config.custom_info or {}
+                rapid_window = float(custom_info.get('rapid_fill_window_sec', 300))
+                elapsed = now - self._first_buy_fill_ts
+                unfilled = self.levels_by_state.get(GridLevelStates.OPEN_ORDER_PLACED, [])
+                if len(unfilled) == 0 and elapsed <= rapid_window:
+                    self._rapid_fill_detected = True
+                    self.logger().warning(
+                        f"⚡ RAPID_GRID_FILL: {self.config.trading_pair} | "
+                        f"all buys filled in {elapsed:.0f}s (window={rapid_window:.0f}s) — "
+                        f"falling knife suspected, halving no-progress timeout"
+                    )
+
     def process_order_completed_event(self, _, market, event: Union[BuyOrderCompletedEvent, SellOrderCompletedEvent]):
         """
         This method is responsible for processing the order completed event. Here we will check if the id is one of the
@@ -4113,26 +4213,33 @@ class GridExecutor(ExecutorBase):
         error_msg_full = str(event)  # Preserve case for matching
         error_msg = error_msg_full.lower()
 
-        # Detect NL-restriction pattern
+        # Detect NL-restriction / local compliance restriction pattern
+        # Kraken: "EAccount:Invalid permissions:STBL trading restricted for NL."
+        # OKX EU:  "You can't trade this pair or borrow this crypto due to local compliance restrictions."
         is_nl_restricted = (
             "trading restricted for nl" in error_msg
             or ("invalid permissions" in error_msg and "trading restricted" in error_msg)
+            or "local compliance restrictions" in error_msg
+            or ("can't trade this pair" in error_msg and "compliance" in error_msg)
         )
 
         if is_nl_restricted:
             # Extract coin from trading pair (e.g., "STBL-EUR" -> "STBL-EUR")
             trading_pair = self.config.trading_pair
             self.logger().warning(
-                f"🚫 NL-RESTRICTION: {trading_pair} is restricted for NL accounts on Kraken\n"
+                f"🚫 NL-RESTRICTION: {trading_pair} is restricted due to local compliance "
+                f"restrictions on this exchange\n"
                 f"   Error: {error_msg_full}\n"
                 f"   This coin will be auto-blacklisted to prevent retries."
             )
             # Mark this executor with NL-restriction flag for controller to detect
             self._nl_restricted = True
             self._nl_restricted_coin = trading_pair
-            # Also store in custom_info so ExecutorInfo can access it
-            self._custom_info['nl_restricted'] = True
-            self._custom_info['nl_restricted_coin'] = trading_pair
+            # Also store in custom_info so ExecutorInfo/controller can access it
+            if self.config.custom_info is None:
+                self.config.custom_info = {}
+            self.config.custom_info['nl_restricted'] = True
+            self.config.custom_info['nl_restricted_coin'] = trading_pair
             # Terminate executor immediately - no point retrying
             self._status = RunnableStatus.TERMINATED
             return  # Skip normal error processing
@@ -4316,8 +4423,10 @@ class GridExecutor(ExecutorBase):
 
         :return: The unrealized pnl in quote asset.
         """
-        open_filled_levels = self.levels_by_state[GridLevelStates.OPEN_ORDER_FILLED] + self.levels_by_state[
-            GridLevelStates.CLOSE_ORDER_PLACED]
+        open_filled_levels = (
+            self.levels_by_state.get(GridLevelStates.OPEN_ORDER_FILLED, []) +
+            self.levels_by_state.get(GridLevelStates.CLOSE_ORDER_PLACED, [])
+        )
         side_multiplier = 1 if self.config.side == TradeType.BUY else -1
         executed_amount_base = Decimal(sum([level.active_open_order.order.amount for level in open_filled_levels]))
         if executed_amount_base == Decimal("0"):
@@ -4355,9 +4464,11 @@ class GridExecutor(ExecutorBase):
             self.position_pnl_quote = side_multiplier * ((self.mid_price - self.position_break_even_price) / self.position_break_even_price) * self.position_size_quote - self.position_fees_quote
             self.position_pnl_pct = self.position_pnl_quote / self.position_size_quote if self.position_size_quote > 0 else Decimal(
                 "0")
-            self.close_liquidity_placed = sum([level.amount_quote for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED] if level.active_close_order and level.active_close_order.executed_amount_base == Decimal("0")])
-        if len(self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]) > 0:
-            self.open_liquidity_placed = sum([level.amount_quote for level in self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED] if level.active_open_order and level.active_open_order.executed_amount_base == Decimal("0")])
+            close_order_levels = self.levels_by_state.get(GridLevelStates.CLOSE_ORDER_PLACED, [])
+            self.close_liquidity_placed = sum([level.amount_quote for level in close_order_levels if level.active_close_order and level.active_close_order.executed_amount_base == Decimal("0")])
+        open_order_levels = self.levels_by_state.get(GridLevelStates.OPEN_ORDER_PLACED, [])
+        if len(open_order_levels) > 0:
+            self.open_liquidity_placed = sum([level.amount_quote for level in open_order_levels if level.active_open_order and level.active_open_order.executed_amount_base == Decimal("0")])
         else:
             self.open_liquidity_placed = Decimal("0")
 

@@ -24,12 +24,12 @@ paper_trading: false                # 💰 LIVE TRADING MODE
 
 use_dynamic_pair_discovery: true
 max_coins_to_monitor: 30                  # Was 25 → 30 (match met top_n voor orderbook prefetch)
-min_24h_volume_quote: 500000          # Minimum 24h volume in quote currency (USD)
+min_24h_volume_quote: 1500000         # 2026-05-10: verlaagd van 500k → meer kandidaten (live: ~90 paren kwalificeren bij spread<0.20%)
 
 # US-007: Dynamic Pair Manager (two-tier discovery: REST scans all, WebSocket for best)
 use_dynamic_pair_manager: true       # Enable two-tier pair discovery
 pair_scan_interval_seconds: 300      # Interval between REST scans (5 min)
-max_spread_pct: 0.5                  # Maximum bid-ask spread filter
+max_spread_pct: 0.20                 # 2026-05-10: Kraken fee drag needs tighter spread gate
 exclude_expensive_coins: false
 
 blacklist:
@@ -60,6 +60,8 @@ blacklist:
   - CH-USD
   - SAPIEN-USD
   - USELESS-USD
+  # Structural spread outlier (2026-05-09: 75%+ rejects were SPREAD_TOO_WIDE)
+  - PLAY-USD
   # Structural SmartEntry failures (2026-04-29: 337× en 103× rejected, nooit door SmartEntry)
   - RLS-USD
   - BLEND-USD
@@ -87,6 +89,12 @@ blacklist:
   - SUI-USD              # Trends too hard for grids, -$0.44 single trade loss
   # Catastrophic loss (2026-04-16: -$68.14 ALGO, bought but never sold = EARLY_STOP with 0 sells)
   - ALGO-USD             # Entire position stuck, close_type=8 with realized_sell=0
+  # Failed tail-risk blacklist (2026-05-10 Codex run review: close_type=8 / orphan-prone names)
+  - PEPE-USD
+  - TON-USD
+  - 0G-USD
+  - ICP-USD
+  - HYPE-USD
   # Large-cap coins: not grid-trading targets + cause persistent batch update WARNINGs (no_price_in_batch)
   - ETH-USD              # Too expensive for grid, fails Kraken batch price API
   - LTC-USD              # Low volatility for grid, fails Kraken batch price API
@@ -104,9 +112,9 @@ adaptive_regime_detection:
   # Prevents flicker. Higher = more stable, slower reaction. 1 = immediate (old behavior).
   regime_smoothing_count: 3
 
-  # V2-06: Auto BEAR-light — allow 1 grid in shallow BEAR when score > threshold.
-  # Safe default: disabled. Enable only after reviewing live BEAR regime behavior.
-  bear_auto_light_enabled: true       # V2-06: BEAR-light active
+  # Kraken live: block BEAR entries until nonce/orphan handling is boring again.
+  bear_meanrev_policy: block         # block | conditional | allow
+  bear_auto_light_enabled: false
   bear_auto_light_threshold: -5.0    # Score above this = shallow BEAR → allow 1 grid
   bear_size_multiplier: 0.5          # Position size fraction in BEAR-light (0.5 = 50%)
 
@@ -177,7 +185,7 @@ adaptive_filters:
     grid_spacing_mult: 1.5
     max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid for mean-reversion)
     entry_confidence_min: 0.80    # T3-F3: 0.90→0.80
-    bear_allow_meanrev: true     # 🔧 HF-01 2026-04-04: false→true (99% BEAR regime blokkeerde 1284 entries)
+    bear_allow_meanrev: false    # ST-07: legacy flag disabled; policy is adaptive_regime_detection.bear_meanrev_policy=block
 
 # ==============================================================================
 # GRID SUITABILITY SCORER (Per-Coin Mean-Reversion Fitness)
@@ -218,6 +226,8 @@ warmup_override_enabled: true
 warmup_4h_strong_min: -0.5
 warmup_1h_min_if_4h_strong: -1.5
 warmup_max_minutes: 120
+warmup_max_trend_24h_pct: 8.0      # Reject coins already up >8% in 24h during warmup (extended = dangerous)
+auto_sell_orphaned_positions: true  # Auto-sell orphaned positions at startup (bot-managed coins only)
 
 # ==============================================================================
 # FEATURE 1.1: MARKET REGIME FILTER - BTC Trend Following
@@ -372,7 +382,7 @@ smart_entry_filter:
   max_trend_24h_pct: 15.0          # 🔧 TUNED 2026-04-03: 25→15 (stop trend-chasing: coins +25% in 24h zijn geen grid-candidates)
   min_trend_24h_pct: -10.0
 
-  max_entry_spread_pct: 0.5        # T3-F3: 0.3→0.5 (25% rejects, Kraken spreads 0.3-0.6%)
+  max_entry_spread_pct: 0.20       # 2026-05-11: align SmartEntry with hard Kraken spread gate
   slippage_check_enabled: true
 
   min_depth_multiplier: 5.0
@@ -443,7 +453,7 @@ coin_profiles:
     rsi_block_min: 77.0
     max_trend_24h_pct: 24.0
     max_5m_spike_pct: 1.8
-    max_entry_spread_pct: 0.5         # Spread op Kraken ~0.37%, ruimte houden
+    max_entry_spread_pct: 0.20        # Kraken defensive mode: no loose per-coin spread override
 
   ONDO-USD:
     min_wick_ratio: 0.00
@@ -923,7 +933,7 @@ coin_discovery_refresh_interval_seconds: 3600
 #    2 slots × $150/coin → 3 grid levels × $50/level
 # ==============================================================================
 
-max_simultaneous_coins: 3             # Aligned met dynamic_slots.max_slots: 3 (CHOP=2, BULL=3)
+max_simultaneous_coins: 2             # 2026-05-10: temporary cap until Kraken nonce/orphan issues are fixed
 
 total_amount_quote: 300             # Origineel: $300 USD budget
 min_order_amount_quote: 15          # $15 minimum order
@@ -958,10 +968,13 @@ max_stop_pct: 0.03                   # 🔧 TUNED 2026-04-14: 5%→3% (cap align
 
 take_profit_pct: 0.05
 
-# Item 7: Dynamic TP op basis van trendsterkte (0.70x–1.50x basis-TP)
-use_dynamic_take_profit: true
-min_take_profit_pct: 0.020         # Floor: 2.0%
-max_take_profit_pct: 0.08          # Ceiling: 8%
+# Item 7: Trend-based TP (0.70x–1.50x basis-TP at grid creation time)
+# DISABLED: dynamic_tp_enabled (ATR-based, in-executor) already adjusts TP per-coin
+# during execution with a tighter cap (max 4%). The trend-TP ceiling (max 8%) would
+# always be overridden by the ATR cap, making this system redundant.
+use_dynamic_take_profit: false
+min_take_profit_pct: 0.020         # Floor: 2.0% (still used if use_dynamic_take_profit re-enabled)
+max_take_profit_pct: 0.08          # Ceiling: 8%  (still used if use_dynamic_take_profit re-enabled)
 
 # Item 4: Daily coin kill switch (-1R = halve size, -2R = disable voor vandaag)
 daily_kill_switch_enabled: true
@@ -970,11 +983,16 @@ r_unit_quote: 5.0                  # 1R = $5
 # Item 16: Kapitaalreserve voor beste setups
 capital_reserve_pct: 10.0         # 10% achtergehouden voor hoge-kwaliteit entries
 
-# Trailing TP: lock in profit when price rises past activation, exit if it drops back by delta.
-# 2026-05-07: global TAKE_PROFIT now requires real fee-aware net target first; trailing can wake earlier
-# without the old "tiny positive TP close" problem. Keep delta wider than old 0.5% noise setting.
-trailing_stop_activation_pct: 0.015   # Activeer bij +1.5% net/open P&L zodat winnaars eerder tracked worden
-trailing_stop_delta_pct: 0.010        # 1.0% pullback buffer; fee-aware guard still blocks below break-even
+# Trailing stop: twee functies
+#  1. Winst beschermen bij omslag — als positie op 2.5% staat en markt keert,
+#     sluit trailing op ~1.5% i.p.v. wachten tot stop-loss of TP
+#  2. Runners laten lopen — boven ATR-TP cap (4%) blijft trailing volgen
+# Activation = 2.5% (boven TP-min=2% zodat kleine snelle trades via TP-limit sluiten,
+# maar langzamere moves naar 2.5%+ trailing-bescherming krijgen bij omslag)
+# Flow: snelle move naar 2%+ → ATR-TP limit sluit | langzame move naar 2.5% → trailing ON
+#       omslag na 2.5% → trailing sluit op ~1.5% | runner >4% → trailing volgt mee
+trailing_stop_activation_pct: 0.022   # 2.2% — verlaagd van 2.5%; 0.2% boven TP-min (2%) zoals Bitget (1.7% boven 1.5%)
+trailing_stop_delta_pct: 0.010        # 1.0% pullback buffer om winst te beschermen
 
 # Dynamic TP: scale take-profit with ATR (volatile coins get wider TP, quiet coins get tighter)
 dynamic_tp_enabled: true
@@ -1042,8 +1060,9 @@ soft_exit_extend_seconds: 900      # 🔧 TUNED 2026-04-14: 1800→900 (15 min e
 no_fill_timeout_sec: 1800            # 🔧 TUNED 2026-04-14: 3600→1800 (30 min - geen fills = dode liquiditeit, cut sneller)
 no_progress_timeout_sec: 2700    # 🔧 TUNED 2026-04-14: 3600→2700 (45 min - aligned met soft_hold sweet spot)
 no_progress_min_loss_pct: 0.5    # 🔧 TUNED 2026-04-03: 1.0→0.5 (cut bags at -0.5%, halves NO_PROGRESS losses)
-no_progress_atr_multiplier: 1.5
+no_progress_atr_multiplier: 1.0   # 2026-05-10: Kraken active losers should unwind earlier
 close_grace_sec: 600               # ST-05b: 120→600 (10 min graceful LIMIT orders before aggressive market exit)
+fee_aware_timeout_bypass_sec: 1800  # 2026-05-10: cap no-progress fee-guard limbo to 30m after timeout
 
 min_startup_wait_seconds: 60
 
@@ -1077,7 +1096,7 @@ observability:
 dynamic_slots:
   enabled: true
   min_slots: 1
-  max_slots: 3               # 🔧 FIX: 12→3 ($300 budget = max 2-3 coins)
+  max_slots: 2               # 2026-05-10: temporary cap until Kraken nonce/orphan issues are fixed
   regime_multipliers:
     BULL: 1.5
     CHOP: 0.75
@@ -1088,7 +1107,10 @@ dynamic_slots:
 # ==============================================================================
 
 regime_coin_selection:
-  bear_allow_trading: false       # Sit out in BEAR regime
+  # NOTE: RegimeCoinSelector.select() is NOT called in the trading tick.
+  # BEAR entry is controlled by adaptive_regime_detection.bear_meanrev_policy.
+  # These values exist for status display and future wiring only.
+  bear_allow_trading: false       # mirrors bear_meanrev_policy=block
   bear_max_grids: 0
   chop_use_grid_ranking: true     # CHOP: rank by grid suitability
   chop_min_trend_pct: 0.001      # Near-zero floor: accept flat/sideways coins
@@ -1104,11 +1126,11 @@ fee_aware_filter:
   taker_fee_pct: 0.35            # 🔧 FIX 2026-05-01: 0.26→0.35 (observed taker fee at <$10k/30d volume tier)
   maker_fee_pct: 0.20            # 🔧 FIX 2026-05-01: 0.16→0.20 (observed maker fee at <$10k/30d volume tier)
   fee_model: best_case           # 🔧 FIX 2026-05-02b: average→best_case (grid orders = limit orders → altijd maker-fees; maker+maker=0.40% vs average=0.55%)
-  min_net_profit_pct: 0.3        # Min expected profit after fees
+  min_net_profit_pct: 0.4        # 2026-05-10: higher net edge required for Kraken fee drag
   # V2-04: Expected-Fill Hourly Profit Model
-  hourly_profit_check_enabled: false  # false = shadow mode (logs only), true = blocks entry
-  min_profit_per_hour_pct: 0.05       # Min expected profit per hour as % of capital per level
-  fills_calibration_factor: 1.0       # Tunable: fills/h = (atr/spacing) × factor
+  hourly_profit_check_enabled: true   # Geactiveerd 2026-05-09 — 14d shadow data (61k samples), P10=0.079%/h
+  min_profit_per_hour_pct: 0.10       # Blokkeert ~18% laagste-kwaliteit entries (P20 van shadow dist.)
+  fills_calibration_factor: 1.0       # Model telt roundtrips, DB telt individuele orders (~47x verschil) — factor 1.0 houden
 
 # ==============================================================================
 # ST-11: IDLE MODE
@@ -1129,7 +1151,7 @@ idle_mode:
 
 economic_edge_gate:
   enabled: true
-  min_edge_pct: 0.10             # Min expected edge after all costs
+  min_edge_pct: 0.15             # float-epsilon fix (1e-9) in controller vangt de boundary op; 0.20 blokkeerde alles (edge=0.15% < 0.20%)
   include_spread_cost: false     # 🔧 FIX 2026-05-02: disabled (spread cost was 0.275% extra; total now 0.60% vs 1.10%)
   include_slippage_buffer_pct: 0.05  # Slippage buffer to subtract
 
@@ -1149,12 +1171,12 @@ close_cooldowns:
 # ==============================================================================
 
 regime_timeouts:
-  bull_no_progress_sec: 7200     # 2h - trending coins need time
-  chop_no_progress_sec: 5400     # 1.5h - should bounce within window
-  bear_no_progress_sec: 3600     # 1h - faster cuts in bear
-  bull_no_fill_sec: 5400         # 1.5h
+  bull_no_progress_sec: 3600     # 2026-05-10: 2h->1h; Kraken nonce/orphan risk needs faster recycle
+  chop_no_progress_sec: 2700     # 2026-05-10: 1.5h->45m; align with base no_progress timeout
+  bear_no_progress_sec: 1800     # 2026-05-10: 1h->30m; faster cuts in bear
+  bull_no_fill_sec: 3600         # 2026-05-10: 1.5h->1h; avoid stale unfilled grids
   chop_no_fill_sec: 3600         # 1h
-  bear_no_fill_sec: 2400         # 40m
+  bear_no_fill_sec: 1800         # 2026-05-10: 40m->30m; defensive Kraken mode
 
 # ==============================================================================
 # MOMENTUM SLEEVE (Fase 2 — detect-only, geen orders)

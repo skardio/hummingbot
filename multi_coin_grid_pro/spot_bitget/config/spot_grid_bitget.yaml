@@ -80,6 +80,7 @@ adaptive_regime_detection:
 
   # V2-06: Auto BEAR-light — allow 1 grid in shallow BEAR when score > threshold.
   # Safe default: disabled. Enable only after reviewing live BEAR regime behavior.
+  bear_meanrev_policy: conditional    # block | conditional | allow
   bear_auto_light_enabled: true       # V2-06: BEAR-light active
   bear_auto_light_threshold: -5.0    # Score above this = shallow BEAR → allow 1 grid
   bear_size_multiplier: 0.5          # Position size fraction in BEAR-light (0.5 = 50%)
@@ -158,7 +159,7 @@ adaptive_filters:
     grid_spacing_mult: 1.5
     max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid even in BEAR)
     entry_confidence_min: 0.80      # T3-F3: unchanged (was already 0.80)
-    bear_allow_meanrev: true        # 🔧 FIX: false→true (allow counter-trend trades)
+    bear_allow_meanrev: false       # ST-07: legacy flag disabled; policy is adaptive_regime_detection.bear_meanrev_policy=conditional
 
 # ==============================================================================
 # GRID SUITABILITY SCORER (Per-Coin Mean-Reversion Fitness)
@@ -267,9 +268,11 @@ mtf_declining_4h_max: -2.0         # (prevents trading during severe crashes)
 # ==============================================================================
 
 warmup_override_enabled: true
-warmup_4h_strong_min: -2.5        # 🔧 FIX: -0.5→-2.5 (match mtf_4h_min_pct for multi-coin trading)
-warmup_1h_min_if_4h_strong: -3.0  # 🔧 FIX: -2.0→-3.0 (match mtf_1h_min_pct for pullback entries)
+warmup_4h_strong_min: -2.5        # 🔧 FIX: -0.5→-2.5 (match mtf_4h_min_pct voor multi-coin trading)
+warmup_1h_min_if_4h_strong: -3.0  # 🔧 FIX: -2.0→-3.0 (match mtf_1h_min_pct voor pullback entries)
 warmup_max_minutes: 120
+warmup_max_trend_24h_pct: 5.0     # Strenger dan Kraken (5% i.p.v. 8%): ZEC +4.76% deed -$0.47
+auto_sell_orphaned_positions: true # Auto-sell orphaned positions bij startup (alleen bot-managed coins)
 
 # ==============================================================================
 # FEATURE 1.1: MARKET REGIME FILTER - BTC Trend Following
@@ -434,8 +437,11 @@ dynamic_slots:
 # ==============================================================================
 
 regime_coin_selection:
-  bear_allow_trading: false       # Sit out in BEAR regime
-  bear_max_grids: 0
+  # NOTE: RegimeCoinSelector.select() is NOT called in the trading tick.
+  # BEAR entry is controlled by adaptive_regime_detection.bear_meanrev_policy.
+  # These values exist for status display and future wiring only.
+  bear_allow_trading: true        # mirrors bear_meanrev_policy=conditional (BEAR-light ON)
+  bear_max_grids: 1               # 1 slot in BEAR (enforced by dynamic_slots.BEAR multiplier)
   chop_use_grid_ranking: true     # CHOP: rank by grid suitability
   chop_min_trend_pct: 0.001      # Near-zero floor: accept flat/sideways coins
   chop_max_trend_pct: 3.0        # >3% |trend| = too trendy for grid
@@ -452,9 +458,9 @@ fee_aware_filter:
   fee_model: best_case           # 🔧 FIX 2026-05-02b: average→best_case (grid orders = limit/maker; maker+maker=0.20% RT)
   min_net_profit_pct: 0.2        # Min expected profit after fees
   # V2-04: Expected-Fill Hourly Profit Model
-  hourly_profit_check_enabled: false  # false = shadow mode (logs only), true = blocks entry
-  min_profit_per_hour_pct: 0.05       # Min expected profit per hour as % of capital per level
-  fills_calibration_factor: 1.0       # Tunable: fills/h = (atr/spacing) × factor
+  hourly_profit_check_enabled: true   # Geactiveerd 2026-05-09 — conservatievere threshold dan Kraken (minder fills)
+  min_profit_per_hour_pct: 0.08       # Blokkeert ~10% laagste-kwaliteit entries (P10 van shadow dist.)
+  fills_calibration_factor: 1.0       # Model telt roundtrips, DB telt individuele orders (~20x verschil) — factor 1.0 houden
 
 # ==============================================================================
 # ST-11: IDLE MODE
@@ -495,10 +501,10 @@ close_cooldowns:
 # ==============================================================================
 
 regime_timeouts:
-  bull_no_progress_sec: 7200     # 2h - trending coins need time
-  chop_no_progress_sec: 5400     # 1.5h - should bounce within window
-  bear_no_progress_sec: 3600     # 1h - faster cuts in bear
-  bull_no_fill_sec: 5400         # 1.5h
+  bull_no_progress_sec: 3600     # 2026-05-10: 2h→1h; DOGE/LINK/ETH showed active losses waiting too long
+  chop_no_progress_sec: 3600     # 2026-05-10: 1.5h→1h; stalled grids should recycle faster
+  bear_no_progress_sec: 2700     # 2026-05-10: 1h→45m; faster cuts in bear
+  bull_no_fill_sec: 3600         # 2026-05-10: 1.5h→1h; avoid stale unfilled BULL grids
   chop_no_fill_sec: 3600         # 1h
   bear_no_fill_sec: 2400         # 40m
 
@@ -1441,10 +1447,13 @@ max_stop_pct: 0.05                # Max -5% (conservative cap for grid trading)
 
 take_profit_pct: 0.05             # 5% TP (realistisch voor huidige markt)
 
-# Item 7: Dynamic TP op basis van trendsterkte (0.70x–1.50x basis-TP)
-use_dynamic_take_profit: true
-min_take_profit_pct: 0.020         # Floor: 2.0%
-max_take_profit_pct: 0.08          # Ceiling: 8%
+# Item 7: Trend-based TP (0.70x–1.50x basis-TP at grid creation time)
+# DISABLED: dynamic_tp_enabled (ATR-based, in-executor) already adjusts TP per-coin
+# during execution with a tighter cap (max 3%). The trend-TP ceiling (max 8%) would
+# always be overridden by the ATR cap, making this system redundant.
+use_dynamic_take_profit: false
+min_take_profit_pct: 0.020         # Floor: 2.0% (still used if use_dynamic_take_profit re-enabled)
+max_take_profit_pct: 0.08          # Ceiling: 8%  (still used if use_dynamic_take_profit re-enabled)
 
 # Item 4: Daily coin kill switch (-1R = halve size, -2R = disable voor vandaag)
 daily_kill_switch_enabled: true
@@ -1453,12 +1462,16 @@ r_unit_quote: 5.0                  # 1R = $5
 # Item 16: Kapitaalreserve voor beste setups
 capital_reserve_pct: 10.0         # 10% achtergehouden voor hoge-kwaliteit entries
 
-# Trailing TP: lock in profit when price rises past activation, exit if it drops back by delta
-# trailing_stop_activation_pct: 0.05   # 🔧 HOTFIX 2026-05-05: 0.02→0.05 (trail pas actief na +5%, crash-bescherming)
-# trailing_stop_delta_pct: 0.03        # 🔧 HOTFIX 2026-05-05: 0.005→0.03 (3% ruimte, niet liquideren bij kleine dip)
-
-trailing_stop_activation_pct: 0.015   # Activeer bij +1.5% net/open P&L zodat winnaars eerder tracked worden
-trailing_stop_delta_pct: 0.010
+# Trailing stop: twee functies
+#  1. Winst beschermen bij omslag — als positie op 2.0% staat en markt keert,
+#     sluit trailing op ~1.0% i.p.v. wachten tot stop-loss of TP
+#  2. Runners laten lopen — boven ATR-TP cap (3%) blijft trailing volgen
+# Activation = 2.0% (boven TP-min=1.5% zodat kleine snelle trades via TP-limit sluiten,
+# maar langzamere moves naar 2.0%+ trailing-bescherming krijgen bij omslag)
+# Minimum voor positief resultaat: activation > delta + fees = 1% + 0.1% = 1.1% ✓
+# (was 1.5% = gelijk aan TP-min, racete de TP-limietorder)
+trailing_stop_activation_pct: 0.017   # 1.7% — verlaagd van 2.0%; pakt moves vanaf ~1.7% (was 1.5% maar racete TP-min)
+trailing_stop_delta_pct: 0.010        # 1.0% pullback buffer om winst te beschermen
 
 # Dynamic TP: scale take-profit with ATR (volatile coins get wider TP, quiet coins get tighter)
 dynamic_tp_enabled: true
@@ -1536,8 +1549,9 @@ soft_exit_extend_seconds: 1800     # ⏳ Extend by 30 min if trend bullish
 no_fill_timeout_sec: 3600          # T0-Q10: Was 1200 (20 min) → 3600 (60 min)
 no_progress_timeout_sec: 3600     # 🔧 TUNED 2026-04-02: 5400→3600 (1 uur, cut stalled positions faster)
 no_progress_min_loss_pct: 0.5     # 🔧 TUNED 2026-04-03: 1.0→0.5 (align met Kraken, kap bags eerder)
-no_progress_atr_multiplier: 1.5   # 🎯 PRO: Require adverse move > 1.5×ATR
+no_progress_atr_multiplier: 1.0   # 2026-05-10: 1.5→1.0 so active losers unwind earlier
 close_grace_sec: 600              # ST-05b: 120→600 (10 min graceful LIMIT orders before aggressive market exit)
+fee_aware_timeout_bypass_sec: 1800 # 2026-05-10: cap no-progress loser limbo to 30m after timeout
 
 min_startup_wait_seconds: 60       # 🚀 FIX: 90→60 (1 min startup delay)
 

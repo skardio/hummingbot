@@ -57,7 +57,7 @@ class TestEventLoggerIntegration(unittest.TestCase):
             correlation_id="corr_002",
             symbol="ETH-EUR",
             stage=Stage.SMART_ENTRY,
-            metadata={"rsi": 45.2, "vwap_dev": 1.2}
+            metadata={"rsi": 45.2, "vwap_dev": 1.2, "regime": "BULL"}
         )
 
         logger.emit_gate_denied(
@@ -149,6 +149,7 @@ class TestEventLoggerIntegration(unittest.TestCase):
             self.assertIn("symbol", event)
             self.assertIn("reason_msg", event)
             self.assertIn("metadata", event)
+            self.assertIn("regime", event)
 
         # Verify gate_passed events
         gate_passed_events = [e for e in events if e["event_type"] == "gate_passed"]
@@ -158,6 +159,7 @@ class TestEventLoggerIntegration(unittest.TestCase):
             self.assertIn("correlation_id", event)
             self.assertIn("stage", event)
             self.assertIn("symbol", event)
+            self.assertIn("regime", event)
 
         # ===== Verify Specific Event Details =====
 
@@ -180,6 +182,7 @@ class TestEventLoggerIntegration(unittest.TestCase):
             and e["stage"] == "SMART_ENTRY"
         )
         self.assertEqual(eth_passed["correlation_id"], "corr_002")
+        self.assertEqual(eth_passed["regime"], "BULL")
 
         eth_denied = next(
             e for e in events

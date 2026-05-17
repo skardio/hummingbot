@@ -13,6 +13,7 @@ ENHANCED: Fully dynamic allocation based on ACTUAL available balance
 """
 
 import logging
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
@@ -89,6 +90,9 @@ class DynamicSlotManager:
         # Currency symbol for logging
         self.currency_symbol = "$" if self.quote_asset in ("USD", "USDT", "USDC") else "€"
 
+        # Rate-limit the 'capped by min order size' log to once per minute
+        self._last_capped_log_time: float = 0.0
+
         # Allow config to override regime multipliers (ensure Decimal type)
         custom_multipliers = config.get("regime_multipliers", {})
         # Convert custom multipliers to Decimal to avoid type mismatch
@@ -163,13 +167,16 @@ class DynamicSlotManager:
                 max_feasible_slots = max(1, max_feasible_slots)  # At least 1 slot
 
                 if final_slots > max_feasible_slots:
-                    self.logger().warning(
-                        f"⚠️ Dynamic slots capped by min order size: "
-                        f"{final_slots} → {max_feasible_slots} "
-                        f"(capital={self.currency_symbol}{trading_capital}, "
-                        f"min_order={self.currency_symbol}{self.min_order_amount}, "
-                        f"grids={self.num_grids})"
-                    )
+                    now = time.monotonic()
+                    if now - self._last_capped_log_time >= 60:
+                        self.logger().warning(
+                            f"⚠️ Dynamic slots capped by min order size: "
+                            f"{final_slots} → {max_feasible_slots} "
+                            f"(capital={self.currency_symbol}{trading_capital}, "
+                            f"min_order={self.currency_symbol}{self.min_order_amount}, "
+                            f"grids={self.num_grids})"
+                        )
+                        self._last_capped_log_time = now
                     final_slots = max_feasible_slots
 
         self.logger().debug(

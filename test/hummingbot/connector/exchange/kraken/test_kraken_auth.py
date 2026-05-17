@@ -17,7 +17,7 @@ class KrakenAuthTests(TestCase):
     def setUp(self) -> None:
         self._api_key = "testApiKey"
         self._secret = "kQH5HW/8p1uGOVjbgWA7FunAmGO8lsSUXNsu3eow76sz84Q18fWxnyRzBHCd3pd5nE9qa99HAZtuZuj6F1huXg=="  # noqa: mock
-        KrakenAuth._last_tracking_nonce = 0
+        self._mock_time_provider = MagicMock()
 
     def async_run_with_timeout(self, coroutine: Awaitable, timeout: float = 1):
         ret = asyncio.get_event_loop().run_until_complete(asyncio.wait_for(coroutine, timeout))
@@ -27,8 +27,7 @@ class KrakenAuthTests(TestCase):
     def test_rest_authenticate(self, mocked_nonce):
         mocked_nonce.return_value = "1"
         now = 1234567890.000
-        mock_time_provider = MagicMock()
-        mock_time_provider.time.return_value = now
+        self._mock_time_provider.time.return_value = now
         test_url = "/test"
         params = {
             "symbol": "LTCBTC",
@@ -39,7 +38,7 @@ class KrakenAuthTests(TestCase):
             "price": "0.1",
         }
 
-        auth = KrakenAuth(api_key=self._api_key, secret_key=self._secret, time_provider=mock_time_provider)
+        auth = KrakenAuth(api_key=self._api_key, secret_key=self._secret, time_provider=self._mock_time_provider)
         request = RESTRequest(method=RESTMethod.GET, data=json.dumps(params), is_auth_required=True)
         request.url = test_url
         configured_request = self.async_run_with_timeout(auth.rest_authenticate(request))
@@ -68,9 +67,22 @@ class KrakenAuthTests(TestCase):
     @patch("hummingbot.connector.exchange.kraken.kraken_auth.time.time_ns")
     def test_tracking_nonce_uses_microseconds_and_remains_monotonic(self, mocked_time_ns):
         mocked_time_ns.return_value = 1_234_567_890_123_456_789
+        auth = KrakenAuth(api_key=self._api_key, secret_key=self._secret, time_provider=self._mock_time_provider)
 
-        first_nonce = KrakenAuth.get_tracking_nonce()
-        second_nonce = KrakenAuth.get_tracking_nonce()
+        first_nonce = auth.get_tracking_nonce()
+        second_nonce = auth.get_tracking_nonce()
 
         self.assertEqual("1234567890123456", first_nonce)
         self.assertEqual("1234567890123457", second_nonce)
+
+    @patch("hummingbot.connector.exchange.kraken.kraken_auth.time.time_ns")
+    def test_tracking_nonce_state_is_not_shared_across_auth_instances(self, mocked_time_ns):
+        mocked_time_ns.return_value = 1_234_567_890_123_456_789
+        first_auth = KrakenAuth(api_key=self._api_key, secret_key=self._secret, time_provider=self._mock_time_provider)
+        second_auth = KrakenAuth(api_key=self._api_key, secret_key=self._secret, time_provider=self._mock_time_provider)
+
+        first_nonce = first_auth.get_tracking_nonce()
+        second_nonce = second_auth.get_tracking_nonce()
+
+        self.assertEqual("1234567890123456", first_nonce)
+        self.assertEqual("1234567890123456", second_nonce)

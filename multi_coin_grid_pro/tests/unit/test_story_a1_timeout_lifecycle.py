@@ -41,6 +41,9 @@ class MockExecutor:
         self._close_order = None
         self.close_type = None
         self.position_size_base = 0.0  # Mock inventory
+        # Story 2.1/2.2: Rapid grid-fill state
+        self._first_buy_fill_ts = None
+        self._rapid_fill_detected = False
 
         # Mock config
         self.config = MagicMock()

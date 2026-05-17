@@ -99,7 +99,9 @@ def apply_quality_gate(
 
     for pair, volume, spread in candidates:
         base = _extract_base(pair, quote_asset)
-        reason = _check_quality(base, pair, config, available_base_assets)
+        reason = _check_market_quality(pair, volume, spread, config)
+        if reason is None:
+            reason = _check_asset_quality(base, pair, config, available_base_assets)
 
         if reason:
             rejected[pair] = reason
@@ -115,7 +117,27 @@ def _extract_base(pair: str, quote_asset: str) -> str:
     return pair.replace(f"-{quote_asset}", "").upper()
 
 
-def _check_quality(
+def _check_market_quality(
+    pair: str,
+    volume: float,
+    spread: float,
+    config: QualityGateConfig,
+) -> Optional[str]:
+    """Return market-quality rejection reason or None if volume/spread pass."""
+    if config.min_24h_volume > 0 and volume < config.min_24h_volume:
+        return "LOW_VOLUME"
+
+    if config.max_spread_pct > 0:
+        # Controller pair_spreads are stored as fractions (0.005 = 0.5%),
+        # while config uses percent units (0.5 = 0.5%).
+        spread_pct = spread * 100.0 if spread <= 1.0 else spread
+        if spread_pct > config.max_spread_pct:
+            return "WIDE_SPREAD"
+
+    return None
+
+
+def _check_asset_quality(
     base: str,
     pair: str,
     config: QualityGateConfig,

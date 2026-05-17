@@ -195,6 +195,46 @@ class TestStaleExecutorCleanup:
         assert "STALE EXECUTOR CLEANED" in call_args
         assert trading_pair in call_args
 
+    def test_inactive_executor_reference_cleanup_is_silent(self, controller, mock_telegram_alerter):
+        """Closed executors should clean local state without raising orphan warnings."""
+        executor_id = "ClosedExecutor123"
+        trading_pair = "SONIC-USDT"
+        controller.active_coins = {trading_pair: executor_id}
+        controller.entry_prices = {trading_pair: Decimal("0.048")}
+        controller._executor_creation_timestamps = {executor_id: time.time() - 120}
+
+        inactive_executor = MagicMock()
+        inactive_executor.id = executor_id
+        inactive_executor.is_active = False
+        controller.executors_info = [inactive_executor]
+
+        controller._check_professional_exit_signals()
+
+        assert trading_pair not in controller.active_coins
+        assert trading_pair not in controller.entry_prices
+        assert executor_id not in controller._executor_creation_timestamps
+        mock_telegram_alerter.warning.assert_not_called()
+
+    def test_missing_executor_cleanup_does_not_send_telegram_by_default(self, controller, mock_telegram_alerter):
+        """Missing local references are not proof of exchange orphans, so Telegram is opt-in."""
+        executor_id = "MissingExecutor123"
+        trading_pair = "BTC-USDT"
+        stale_key = f"{trading_pair}_{executor_id}"
+        controller.active_coins = {trading_pair: executor_id}
+        controller.entry_prices = {trading_pair: Decimal("42000")}
+        controller._executor_creation_timestamps = {executor_id: time.time() - 120}
+        controller.executors_info = []
+        controller._stale_executor_counts = {stale_key: 9}
+        controller.config.send_stale_executor_telegram_alerts = False
+
+        controller._check_professional_exit_signals()
+
+        assert trading_pair not in controller.active_coins
+        assert trading_pair not in controller.entry_prices
+        assert executor_id not in controller._executor_creation_timestamps
+        assert stale_key not in controller._stale_executor_counts
+        mock_telegram_alerter.warning.assert_not_called()
+
 
 class TestStaleOrderDetection:
     """Test suite for stale open order detection"""

@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import time
 import uuid
 from collections import deque
 from decimal import Decimal
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from hummingbot.connector.markets_recorder import MarketsRecorder
 from hummingbot.core.data_type.common import PositionAction, PositionMode, PriceType, TradeType
@@ -167,6 +168,8 @@ class ExecutorOrchestrator:
         self.cached_performance = {}
         self.initial_positions_by_controller = initial_positions_by_controller or {}
         self._skipped_position_pairs: set = set()  # throttle "not in markets" warnings
+        self._last_active_executor_snapshot_ts = 0.0
+        self.active_executor_snapshot_interval_sec = 30.0
         self._initialize_cached_performance()
 
     def _initialize_cached_performance(self):
@@ -180,14 +183,18 @@ class ExecutorOrchestrator:
                 self.active_executors[controller_id] = []
                 self.positions_held[controller_id] = []
         db_executors = MarketsRecorder.get_instance().get_all_executors()
-        for executor in db_executors:
+        run_db_executors = [
+            executor for executor in db_executors
+            if self._timestamp_in_current_run(executor.timestamp)
+        ]
+        for executor in run_db_executors:
             controller_id = executor.controller_id
             if controller_id not in self.strategy.controllers:
                 continue
             self._update_cached_performance(controller_id, executor)
 
         # Compute and add orphan fill PnL (fills not tracked by any executor)
-        self._apply_orphan_fill_adjustment(db_executors)
+        self._apply_orphan_fill_adjustment(run_db_executors)
 
         # Create initial positions from config overrides first
         self._create_initial_positions()
@@ -195,6 +202,8 @@ class ExecutorOrchestrator:
         # Load positions from database only for controllers without initial position overrides
         db_positions = MarketsRecorder.get_instance().get_all_positions()
         for position in db_positions:
+            if not self._timestamp_in_current_run(position.timestamp):
+                continue
             controller_id = position.controller_id
             # Skip if this controller has initial position overrides
             if controller_id in self.initial_positions_by_controller or controller_id not in self.strategy.controllers:
@@ -206,6 +215,18 @@ class ExecutorOrchestrator:
                                       f"not available in current strategy markets")
                 continue
             self._load_position_from_db(controller_id, position)
+
+    def _timestamp_in_current_run(self, timestamp: Optional[float]) -> bool:
+        run_start = getattr(self.strategy, "strategy_start_time", None)
+        if run_start is None or timestamp is None:
+            return True
+        try:
+            ts = float(timestamp)
+        except (TypeError, ValueError):
+            return False
+        if ts > 1_000_000_000_000:
+            return ts >= float(run_start) * 1000
+        return ts >= float(run_start)
 
     def _apply_orphan_fill_adjustment(self, db_executors: list):
         """
@@ -226,7 +247,7 @@ class ExecutorOrchestrator:
 
         controller_id = controller_ids[0]
 
-        # Collect all order IDs tracked by executors
+        # Collect all order IDs explicitly tracked by executors via filled_orders / held_position_orders
         tracked_order_ids = set()
         for executor_info in db_executors:
             if not executor_info.custom_info:
@@ -240,6 +261,27 @@ class ExecutorOrchestrator:
                 if client_id:
                     tracked_order_ids.add(client_id)
 
+        # Build executor time-windows per trading_pair.  A fill is NOT a true orphan if:
+        #   (a) it falls within an executor's active period for the same pair (late-arriving fill),
+        #   (b) the pair never had an executor (historical non-executor trading), or
+        #   (c) the fill pre-dates the first executor ever opened for that pair.
+        # Only fills that survive all three checks are genuine post-executor orphan fills.
+        ORPHAN_BUFFER_MS = 60_000  # 60 s tolerance for late exchange confirmations
+        pair_executor_windows: Dict[str, List[Tuple[int, int]]] = {}
+        pair_first_open_ms: Dict[str, int] = {}
+        for executor_info in db_executors:
+            pair = executor_info.trading_pair
+            if not pair:
+                continue
+            open_ms = int(executor_info.timestamp * 1000)
+            if executor_info.close_timestamp:
+                close_ms = int(executor_info.close_timestamp * 1000) + ORPHAN_BUFFER_MS
+            else:
+                close_ms = int(time.time() * 1000) + ORPHAN_BUFFER_MS
+            pair_executor_windows.setdefault(pair, []).append((open_ms, close_ms))
+            if pair not in pair_first_open_ms or open_ms < pair_first_open_ms[pair]:
+                pair_first_open_ms[pair] = open_ms
+
         # Query all TradeFills
         try:
             all_fills = MarketsRecorder.get_instance().get_all_trade_fills()
@@ -250,16 +292,40 @@ class ExecutorOrchestrator:
         if not all_fills:
             return
 
-        # Group orphan fills by trading pair
+        # Group orphan fills by trading pair.
+        # A fill is considered tracked (non-orphan) if any of the following hold:
+        #   1. Its order_id appears in an executor's filled_orders / held_position_orders.
+        #   2. Its timestamp falls within any executor's active window for its trading_pair.
+        #   3. The trading_pair never had any executor — the fill belongs to a different
+        #      trading system entirely.
+        #   4. The fill pre-dates the first executor ever opened for that pair — historical
+        #      fill from before executor tracking was established for this pair.
         orphan_fills_by_pair: Dict[str, list] = {}
         orphan_count = 0
         for fill in all_fills:
-            if fill.order_id in tracked_order_ids:
+            if not self._timestamp_in_current_run(fill.timestamp):
                 continue
+            if fill.order_id in tracked_order_ids:
+                continue  # Matched by explicit order ID
+
             pair = fill.symbol
-            if pair not in orphan_fills_by_pair:
-                orphan_fills_by_pair[pair] = []
-            orphan_fills_by_pair[pair].append(fill)
+            fill_ts: int = fill.timestamp  # milliseconds
+
+            windows = pair_executor_windows.get(pair)
+            if windows is None:
+                # Pair never traded via executor system; not our orphan to track
+                continue
+
+            if any(open_ms <= fill_ts <= close_ms for open_ms, close_ms in windows):
+                continue  # Fill occurred during an executor's active period
+
+            if fill_ts < pair_first_open_ms[pair]:
+                # Fill pre-dates the first executor for this pair; it is a historical
+                # fill unrelated to current executor tracking, not a true orphan.
+                continue
+
+            # True orphan: fill after executor tracking began, but outside all windows
+            orphan_fills_by_pair.setdefault(pair, []).append(fill)
             orphan_count += 1
 
         if orphan_count == 0:
@@ -452,6 +518,37 @@ class ExecutorOrchestrator:
         # Remove the executors from the list
         self.active_executors = {}
 
+    def _store_active_executor_snapshots(self, force: bool = False):
+        """
+        Persist live executor snapshots periodically.
+
+        Executors are stored when they are created and again when they close. If
+        the process exits while an executor is still active, any fills that
+        arrived after creation can otherwise be present in TradeFill but absent
+        from the Executors row. Keeping a throttled live snapshot prevents that
+        stale state from hiding active inventory in post-run analysis.
+        """
+        now = time.time()
+        if not force and now - self._last_active_executor_snapshot_ts < self.active_executor_snapshot_interval_sec:
+            return
+
+        recorder = MarketsRecorder.get_instance()
+        stored = 0
+        for executors_list in self.active_executors.values():
+            for executor in executors_list:
+                if executor and not executor.is_closed:
+                    try:
+                        recorder.store_or_update_executor(executor)
+                        stored += 1
+                    except Exception as exc:
+                        self.logger().warning(
+                            f"Could not persist live executor snapshot "
+                            f"{getattr(getattr(executor, 'config', None), 'id', '?')}: {exc}"
+                        )
+        self._last_active_executor_snapshot_ts = now
+        if stored:
+            self.logger().debug(f"Persisted {stored} live executor snapshot(s)")
+
     def execute_action(self, action: ExecutorAction):
         """
         Execute the action and handle executors based on action type.
@@ -500,7 +597,12 @@ class ExecutorOrchestrator:
 
         executor.start()
         self.active_executors[controller_id].append(executor)
-        # MarketsRecorder.get_instance().store_or_update_executor(executor)
+        try:
+            MarketsRecorder.get_instance().store_or_update_executor(executor)
+        except Exception as e:
+            self.logger().warning(
+                f"Could not store initial executor snapshot {executor.config.id}: {e}"
+            )
         self.logger().debug(f"Created {type(executor).__name__} for controller {controller_id}")
 
     def stop_executor(self, action: StopExecutorAction):
@@ -647,6 +749,7 @@ class ExecutorOrchestrator:
         """
         Generate a report of all executors.
         """
+        self._store_active_executor_snapshots()
         report = {}
         for controller_id, executors_list in self.active_executors.items():
             report[controller_id] = [executor.executor_info for executor in executors_list if executor]
@@ -698,6 +801,8 @@ class ExecutorOrchestrator:
         }
 
     def generate_performance_report(self, controller_id: str) -> PerformanceReport:
+        self._store_active_executor_snapshots()
+
         # Create a new report starting from cached base values
         report = PerformanceReport()
         cached_report = self.cached_performance.get(controller_id, PerformanceReport())

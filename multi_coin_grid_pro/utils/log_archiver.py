@@ -15,6 +15,7 @@ Usage:
     archive_bot_logs("kraken_eur")   # in Kraken EUR __init__
     archive_bot_logs("kraken_usd")   # in Kraken USD __init__
     archive_bot_logs("bitget")       # in Bitget __init__
+    archive_bot_logs("okx")          # in OKX __init__
 """
 
 import logging
@@ -50,6 +51,10 @@ _BOT_PATTERNS: dict[str, list[str]] = {
         "logs_spot_grid_bitget_[0-9]*.log*",
         "bitget_multi_coin_grid_report_*.log",
     ],
+    "okx": [
+        "logs_spot_grid_okx_[0-9]*.log*",
+        "okx_multi_coin_grid_report_*.log",
+    ],
 }
 
 
@@ -69,7 +74,7 @@ def archive_bot_logs(
     that each run gets its own folder and nothing is ever overwritten.
 
     Args:
-        bot_name:        One of "kraken_eur", "kraken_usd", "bitget".
+        bot_name:        One of "kraken_eur", "kraken_usd", "bitget", "okx".
         logs_dir:        Directory that contains the live log files.
         archive_dir:     Destination directory for archived logs.
         min_age_seconds: Minimum file age in seconds before archiving.

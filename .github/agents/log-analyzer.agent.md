@@ -20,7 +20,7 @@ You analyze logs, events, and cooldown databases for a multi-coin grid trading b
 - **NEVER run commands that modify state** (no writes, no deletes, no pip install).
 - Read `.github/analysis-context.md` FIRST for all log paths, database locations, and query templates.
 - **VERIFY claims by checking source code** — when a log message seems wrong, trace it back to the Python source to understand WHY.
-- Use `source ~/.venvs/bot/bin/activate` before running any Python/sqlite3 commands.
+- Use `source /home/mo/repos/hummingbot/.venv/bin/activate` before running any Python/sqlite3 commands.
 
 ## Bot Instances
 
@@ -90,6 +90,86 @@ grep -i "Unhandled error\|background task" <logfile>
 9. **Market regime**: `grep "regime\|BEAR\|BULL\|breadth" <logfile> | tail -10`
 10. **Balance issues**: `grep -i "insufficient\|balance\|INSUFFICIENT_BALANCE" <logfile> | head -10`
 
+### Step 5b: Funnel gap check (ALWAYS do this — catches post-filter blockers)
+Compare WHY-NO-TRADE approved count vs actual executor starts. A ratio >10:1 means something is blocking AFTER the SmartEntry filters.
+```bash
+# Approved count from WHY-NO-TRADE hourly summary
+grep "Approved:" <report_logfile> | tail -5
+
+# Executor starts in the same window
+grep "Creating.*executor\|executor.*started\|GridExecutor.*start\|record_started" <logfile> | wc -l
+
+# If approved >> executor starts, search for post-filter blockers:
+grep -iE "insufficient capital|budget_precheck|effective=.*need=|stale.*reserv|orphan reserv" <logfile> | head -20
+grep -iE "SLOT_FULL|TWO_FAILED_CYCLES|ALREADY_TRADING" <logfile> | tail -10
+```
+**If `insufficient capital` appears → budget/reservation bug. Count occurrences and report first/last timestamp.**
+
+### Step 5c: Capital / budget health check (ALWAYS do this)
+```bash
+# Look for budget precheck blocks
+grep -c "budget_precheck_blocked\|insufficient capital" <logfile>
+
+# Show actual capital numbers when blocked
+grep "effective=\|need=\|total_reserved\|capital reserve" <logfile> | head -10
+
+# Check SQLite for INSUFFICIENT_BALANCE close reason
+source /home/mo/repos/hummingbot/.venv/bin/activate
+sqlite3 <trade_db> "SELECT json_extract(config,'$.trading_pair'), json_extract(custom_info,'$.early_stop_reason'), COUNT(*) FROM Executors WHERE close_timestamp > strftime('%s','now','-24 hours') GROUP BY 2 ORDER BY 3 DESC;"
+```
+
+### Step 5d: New-feature health check (ST-06b / ST-07 / budget fix / warmup guard)
+These features were recently added — verify they are working correctly, not just silently broken.
+
+**ST-07: BEAR policy**
+```bash
+# How many new entries were blocked by bear policy?
+grep -c "REGIME_BEAR_BLOCKED" <logfile>
+
+# BEAR-light activations (shallow BEAR allowed with reduced size)?
+grep "BEAR-LIGHT:" <logfile> | head -10
+
+# Divergence filter — how often did coins fail the BTC-divergence check?
+grep "BEAR-LIGHT DIVERGENCE FAIL\|BEAR-LIGHT DIVERGENCE OK" <logfile> | wc -l
+grep "BEAR-LIGHT DIVERGENCE FAIL" <logfile> | head -5
+
+# BEAR-light sizing applied?
+grep "BEAR-LIGHT sizing" <logfile> | tail -5
+```
+**Expected**: In BEAR regime → REGIME_BEAR_BLOCKED entries appear. In shallow BEAR → BEAR-LIGHT messages. In CHOP/BULL → none of the above. If BEAR-LIGHT DIVERGENCE OK but no executor created, escalate to funnel gap check.
+
+**Budget precheck fix (US-004 / Codex)**
+```bash
+# Stale reservation cleanup running? (should appear every reconcile cycle if closed executors existed)
+grep "US-004 budget sync cleaned" <logfile> | tail -10
+
+# Budget sync errors?
+grep "US-004 budget sync failed" <logfile>
+
+# Budget precheck blocks — should be rare after the fix; if still frequent → bug not fully fixed
+grep -c "Budget pre-check: insufficient capital" <logfile>
+```
+**Expected**: `US-004 budget sync cleaned N` appears occasionally (normal). `Budget pre-check: insufficient capital` should be rare (0-2/hr max). If `>5/hr` → budget bug may still be present.
+
+**Warmup trend guard (warmup_max_trend_24h_pct)**
+```bash
+# Coins rejected during warmup due to extended 24h trend
+grep "BUY REJECTED (warm-up mode - 24H EXTENDED)" <logfile> | head -10
+
+# Check which coins are being skipped (and what their 24h% was)
+grep "warm-up mode - 24H EXTENDED" <logfile> | grep -oE "[A-Z]+-USD.*24h trend.*%"
+```
+**Expected**: Some coins blocked at startup in trending market — this is correct. If ALL coins are blocked for a long time, `warmup_max_trend_24h_pct` may be too low for current market conditions.
+
+**SQLite executor persistence (ST-06b: closed_executors_buffer=0)**
+```bash
+# Verify executors are being written to SQLite quickly after close
+# (with buffer=0, they should appear within seconds of close)
+source /home/mo/repos/hummingbot/.venv/bin/activate
+sqlite3 <trade_db> "SELECT COUNT(*) FROM Executors WHERE close_timestamp > strftime('%s','now','-1 hour');"
+```
+**Expected**: Count should be non-zero if any executors closed in the last hour. If 0 but you saw fills in logs → SQLite persistence may be broken again.
+
 ### Step 6: Timeline reconstruction
 ```bash
 # First and last log entry
@@ -106,8 +186,8 @@ grep -iE "FILL|RISK|PAUSE|EXIT|CREATE|TIMEOUT|STUCK|ERROR" <logfile> | head -50
 ### Step 7: Query databases
 ```bash
 # Recent trades and PnL
-source ~/.venvs/bot/bin/activate
-sqlite3 data/multi_coin_grid_v2.sqlite "SELECT trading_pair, close_type, net_pnl_quote, close_timestamp FROM executors WHERE close_timestamp > strftime('%s','now','-24 hours') ORDER BY close_timestamp DESC LIMIT 20"
+source /home/mo/repos/hummingbot/.venv/bin/activate
+sqlite3 data/multi_coin_grid_v2_usd.sqlite "SELECT json_extract(config,'$.trading_pair'), close_type, net_pnl_quote, close_timestamp FROM Executors WHERE close_timestamp > strftime('%s','now','-24 hours') ORDER BY close_timestamp DESC LIMIT 20"
 
 # Active cooldowns
 sqlite3 data/cooldowns_usd.db "SELECT * FROM symbol_cooldowns ORDER BY cooldown_until DESC LIMIT 10"
@@ -136,6 +216,7 @@ Always structure your analysis as:
 - Process status (running/stopped, uptime, PID)
 - Controller health: ticking (Y/N), tick count, loggers active
 - Total fills, total executors created, total errors
+- **Funnel gap**: approved-by-filters vs executors-actually-started (flag if ratio > 10:1)
 
 ### 2. Key Findings (severity ordered)
 - 🔴 Critical: controller not ticking, stuck orders, fund safety issues, crashes

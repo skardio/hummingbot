@@ -7,6 +7,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock
 
 from multi_coin_grid_pro.core.entry_gateway import EntryGateway
+from multi_coin_grid_pro.core.global_risk_manager import CoinCycleState
 
 NOW = 1_700_000_000.0
 NOTIONAL = Decimal("100")
@@ -14,12 +15,14 @@ NOTIONAL = Decimal("100")
 
 def make_gateway(
     cycle_locked: bool = False,
+    cycle_state=None,
     disabled_today: bool = False,
     can_open_result=Decimal("100"),
     min_quality: int = 0,
 ) -> EntryGateway:
     risk = MagicMock()
     risk.is_coin_cycle_locked.return_value = cycle_locked
+    risk.get_coin_cycle_state.return_value = cycle_state
     risk.is_coin_disabled_today.return_value = disabled_today
     risk.can_open_trade.return_value = can_open_result
     risk.get_failed_cycles.return_value = 2
@@ -45,6 +48,13 @@ class TestEntryGatewayAllowed:
 
 
 class TestEntryGatewayCycleLock:
+    def test_two_failed_cycles_state_blocks(self):
+        gw = make_gateway(cycle_locked=False, cycle_state=CoinCycleState.TWO_FAILED_CYCLES)
+        decision = gw.can_enter(symbol="ETH-EUR", requested_notional=NOTIONAL, now=NOW)
+        assert decision.allowed is False
+        assert decision.blocked_by == "cycle_lock"
+        assert "TWO_FAILED_CYCLES" in decision.reason
+
     def test_cycle_lock_blocks(self):
         gw = make_gateway(cycle_locked=True)
         decision = gw.can_enter(symbol="ETH-EUR", requested_notional=NOTIONAL, now=NOW)

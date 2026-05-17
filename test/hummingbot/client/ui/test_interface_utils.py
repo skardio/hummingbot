@@ -1,4 +1,6 @@
 import asyncio
+import sys
+import types
 import unittest
 from decimal import Decimal
 from typing import Awaitable
@@ -6,7 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pandas as pd
 
+import hummingbot.client as hummingbot_client
 from hummingbot.client.ui.interface_utils import (
+    _strategy_v2_trade_monitor_status,
     format_bytes,
     format_df_for_printout,
     start_process_monitor,
@@ -14,8 +18,22 @@ from hummingbot.client.ui.interface_utils import (
     start_trade_monitor,
 )
 
+if "hummingbot.client.hummingbot_application" not in sys.modules:
+    hummingbot_application_module = types.ModuleType("hummingbot.client.hummingbot_application")
+    hummingbot_application_module.HummingbotApplication = MagicMock()
+    sys.modules["hummingbot.client.hummingbot_application"] = hummingbot_application_module
+    hummingbot_client.hummingbot_application = hummingbot_application_module
+
 
 class ExpectedException(Exception):
+    pass
+
+
+DummyStrategyV2Base = type("StrategyV2Base", (), {})
+DummyStrategyV2Base.__module__ = "hummingbot.strategy.strategy_v2_base"
+
+
+class DummyStrategyV2(DummyStrategyV2Base):
     pass
 
 
@@ -167,6 +185,132 @@ class InterfaceUtilsTest(unittest.TestCase):
             self.async_run_with_timeout(start_trade_monitor(mock_result))
         self.assertEqual(1, mock_result.log.call_count)
         self.assertEqual('Trades: 0, Total P&L: 0.00, Return %: 0.00%', mock_result.log.call_args_list[0].args[0])
+
+    def test_strategy_v2_trade_monitor_status_uses_active_executor_performance(self):
+        strategy = DummyStrategyV2()
+        strategy.update_executors_info = MagicMock()
+        strategy.controllers = {
+            "spot_grid_bitget": MagicMock(config=MagicMock(quote_asset="USDT"))
+        }
+        strategy.controller_reports = {
+            "spot_grid_bitget": {
+                "executors": [
+                    MagicMock(
+                        trading_pair="SUI-USDT",
+                        net_pnl_quote=Decimal("2"),
+                        filled_amount_quote=Decimal("60"),
+                        custom_info={"filled_orders": [{"id": 1}, {"id": 2}]},
+                    ),
+                    MagicMock(
+                        trading_pair="SOL-USDT",
+                        net_pnl_quote=Decimal("-0.5"),
+                        filled_amount_quote=Decimal("40"),
+                        custom_info={},
+                    ),
+                ],
+                "performance": MagicMock(global_pnl_quote=Decimal("999"), volume_traded=Decimal("999")),
+            }
+        }
+
+        status = _strategy_v2_trade_monitor_status(strategy)
+
+        self.assertEqual("Trades: 3, Total P&L: 1.50 USDT, Return %: 1.50%", status)
+        strategy.update_executors_info.assert_called_once()
+
+    def test_strategy_v2_trade_monitor_status_filters_to_current_run(self):
+        strategy = DummyStrategyV2()
+        strategy.update_executors_info = MagicMock()
+        strategy.controllers = {
+            "multi_coin_grid_usd": MagicMock(config=MagicMock(quote_asset="USD"))
+        }
+        strategy.controller_reports = {
+            "multi_coin_grid_usd": {
+                "executors": [
+                    MagicMock(
+                        timestamp=100.0,
+                        trading_pair="OLD-USD",
+                        net_pnl_quote=Decimal("-329.9"),
+                        filled_amount_quote=Decimal("26392"),
+                        custom_info={"filled_orders": [{"id": i} for i in range(460)]},
+                    ),
+                    MagicMock(
+                        timestamp=2000.0,
+                        trading_pair="HBAR-USD",
+                        net_pnl_quote=Decimal("0.25"),
+                        filled_amount_quote=Decimal("25"),
+                        custom_info={"filled_orders": [{"id": 1}]},
+                    ),
+                ],
+                "performance": MagicMock(global_pnl_quote=Decimal("-329.9"), volume_traded=Decimal("26392")),
+            }
+        }
+
+        status = _strategy_v2_trade_monitor_status(strategy, run_start_time=1000.0)
+
+        self.assertEqual("Trades: 1, Total P&L: 0.2500 USD, Return %: 1.00%", status)
+
+    def test_strategy_v2_trade_monitor_status_ignores_all_time_performance_for_current_run(self):
+        strategy = DummyStrategyV2()
+        strategy.update_executors_info = MagicMock()
+        strategy.controllers = {
+            "multi_coin_grid_usd": MagicMock(config=MagicMock(quote_asset="USD"))
+        }
+        strategy.controller_reports = {
+            "multi_coin_grid_usd": {
+                "executors": [
+                    MagicMock(
+                        timestamp=100.0,
+                        trading_pair="OLD-USD",
+                        net_pnl_quote=Decimal("-329.9"),
+                        filled_amount_quote=Decimal("26392"),
+                        custom_info={"filled_orders": [{"id": i} for i in range(460)]},
+                    ),
+                ],
+                "performance": MagicMock(global_pnl_quote=Decimal("-329.9"), volume_traded=Decimal("26392")),
+            }
+        }
+
+        status = _strategy_v2_trade_monitor_status(strategy, run_start_time=1000.0)
+
+        self.assertIsNone(status)
+
+    @patch("hummingbot.client.ui.interface_utils._sleep", new_callable=AsyncMock)
+    @patch("hummingbot.client.hummingbot_application.HummingbotApplication")
+    def test_start_trade_monitor_prefers_strategy_v2_executor_performance(self, mock_hb_app, mock_sleep):
+        mock_result = MagicMock()
+        mock_app = mock_hb_app.main_application()
+        strategy = DummyStrategyV2()
+        strategy.update_executors_info = MagicMock()
+        strategy.controllers = {
+            "spot_grid_bitget": MagicMock(config=MagicMock(quote_asset="USDT"))
+        }
+        strategy.controller_reports = {
+            "spot_grid_bitget": {
+                "executors": [
+                    MagicMock(
+                        trading_pair="SUI-USDT",
+                        timestamp=1001.0,
+                        net_pnl_quote=Decimal("1"),
+                        filled_amount_quote=Decimal("100"),
+                        custom_info={"filled_orders": [{"id": 1}]},
+                    )
+                ],
+            }
+        }
+        mock_app.trading_core._strategy_running = True
+        mock_app.trading_core.strategy = strategy
+        mock_app.trading_core.markets = {"bitget": MagicMock(ready=True)}
+        mock_app.trading_core.trade_fill_db = MagicMock()
+        mock_app.init_time = 1000.0
+        mock_sleep.side_effect = asyncio.CancelledError()
+
+        with self.assertRaises(asyncio.CancelledError):
+            self.async_run_with_timeout(start_trade_monitor(mock_result))
+
+        self.assertEqual(2, mock_result.log.call_count)
+        self.assertEqual('Trades: 0, Total P&L: 0.00, Return %: 0.00%', mock_result.log.call_args_list[0].args[0])
+        self.assertEqual('Trades: 1, Total P&L: 1 USDT, Return %: 1.00%', mock_result.log.call_args_list[1].args[0])
+        mock_app._get_trades_from_session.assert_not_called()
 
     @unittest.skip("Test hangs - needs investigation. The trade monitor implementation has been updated to use trading_core architecture.")
     @patch("hummingbot.client.ui.interface_utils._sleep", new_callable=AsyncMock)

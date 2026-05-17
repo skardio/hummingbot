@@ -489,6 +489,69 @@ class TestMultiCoinGridController:
         has_liquidity = controller._check_liquidity_requirements("XRP-EUR")
         assert has_liquidity is False
 
+    async def test_adaptive_min_volume_threshold_keeps_base_when_sufficient(self, controller):
+        """Adaptive threshold should keep configured minimum when enough pairs already pass."""
+        controller.config.min_24h_volume_eur = Decimal("100000")
+
+        pair_volumes = {
+            "BTC-EUR": 500000.0,
+            "ETH-EUR": 300000.0,
+            "SOL-EUR": 200000.0,
+            "XRP-EUR": 150000.0,
+            "ADA-EUR": 120000.0,
+        }
+
+        resolved = controller._resolve_adaptive_min_volume_threshold(
+            pair_volumes=pair_volumes,
+            target_count=5,
+            context="test",
+        )
+
+        assert resolved == 100000.0
+
+    async def test_adaptive_min_volume_threshold_relaxes_with_floor(self, controller):
+        """Adaptive threshold should relax only as much as needed and respect floor ratio."""
+        controller.config.min_24h_volume_eur = Decimal("100000")
+        controller.config.universe_adaptive_min_volume_floor_ratio = 0.5
+
+        pair_volumes = {
+            "BTC-EUR": 150000.0,
+            "ETH-EUR": 90000.0,
+            "SOL-EUR": 80000.0,
+            "XRP-EUR": 70000.0,
+            "ADA-EUR": 60000.0,
+        }
+
+        resolved = controller._resolve_adaptive_min_volume_threshold(
+            pair_volumes=pair_volumes,
+            target_count=5,
+            context="test",
+        )
+
+        assert resolved == 60000.0
+        assert resolved >= 50000.0
+
+    async def test_adaptive_min_volume_threshold_disabled(self, controller):
+        """Adaptive threshold should be bypassed when feature is disabled."""
+        controller.config.min_24h_volume_eur = Decimal("100000")
+        controller.config.universe_adaptive_liquidity_enabled = False
+
+        pair_volumes = {
+            "BTC-EUR": 150000.0,
+            "ETH-EUR": 90000.0,
+            "SOL-EUR": 80000.0,
+            "XRP-EUR": 70000.0,
+            "ADA-EUR": 60000.0,
+        }
+
+        resolved = controller._resolve_adaptive_min_volume_threshold(
+            pair_volumes=pair_volumes,
+            target_count=5,
+            context="test",
+        )
+
+        assert resolved == 100000.0
+
     async def test_startup_delay_prevents_first_trade(self, controller, mock_connector):
         """Test that startup delay prevents first trade before wait time expires"""
         import time
@@ -916,6 +979,10 @@ class TestMultiCoinGridController:
         controller.config.no_progress_min_loss_pct = 0.5
         controller.config.no_progress_atr_multiplier = 1.5
         controller.config.no_progress_timeout_sec = 3600
+        controller.config.close_grace_sec = 900
+        controller.config.aggressive_close_method = "TAKER_LIMIT_IOC"
+        controller.config.aggressive_close_slippage_guard_pct = Decimal("0.45")
+        controller.config.fee_aware_timeout_bypass_sec = 5400
 
         # Provide a valid trend so _create_grid_action actually builds the config
         mock_trend = MagicMock()
@@ -938,6 +1005,14 @@ class TestMultiCoinGridController:
             f"BUG: Expected 1.5 from config, got {ci.get('no_progress_atr_multiplier')}"
         assert ci["no_progress_max_extension_sec"] == 3600 * 2, \
             f"Expected 2x timeout, got {ci.get('no_progress_max_extension_sec')}"
+        assert ci["close_grace_sec"] == 900, \
+            f"BUG: Expected close_grace_sec from config, got {ci.get('close_grace_sec')}"
+        assert ci["aggressive_close_method"] == "TAKER_LIMIT_IOC", \
+            f"BUG: Expected aggressive close method from config, got {ci.get('aggressive_close_method')}"
+        assert ci["aggressive_close_slippage_guard_pct"] == Decimal("0.45"), \
+            "BUG: aggressive close slippage guard must reach the executor"
+        assert ci["fee_aware_timeout_bypass_sec"] == 5400, \
+            "BUG: fee-aware timeout bypass must reach the executor"
 
     # ===========================================================================
     # _build_executor_custom_info() Tests (LEGACY - method removed, tests skipped)

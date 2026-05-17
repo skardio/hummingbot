@@ -3,7 +3,7 @@ import logging
 import re
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from aioresponses import aioresponses
 from aioresponses.core import RequestCall
@@ -17,6 +17,7 @@ from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState
 from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee, TokenAmount, TradeFeeBase
 from hummingbot.core.event.events import MarketOrderFailureEvent
 from hummingbot.core.network_iterator import NetworkStatus
+from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 
 
 class KrakenExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests):
@@ -860,6 +861,49 @@ class KrakenExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests)
     @aioresponses()
     def test_update_time_synchronizer_failure_is_logged(self, mock_api):
         pass
+
+    @patch("hummingbot.connector.exchange.kraken.kraken_exchange.time.perf_counter")
+    def test_invalid_nonce_error_is_logged_with_request_timing_diagnostics(self, perf_counter_mock):
+        perf_counter_mock.side_effect = [10.0, 10.25]
+        self.exchange.REQUEST_ATTEMPTS = 1
+        self.exchange._auth._last_tracking_nonce = 1234567890123456
+        self.exchange._api_request = AsyncMock(
+            side_effect=[
+                {"error": ["EAPI:Invalid nonce"], "result": None},
+                {"error": ["EAPI:Invalid nonce"], "result": None},
+            ]
+        )
+
+        with self.assertRaises(IOError):
+            self.async_run_with_timeout(
+                self.exchange._api_request_with_retry(
+                    method=RESTMethod.POST,
+                    path_url=CONSTANTS.BALANCE_PATH_URL,
+                    data={},
+                    is_auth_required=True,
+                )
+            )
+
+        with self.assertRaises(IOError):
+            self.async_run_with_timeout(
+                self.exchange._api_request_with_retry(
+                    method=RESTMethod.POST,
+                    path_url=CONSTANTS.BALANCE_PATH_URL,
+                    data={},
+                    is_auth_required=True,
+                )
+            )
+
+        self.assertTrue(
+            self.is_logged(
+                "ERROR",
+                "Invalid nonce error from /0/private/Balance on attempt 1/1. "
+                "last_local_nonce=1234567890123456, since_prev_private_request_ms=250.0, "
+                "since_prev_same_endpoint_request_ms=250.0. "
+                "Please ensure your Kraken API key nonce window is at least 10, "
+                "and if needed reset your API key.",
+            )
+        )
 
     @aioresponses()
     def test_update_time_synchronizer_raises_cancelled_error(self, mock_api):

@@ -5,6 +5,7 @@ import os
 import tempfile
 import time
 import unittest
+from pathlib import Path
 
 from multi_coin_grid_pro.persistence.trade_label_store import TradeLabel, TradeLabelStore, session_from_utc
 
@@ -61,6 +62,11 @@ class TestSessionFromUtc(unittest.TestCase):
         import datetime as _dt
         dt = _dt.datetime(2025, 4, 19, 12, 0, 0)   # Saturday
         self.assertEqual(session_from_utc(dt.timestamp()), "weekend")
+
+    def test_accepts_datetime_for_backward_compatibility(self):
+        import datetime as _dt
+        dt = _dt.datetime(2025, 4, 21, 10, 0, 0)   # Monday 10:00 UTC
+        self.assertEqual(session_from_utc(dt), "EU")
 
 
 class TestTradeLabelStore(unittest.TestCase):
@@ -130,6 +136,17 @@ class TestTradeLabelStore(unittest.TestCase):
         results = self.store.query_recent(days=30)
         coins = {r.coin for r in results}
         self.assertEqual(coins, {"ETH-USD", "BTC-USD", "SOL-USD"})
+
+    def test_creates_parent_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested = Path(tmpdir) / "nested" / "labels.db"
+            store = TradeLabelStore(db_path=str(nested))
+            try:
+                store.record(_make_label())
+                self.assertTrue(nested.exists())
+                self.assertEqual(len(store.query_recent(days=30)), 1)
+            finally:
+                store.close()
 
 
 if __name__ == "__main__":

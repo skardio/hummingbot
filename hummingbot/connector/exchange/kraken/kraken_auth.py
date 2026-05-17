@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import json
+import threading
 import time
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -12,21 +13,21 @@ from hummingbot.core.web_assistant.connections.data_types import RESTRequest, WS
 
 
 class KrakenAuth(AuthBase):
-    _last_tracking_nonce: int = 0
-
     def __init__(self, api_key: str, secret_key: str, time_provider: TimeSynchronizer):
         self.api_key = api_key
         self.secret_key = secret_key
         self.time_provider = time_provider
+        self._last_tracking_nonce = 0
+        self._nonce_lock = threading.Lock()
 
-    @classmethod
     def get_tracking_nonce(self) -> str:
         # Use epoch microseconds. Kraken only requires a strictly increasing
         # integer nonce; microseconds reduce same-key collisions across local
         # clients compared with millisecond nonces.
         nonce = time.time_ns() // 1_000
-        self._last_tracking_nonce = nonce if nonce > self._last_tracking_nonce else self._last_tracking_nonce + 1
-        return str(self._last_tracking_nonce)
+        with self._nonce_lock:
+            self._last_tracking_nonce = nonce if nonce > self._last_tracking_nonce else self._last_tracking_nonce + 1
+            return str(self._last_tracking_nonce)
 
     async def rest_authenticate(self, request: RESTRequest) -> RESTRequest:
 

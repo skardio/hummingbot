@@ -45,6 +45,7 @@ class OkxExchange(ExchangePyBase):
         self.okx_registration_sub_domain = okx_registration_sub_domain or "www"
         self._trading_required = trading_required
         self._trading_pairs = trading_pairs
+        self._trade_quote_ccy_by_pair: Dict[str, str] = {}
         super().__init__(balance_asset_limit, rate_limits_share_pct)
 
     @property
@@ -176,9 +177,25 @@ class OkxExchange(ExchangePyBase):
 
     def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: Dict[str, Any]):
         mapping = bidict()
+        trade_quote_ccy_by_pair: Dict[str, str] = {}
         for symbol_data in filter(okx_utils.is_exchange_information_valid, exchange_info["data"]):
-            mapping[symbol_data["instId"]] = combine_to_hb_trading_pair(base=symbol_data["baseCcy"],
-                                                                        quote=symbol_data["quoteCcy"])
+            hb_pair = combine_to_hb_trading_pair(base=symbol_data["baseCcy"], quote=symbol_data["quoteCcy"])
+            mapping[symbol_data["instId"]] = hb_pair
+
+            # OKX may require explicit tradeQuoteCcy for users in specific countries/regions.
+            # For OKX Europe usage in this repo, never prefer USDT/EUR as trade quote currency.
+            quote_ccy_list = symbol_data.get("tradeQuoteCcyList") or []
+            if quote_ccy_list:
+                allowed_quote_ccy_list = [ccy for ccy in quote_ccy_list if ccy not in {"USDT", "EUR"}]
+                if allowed_quote_ccy_list:
+                    preferred_order = ["USDC", "USD", "USDG", "RLUSD"]
+                    preferred = next(
+                        (ccy for ccy in preferred_order if ccy in allowed_quote_ccy_list),
+                        allowed_quote_ccy_list[0],
+                    )
+                    trade_quote_ccy_by_pair[hb_pair] = preferred
+
+        self._trade_quote_ccy_by_pair = trade_quote_ccy_by_pair
         self._set_trading_pair_symbol_map(mapping)
 
     async def _place_order(self,
@@ -198,6 +215,10 @@ class OkxExchange(ExchangePyBase):
             "instId": await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair),
             "sz": str(amount),
         }
+        trade_quote_ccy = self._trade_quote_ccy_by_pair.get(trading_pair)
+        if trade_quote_ccy is not None:
+            data["tradeQuoteCcy"] = trade_quote_ccy
+
         if order_type.is_limit_type():
             data["px"] = f"{price:f}"
         else:
@@ -213,7 +234,13 @@ class OkxExchange(ExchangePyBase):
         )
         data = exchange_order_id["data"][0]
         if data["sCode"] != "0":
-            raise IOError(f"Error submitting order {order_id}: {data['sMsg']}")
+            s_code = data.get("sCode", "")
+            sub_code = data.get("subCode", "")
+            s_msg = data.get("sMsg", "")
+            raise IOError(
+                f"Error submitting order {order_id}: sCode={s_code} subCode={sub_code} "
+                f"tradeQuoteCcy={trade_quote_ccy} instId={data.get('instId', '')} sMsg={s_msg}"
+            )
         return str(data["ordId"]), self.current_timestamp
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder):
@@ -294,6 +321,26 @@ class OkxExchange(ExchangePyBase):
             total = available + Decimal(balance_details["frozenBal"])
         self._account_balances[balance_details["ccy"]] = total
         self._account_available_balances[balance_details["ccy"]] = available
+
+    def get_available_balance(self, currency: str) -> Decimal:
+        """
+        Override to map "USD" → "USDC" for OKX EU accounts.
+        OKX EU Unified USD Orderbook uses pair suffix "USD" (e.g. SOL-USD) but
+        settles in USDC. The balance is stored under "USDC", not "USD".
+        """
+        balance = super().get_available_balance(currency)
+        if balance == Decimal("0") and currency == "USD":
+            balance = super().get_available_balance("USDC")
+        return balance
+
+    def get_balance(self, currency: str) -> Decimal:
+        """
+        Override to map "USD" → "USDC" for OKX EU accounts (same reasoning as above).
+        """
+        balance = super().get_balance(currency)
+        if balance == Decimal("0") and currency == "USD":
+            balance = super().get_balance("USDC")
+        return balance
 
     async def _update_trading_rules(self):
         # This has to be reimplemented because the request requires an extra parameter
@@ -383,7 +430,17 @@ class OkxExchange(ExchangePyBase):
     async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
         updated_order_data = await self._request_order_update(order=tracked_order)
 
-        order_data = updated_order_data["data"][0]
+        data = updated_order_data.get("data", [])
+        if not data:
+            # Order never reached the exchange (e.g. rejected by local compliance before submission).
+            # Raise a descriptive error so the base class can route it via _handle_update_error_for_active_order.
+            raise ValueError(
+                f"OKX returned empty data for order {tracked_order.client_order_id} "
+                f"(trading_pair={tracked_order.trading_pair}). "
+                f"Order was likely rejected before reaching the exchange."
+            )
+
+        order_data = data[0]
         new_state = CONSTANTS.ORDER_STATE[order_data["state"]]
 
         order_update = OrderUpdate(

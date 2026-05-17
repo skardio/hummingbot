@@ -90,7 +90,6 @@ def _make_controller(**overrides):
 # T5-A3: Top-level traceback import
 # ==========================================================================
 
-@pytest.mark.xfail(reason="T5-A3: Top-level traceback refactor not yet implemented", strict=False)
 class TestTopLevelTraceback:
     """Verify traceback is imported at module level, not inline."""
 
@@ -124,7 +123,6 @@ class TestTopLevelTraceback:
 # T5-A10: Late instance variables
 # ==========================================================================
 
-@pytest.mark.xfail(reason="T5-A10: Late instance var cleanup not yet implemented", strict=False)
 class TestLateInstanceVars:
     """Verify all formerly-late instance vars are in __init__."""
 
@@ -179,7 +177,6 @@ class TestLateInstanceVars:
 # T5-A1: Injectable clock
 # ==========================================================================
 
-@pytest.mark.xfail(reason="T5-A1: Injectable clock not yet implemented", strict=False)
 class TestInjectableClock:
     """Verify time.time() is replaced by self._clock()."""
 
@@ -226,7 +223,6 @@ class TestInjectableClock:
 # T4-R4: Warmup Gate
 # ==========================================================================
 
-@pytest.mark.xfail(reason="T4-R4: Warmup gate not yet implemented", strict=False)
 class TestWarmupGate:
     """Test that trading is blocked until warmup completes."""
 
@@ -285,7 +281,6 @@ class TestWarmupGate:
 # T4-R5: Load Open Orders on Start
 # ==========================================================================
 
-@pytest.mark.xfail(reason="T4-R5: Load open orders not yet implemented", strict=False)
 class TestLoadOpenOrders:
     """Test exchange open order loading at startup."""
 
@@ -357,7 +352,6 @@ class TestLoadOpenOrders:
 # Integration: Warmup + Open Orders together
 # ==========================================================================
 
-@pytest.mark.xfail(reason="T4-R4/R5: Warmup integration not yet implemented", strict=False)
 class TestWarmupIntegration:
     """Test that warmup steps complete in correct order."""
 

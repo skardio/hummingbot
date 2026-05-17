@@ -84,6 +84,16 @@ class EntryGateway:
         _log = logger or log
 
         # 1. Consecutive failure lock
+        cycle_state_getter = getattr(self.risk_manager, "get_coin_cycle_state", None)
+        if cycle_state_getter is not None:
+            cycle_state = cycle_state_getter(symbol)
+            cycle_state_value = getattr(cycle_state, "value", cycle_state)
+            if cycle_state_value == "TWO_FAILED_CYCLES":
+                n = self.risk_manager.get_failed_cycles(symbol)
+                reason = f"state=TWO_FAILED_CYCLES ({n} consecutive losses today)"
+                _log.info(f"🔒 ENTRY_BLOCKED {symbol} [cycle_lock]: {reason}")
+                return EntryDecision(False, None, "cycle_lock", reason, quality_score)
+
         if self.risk_manager.is_coin_cycle_locked(symbol):
             n = self.risk_manager.get_failed_cycles(symbol)
             reason = f"{n} consecutive losses today"

@@ -77,13 +77,18 @@
 
 **Resultaat:** Per-coin breakdown, top/bottom performers, fee impact, hold time analyse.
 
+**Directe ST-06b check:**
+```
+python multi_coin_grid_pro/scripts/post_run_sqlite_report.py --bot kraken-usd --hours 24
+```
+
 **Wanneer:** Wekelijks om te zien welke coins het beste presteren, of voor/na config changes.
 
 ---
 
 ### `/tune-filters`
 
-**Wat:** Analyseert welke entry filters de meeste trades blokkeren en stelt tuning voor.
+**Wat:** Analyseert welke filters trades blokkeren en splitst conclusies in threshold tuning, coin-blacklist, code-issue of observability-gap.
 
 **Gebruik:**
 ```
@@ -91,7 +96,7 @@
 /tune-filters bitget
 ```
 
-**Resultaat:** Ranking van rejection reasons, per-regime breakdown, concrete config-suggesties.
+**Resultaat:** Ranking van rejection reasons, per-regime breakdown, symbol-concentratie en concrete config/code-suggesties.
 
 **Wanneer:** Als de bot weinig tradet en je wilt weten waarom, of na marktveranderingen.
 

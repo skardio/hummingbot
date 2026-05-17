@@ -296,8 +296,8 @@
 | **R1** | **Correlation risk monitoring** — `correlation_risk_score` hardcoded 0.0, implement 24h rolling correlation | R3 | 2d | Medium: all positions can be maximally correlated | Controller L5661 + new |
 | **R2** | **High-water-mark drawdown** — peak-equity tracking instead of period-start | R3 | 1d | Medium: intraday peak-to-trough unprotected | `DrawdownTracker` |
 | **R3** | **Feed ProfessionalRiskManager** — call `record_fill()` and `record_trade_result()` | R3 | 4h | Medium: dead liquidity detection, win rate tracking inactive | Controller: fill/close events |
-| **R4** | **Warmup gate** — no trading until reconciliation complete | R3 | 4h | Medium: bot can create double positions after restart | Controller: `on_start()` |
-| **R5** | **Load open orders from exchange on start** — prevent double exposure | R3 | 1d | High: after restart, exchange orders invisible to bot | Controller: `on_start()` |
+| ~~**R4**~~ | ~~**Warmup gate** — no trading until reconciliation complete~~ ✅ Done (2026-05-12) | R3 | 4h | Medium: bot can create double positions after restart | Controller: `on_start()` |
+| ~~**R5**~~ | ~~**Load open orders from exchange on start** — prevent double exposure~~ ✅ Done (2026-05-12) | R3 | 1d | High: after restart, exchange orders invisible to bot | Controller: `on_start()` |
 
 **Subtotal Tier 4: ~9.5 days (2 weeks), 6 items**
 
@@ -316,16 +316,16 @@
 
 | # | Item | Source | Effort | Impact | What |
 |---|------|--------|--------|--------|------|
-| **A1** | **34× `time.time()` → injectable clock** — backtesting/replay impossible | R2 | 1d | Medium: violates repo rules, blocks replay | Controller: 34 locations |
+| ~~**A1**~~ | ~~**34× `time.time()` → injectable clock**~~ ✅ Done (2026-05-12) — `clock_fn` param + `self._clock()` throughout | R2 | 1d | Medium: violates repo rules, blocks replay | Controller: 34 locations |
 | **A2** | **`run_until_complete` deadlock fix** — make `determine_executor_actions()` async, or pre-compute orderbook | R2 | 2d | Medium: can silently halt trading | Controller L4046 |
-| **A3** | **24× inline `import traceback` → top-level** | R2 | 30 min | Low: code hygiene | Controller: 24 locations |
+| ~~**A3**~~ | ~~**24× inline `import traceback` → top-level**~~ ✅ Done (2026-05-12) — 33 inline imports removed | R2 | 30 min | Low: code hygiene | Controller: 24 locations |
 | **A4** | **Config decomposition** — 141 fields → nested Pydantic models (GridConfig, RiskConfig, etc.) | R2 | 3d | Medium: maintainability | `multi_coin_grid_config.py` |
 | **A5** | **Split God method** — `determine_executor_actions()` (1342 lines) → 8 stage methods | R2 | 5d | High: untestable, incomprehensible | Controller L3180-4522 |
 | **A6** | ~~**Moved to T4 as R6**~~ — Unify 4 risk systems → `RiskCoordinator` | R2 | — | — | See T4-R6 |
 | **A7** | **Split `_is_executor_actually_active()`** — query with side-effects → pure check + mutation separately | R2 | 2d | Medium: unpredictable behavior | Controller L4541-4760 |
 | **A8** | **33 connector private attr accesses** → `ConnectorAdapter` facade | R2 | 3d | Medium: upstream Hummingbot update breaks bot | Controller: scattered |
 | **A9** | **Fix test infrastructure** — mock layer so 67% broken tests run again | R2 | 3d | High: 4/6 test files fail collection | `test/multi_coin_grid_pro/` |
-| **A10** | **Late instance vars** — ~10 vars created outside `__init__` → defaults in `__init__` | R2 | 1h | Low: `AttributeError` landmines | Controller: scattered |
+| ~~**A10**~~ | ~~**Late instance vars**~~ ✅ Done (2026-05-12) — 8 vars naar `__init__`, hasattr-guards verwijderd | R2 | 1h | Low: `AttributeError` landmines | Controller: scattered |
 | **A11** | **God class decomposition** — full plan: 9,182 lines → 15 files of <500 lines | R2 | 30d | Critical for scaling beyond €5K | Everything |
 
 **Subtotal Tier 5: ~50+ days, 11 items**
@@ -451,8 +451,8 @@
 ### Fase D — Risk architecture (includes A6 from T5)
 
 23. R6 Unify 4 risk systems → RiskCoordinator
-24. R5 Load open orders on start
-25. R4 Warmup gate
+24. ~~R5 Load open orders on start~~ ✅ Done (2026-05-12)
+25. ~~R4 Warmup gate~~ ✅ Done (2026-05-12)
 26. R1 Correlation risk monitoring
 27. R2 High-water-mark drawdown
 28. R3 Feed ProfessionalRiskManager
@@ -465,7 +465,7 @@
 
 ### Fase F — Code quality + architecture (ongoing)
 
-32. A1-A5, A7-A11 (God class decomposition, async fix, tests — A6 already done in Fase D)
+32. ~~A1~~ ✅, ~~A3~~ ✅, ~~A10~~ ✅ — A2, A4, A5, A7, A8, A9, A11 (God class decomposition, async fix, tests — A6 already done in Fase D)
 33. I1-I10 (production infrastructure)
 
 ### Fase G — AI Shadow + Soft Live (after T3.5 positive EV + 30d evidence)

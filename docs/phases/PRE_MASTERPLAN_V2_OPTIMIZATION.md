@@ -14,7 +14,7 @@
 | V2-01 | ~~Dynamic fee model~~ | ✅ **DONE** | — | Fase A: `fee_model: worst_case \| average \| best_case` |
 | V2-02 | ~~Regime smoothing (anti-nervositeit)~~ | ✅ **DONE** | — | `regime_smoothing_count: 3` — vereist 3 opeenvolgende detections |
 | V2-03 | ~~CHOP ranking niet hard genoeg~~ | ✅ **DONE** | — | Opgelost: `chop_max_trend_pct` filter |
-| V2-04 | ~~Expected-fill profitability model~~ | ✅ **DONE** | — | Shadow mode actief — `hourly_profit_check_enabled: false` |
+| V2-04 | ~~Expected-fill profitability model~~ | ✅ **DONE** | — | Geactiveerd 2026-05-09 — Kraken USD: 0.10%/h, Bitget: 0.08%/h (14d shadow data, 61k samples) |
 | V2-05 | Pattern-aware cooldowns | P2 | Medium | Na 100+ trades data |
 | V2-06 | ~~BEAR-light mode~~ | ✅ **DONE** | — | Auto BEAR-light actief (`bear_auto_light_enabled: true`) |
 | V2-07 | Per-coin adaptive timeouts | P3 | Medium | Na ATR-data per coin beschikbaar |
@@ -83,7 +83,7 @@
 
 ## V2-04: Expected-Fill Profitability Model ✅ DONE
 
-**Geïmplementeerd:** 2026-04-25
+**Geactiveerd:** 2026-05-09 (na 14 dagen shadow mode, 61k samples)
 
 **Probleem:** Fee check kijkt alleen naar entry spread vs fees, niet naar verwachte fills.
 - Trade kan theoretisch goed zijn maar praktisch weinig opleveren
@@ -100,15 +100,23 @@
 **Acceptance criteria:**
 - [x] `estimate_hourly_profit()` methode in FeeAwareFilter
 - [x] Uses ATR + grid spacing om fill rate te schatten
-- [x] Configureerbaar: `min_profit_per_hour_pct: 0.05` (0.05%/uur)
-- [ ] Backtested en `fills_calibration_factor` gekalibreerd op live data (shadow logs)
+- [x] Configureerbaar: `min_profit_per_hour_pct` (Kraken: 0.10%, Bitget: 0.08%)
+- [x] Geactiveerd op beide bots (2026-05-09) — threshold gebaseerd op P20 (Kraken) en P10 (Bitget) van shadow distributie
 
-**Config (alle 3 YAMLs):**
+**Config (Kraken USD):**
 ```yaml
 fee_aware_filter:
-  hourly_profit_check_enabled: false  # false = shadow mode, true = blokkeert
-  min_profit_per_hour_pct: 0.05
-  fills_calibration_factor: 1.0       # tune via shadow logs
+  hourly_profit_check_enabled: true   # actief sinds 2026-05-09
+  min_profit_per_hour_pct: 0.10       # P20 van shadow dist. → ~18% blokkering
+  fills_calibration_factor: 1.0
+```
+
+**Config (Bitget):**
+```yaml
+fee_aware_filter:
+  hourly_profit_check_enabled: true   # actief sinds 2026-05-09
+  min_profit_per_hour_pct: 0.08       # P10 van shadow dist. → ~10% blokkering
+  fills_calibration_factor: 1.0
 ```
 
 **Tests:** 12 nieuwe unit tests (27 totaal in test_fee_aware_filter.py) — alle pass
@@ -116,60 +124,16 @@ fee_aware_filter:
 
 **Shadow data locatie:** `data/v204_shadow/v204_YYYY-MM-DD.jsonl` (dagelijks, geen rotatie)
 
-### 🔜 Nog te doen: kalibratie + activeren
+### 🔜 Nog te doen: monitoring na activering
 
-**Stap 1 — Na ≥1 week shadow data: analyseer de schattingen**
+**Check na 1-2 dagen:**
 ```bash
-cat data/v204_shadow/v204_*.jsonl | python3 -c "
-import sys, json, statistics
-rows = [json.loads(l) for l in sys.stdin]
-ratios = [r['expected_hourly_pct'] for r in rows]
-actuals = [r['fills_per_h'] for r in rows]
-print(f'Samples: {len(rows)}')
-print(f'Median expected/h: {statistics.median(ratios):.3f}%')
-print(f'P10 expected/h: {sorted(ratios)[len(ratios)//10]:.3f}%')
-print(f'Median fills/h (model): {statistics.median(actuals):.2f}')
-"
+grep "V2-04: BLOCKED" ~/.hummingbot/logs/kraken_usd.log | wc -l
+grep "V2-04: OK" ~/.hummingbot/logs/kraken_usd.log | wc -l
 ```
+Als BLOCKED/(BLOCKED+OK) > 30% → threshold verlagen naar `0.07`.
 
-**Stap 2 — Vergelijk met werkelijke fills uit de SQLite:**
-```bash
-python3 -c "
-import sqlite3, json
-db = sqlite3.connect('data/multi_coin_grid_v2_usd.sqlite')
-rows = db.execute('''
-    SELECT timestamp, close_timestamp, custom_info
-    FROM Executors WHERE is_active=0 AND filled_amount_quote > 0
-''').fetchall()
-fills_per_h = []
-for ts, cts, ci in rows:
-    orders = json.loads(ci).get('filled_orders', [])
-    h = (cts - ts) / 3600
-    if h > 0:
-        fills_per_h.append(len(orders) / h)
-import statistics
-print(f'Werkelijke fills/h: median={statistics.median(fills_per_h):.2f}, '
-      f'p10={sorted(fills_per_h)[len(fills_per_h)//10]:.2f}')
-db.close()
-"
-```
-
-**Stap 3 — Bereken `fills_calibration_factor`:**
-```
-calibration_factor = werkelijke_fills_per_h / model_fills_per_h
-```
-Pas aan in alle 3 YAMLs:
-```yaml
-fee_aware_filter:
-  fills_calibration_factor: <berekende waarde>  # was 1.0
-```
-
-**Stap 4 — Activeer de filter:**
-```yaml
-fee_aware_filter:
-  hourly_profit_check_enabled: true   # was false (shadow mode)
-  min_profit_per_hour_pct: 0.05       # begin conservatief, verhoog na validatie
-```
+**Shadow data locatie:** `data/v204_shadow/v204_YYYY-MM-DD.jsonl` (bewaard voor retroanalyse)
 
 ---
 
@@ -253,8 +217,8 @@ Nu:        V2-03 ✅ DONE (CHOP ranking fix)
 Week 1:    V2-01 ✅ DONE (dynamic fee model — fase A: config worst/avg/best)
 Week 1-2:  V2-02 ✅ DONE (regime smoothing — 3 consecutive detections)
 Week 2:    V2-06 ✅ DONE (BEAR-light mode — auto actief, score > -5.0)
-Week 3+:   V2-04 + V2-05 (na 100+ trades data beschikbaar)
-Later:     V2-07 (finetuning, lage prioriteit)
+Week 3+:   V2-04 ✅ DONE (geactiveerd 2026-05-09 na 14d shadow data)
+Later:     V2-05 (na 100+ trades data) + V2-07 (finetuning, lage prioriteit)
 ```
 
 > **Principe:** Eerst data verzamelen met huidige v1 implementatie, dan data-driven optimaliseren.

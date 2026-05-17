@@ -45,10 +45,9 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
     - Automatic risk management
     """
 
-    # ST-06b: Lower buffer so executors are stored to DB more frequently.
-    # Framework default=100 but our bot never reaches that threshold,
-    # causing the executors table to be empty.
-    closed_executors_buffer: int = 5
+    # ST-06b: Store closed executors immediately. Keeping even a small buffer
+    # leaves the latest run invisible in SQLite until a clean shutdown.
+    closed_executors_buffer: int = 0
 
     # Strategy configuration - markets will be set dynamically by controllers
     CONFIG_NAME: str = "spot_grid_kraken_eur"  # Kraken EUR spot grid config
@@ -353,12 +352,17 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
 
         lines = []
 
-        # Show balances - ONLY non-zero
-        balance_df = self.get_balance_df()
-        # Filter to only show assets with Total Balance > 0
-        balance_df = balance_df[balance_df["Total Balance"] > 0]
-        if not balance_df.empty:
-            lines.extend(["", "  Balances:"] + ["    " + line for line in balance_df.to_string(index=False).split("\n")])
+        # Show balances - use get_all_balances() so OKX USDC (stored as "USDC")
+        # shows up even when trading pairs use "USD" as quote suffix.
+        balance_lines = []
+        for connector_name, connector in self.connectors.items():
+            all_bal = connector.get_all_balances()
+            for asset, total in sorted(all_bal.items()):
+                if total > 0:
+                    avail = connector.get_available_balance(asset)
+                    balance_lines.append(f"    {connector_name:12s} {asset:8s} {float(total):>14.4f}  {float(avail):>14.4f}")
+        if balance_lines:
+            lines.extend(["", "  Balances (Exchange / Asset / Total / Available):"] + balance_lines)
         else:
             lines.append("\n  No balances available.")
 

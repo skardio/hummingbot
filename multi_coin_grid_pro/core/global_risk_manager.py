@@ -17,6 +17,7 @@ import datetime as _dt
 import time
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum
 from typing import Dict, MutableMapping, Optional
 
 from multi_coin_grid_pro.core.exit_types import ExitType, cooldown_for_exit
@@ -49,6 +50,26 @@ class AllocationRecord:
     notional_quote: Decimal
     opened_at: float
     unrealised_pnl_quote: Decimal = DecimalZero
+
+
+class CoinCycleState(str, Enum):
+    """Explicit per-coin re-entry state after the last completed cycle."""
+
+    READY = "READY"
+    WIN_EXIT = "WIN_EXIT"
+    LOSS_EXIT = "LOSS_EXIT"
+    TWO_FAILED_CYCLES = "TWO_FAILED_CYCLES"
+
+
+@dataclass(frozen=True)
+class CoinCycleStatus:
+    """Observable state-machine snapshot for one coin."""
+
+    symbol: str
+    state: CoinCycleState
+    failed_cycles: int
+    last_pnl_quote: Decimal = DecimalZero
+    last_exit_type: ExitType = ExitType.UNKNOWN
 
 
 class GlobalRiskManager:
@@ -92,6 +113,8 @@ class GlobalRiskManager:
         # Item 3: Consecutive failed-cycle lock
         self._max_consecutive_failures: int = max_consecutive_failures
         self._failed_cycles: Dict[str, int] = {}          # consecutive losses per coin today
+        self._cycle_state: Dict[str, CoinCycleState] = {}
+        self._last_cycle_pnl: Dict[str, Decimal] = {}
 
     # ------------------------------------------------------------------#
     # Helpers
@@ -106,6 +129,8 @@ class GlobalRiskManager:
             self._last_loss_time.clear()
             self._daily_coin_pnl.clear()        # daily coin kill switch reset
             self._failed_cycles.clear()         # item 3: reset failed cycle counter
+            self._cycle_state.clear()
+            self._last_cycle_pnl.clear()
 
     def _max_trade_notional(self) -> Decimal:
         per_trade_cap = (
@@ -296,6 +321,7 @@ class GlobalRiskManager:
             self._consecutive_losses.pop(symbol, None)
             self._last_loss_time.pop(symbol, None)
             self.note_successful_cycle(symbol)  # item 3
+        self._last_cycle_pnl[symbol] = realised_pnl_quote
 
     def update_unrealised(self, *, symbol: str, unrealised_quote: Decimal) -> None:
         """
@@ -366,10 +392,16 @@ class GlobalRiskManager:
     def note_failed_cycle(self, symbol: str) -> None:
         """Increment consecutive failure count for this coin."""
         self._failed_cycles[symbol] = self._failed_cycles.get(symbol, 0) + 1
+        self._cycle_state[symbol] = (
+            CoinCycleState.TWO_FAILED_CYCLES
+            if self.is_coin_cycle_locked(symbol)
+            else CoinCycleState.LOSS_EXIT
+        )
 
     def note_successful_cycle(self, symbol: str) -> None:
         """Reset consecutive failure count on success."""
         self._failed_cycles.pop(symbol, None)
+        self._cycle_state[symbol] = CoinCycleState.WIN_EXIT
 
     def is_coin_cycle_locked(self, symbol: str, max_failures: int = -1) -> bool:
         """True if coin has >= max_consecutive_failures consecutive losses today."""
@@ -379,6 +411,22 @@ class GlobalRiskManager:
     def get_failed_cycles(self, symbol: str) -> int:
         """Return the current consecutive failure count for this coin."""
         return self._failed_cycles.get(symbol, 0)
+
+    def get_coin_cycle_state(self, symbol: str) -> CoinCycleState:
+        """Return explicit WIN/LOSS/2_FAILED state for re-entry decisions."""
+        if self.is_coin_cycle_locked(symbol):
+            return CoinCycleState.TWO_FAILED_CYCLES
+        return self._cycle_state.get(symbol, CoinCycleState.READY)
+
+    def get_coin_cycle_status(self, symbol: str) -> CoinCycleStatus:
+        """Return a structured state-machine snapshot for logs/tests."""
+        return CoinCycleStatus(
+            symbol=symbol,
+            state=self.get_coin_cycle_state(symbol),
+            failed_cycles=self.get_failed_cycles(symbol),
+            last_pnl_quote=self._last_cycle_pnl.get(symbol, DecimalZero),
+            last_exit_type=self._exit_type_per_symbol.get(symbol, ExitType.UNKNOWN),
+        )
 
     # ------------------------------------------------------------------#
     # Daily coin kill switch helpers (item 4)

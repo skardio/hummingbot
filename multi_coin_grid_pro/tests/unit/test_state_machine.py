@@ -5,7 +5,7 @@ Item 3 — State Machine: 2x Failed Cycles → Coin Lock
 """
 from decimal import Decimal
 
-from multi_coin_grid_pro.core.global_risk_manager import GlobalRiskManager, RiskLimits
+from multi_coin_grid_pro.core.global_risk_manager import CoinCycleState, GlobalRiskManager, RiskLimits
 
 BASE_BALANCE = Decimal("1000")
 NOW = 1_700_000_000.0  # fixed timestamp in the past
@@ -33,18 +33,24 @@ class TestFailedCycleInit:
         grm = make_grm()
         assert not grm.is_coin_cycle_locked("BTC-EUR")
 
+    def test_initial_state_ready(self):
+        grm = make_grm()
+        assert grm.get_coin_cycle_state("BTC-EUR") == CoinCycleState.READY
+
 
 class TestNoteFailedCycle:
     def test_single_failure_increments(self):
         grm = make_grm()
         grm.note_failed_cycle("BTC-EUR")
         assert grm.get_failed_cycles("BTC-EUR") == 1
+        assert grm.get_coin_cycle_state("BTC-EUR") == CoinCycleState.LOSS_EXIT
 
     def test_two_failures_locks_coin(self):
         grm = make_grm(max_failures=2)
         grm.note_failed_cycle("BTC-EUR")
         grm.note_failed_cycle("BTC-EUR")
         assert grm.is_coin_cycle_locked("BTC-EUR")
+        assert grm.get_coin_cycle_state("BTC-EUR") == CoinCycleState.TWO_FAILED_CYCLES
 
     def test_one_failure_does_not_lock(self):
         grm = make_grm(max_failures=2)
@@ -60,6 +66,7 @@ class TestNoteSuccessfulCycle:
         grm.note_successful_cycle("BTC-EUR")
         assert grm.get_failed_cycles("BTC-EUR") == 0
         assert not grm.is_coin_cycle_locked("BTC-EUR")
+        assert grm.get_coin_cycle_state("BTC-EUR") == CoinCycleState.WIN_EXIT
 
     def test_success_on_clean_coin_is_noop(self):
         grm = make_grm()
@@ -75,6 +82,9 @@ class TestRegisterCloseTradeIntegration:
             symbol="BTC-EUR", realised_pnl_quote=Decimal("-5"), now=NOW + 3600
         )
         assert grm.get_failed_cycles("BTC-EUR") == 1
+        status = grm.get_coin_cycle_status("BTC-EUR")
+        assert status.state == CoinCycleState.LOSS_EXIT
+        assert status.last_pnl_quote == Decimal("-5")
 
     def test_positive_pnl_resets_failed_cycles(self):
         grm = make_grm()
@@ -84,6 +94,7 @@ class TestRegisterCloseTradeIntegration:
             symbol="BTC-EUR", realised_pnl_quote=Decimal("5"), now=NOW + 3600
         )
         assert grm.get_failed_cycles("BTC-EUR") == 0
+        assert grm.get_coin_cycle_state("BTC-EUR") == CoinCycleState.WIN_EXIT
 
     def test_two_losses_blocks_can_open_trade(self):
         grm = make_grm(max_failures=2)
@@ -96,6 +107,7 @@ class TestRegisterCloseTradeIntegration:
             symbol="ETH-EUR", requested_notional=Decimal("50"), now=NOW + 10
         )
         assert result is None
+        assert grm.get_coin_cycle_status("ETH-EUR").state == CoinCycleState.TWO_FAILED_CYCLES
 
 
 class TestDayResetClearsFailed:
@@ -110,6 +122,7 @@ class TestDayResetClearsFailed:
         grm._reset_if_new_day(next_day)
         assert grm.get_failed_cycles("BTC-EUR") == 0
         assert not grm.is_coin_cycle_locked("BTC-EUR")
+        assert grm.get_coin_cycle_state("BTC-EUR") == CoinCycleState.READY
 
 
 class TestPerSymbolIsolation:

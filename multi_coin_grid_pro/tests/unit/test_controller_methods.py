@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from hummingbot.core.data_type.common import OrderType
+
 try:
     from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
     from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
@@ -23,6 +25,7 @@ except ImportError:
         from controllers.multi_coin_grid_controller import MultiCoinGridController
 
 from hummingbot.strategy_v2.models.executor_actions import CreateExecutorAction, StopExecutorAction
+from multi_coin_grid_pro.spot_bitget.config_schema import SpotGridBitgetConfig
 
 
 @pytest.fixture
@@ -262,6 +265,23 @@ class TestGridCreation:
         assert action is not None
         assert isinstance(action, CreateExecutorAction)
         assert action.executor_config.trading_pair == "XRP-EUR"
+        assert action.executor_config.triple_barrier_config.open_order_type == OrderType.LIMIT_MAKER
+        assert action.executor_config.triple_barrier_config.take_profit_order_type == OrderType.LIMIT_MAKER
+
+    def test_bitget_config_keeps_limit_order_type(self):
+        """Bitget spot must keep LIMIT because LIMIT_MAKER is unsupported there."""
+        bitget_config = SpotGridBitgetConfig(
+            controller_name="test_bitget_controller",
+            connector_name="bitget",
+            quote_asset="USDT",
+            total_amount_quote=Decimal("50"),
+            max_coins_to_monitor=5,
+        )
+
+        triple_barrier = bitget_config.triple_barrier_config
+
+        assert triple_barrier.open_order_type == OrderType.LIMIT
+        assert triple_barrier.take_profit_order_type == OrderType.LIMIT
 
     def test_create_stop_action(self, controller):
         """Test _create_stop_action method"""

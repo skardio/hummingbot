@@ -87,6 +87,16 @@ class MultiCoinGridConfig(ControllerConfigBase):
         )
     )
 
+    # OKX EU Unified USD Orderbook: pairs trade as BTC-USD but balance is held in USDC.
+    # Set balance_currency: USDC when quote_asset is USD to read the correct wallet balance.
+    balance_currency: Optional[str] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Override balance currency (leave empty to use quote_asset): ",
+            prompt_on_new=False,
+        )
+    )
+
     # Whitelisted Trading Pairs (loaded at startup for order book subscriptions)
     # IMPORTANT: Kraken WebSocket limit is ~25-30 subscriptions
     whitelisted_pairs: Optional[List[str]] = Field(
@@ -139,6 +149,28 @@ class MultiCoinGridConfig(ControllerConfigBase):
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
+    )
+
+    universe_adaptive_liquidity_enabled: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable adaptive universe liquidity fallback when too few pairs pass volume filter? (Yes/No): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        description="If enabled, min 24h volume can be relaxed within safe bounds to avoid empty/too-small candidate sets"
+    )
+
+    universe_adaptive_min_volume_floor_ratio: float = Field(
+        default=0.25,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum allowed ratio for adaptive volume fallback (0.01-1.00): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+        ge=0.01,
+        le=1.0,
+        description="Adaptive fallback never lowers min volume below this ratio of configured min_24h_volume"
     )
 
     # Multi-Coin Simultaneous Trading
@@ -634,6 +666,16 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # Story 2.1/2.2: Rapid grid-fill detection — halve no-progress timeout when all buys fill fast
+    rapid_fill_window_sec: int = Field(
+        default=300,  # If all buy levels fill within 300s → falling knife suspected
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Rapid fill window (seconds, 0=disabled): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     # PRO TIMEOUT: PnL-aware and ATR-aware timeout protection
     no_progress_min_loss_pct: float = Field(
         default=1.5,  # Only trigger timeout if unrealized loss > 1.5%
@@ -692,6 +734,15 @@ class MultiCoinGridConfig(ControllerConfigBase):
         default=Decimal("0.30"),  # 0.3% max slippage for aggressive close
         client_data=ClientFieldData(
             prompt=lambda mi: "Aggressive close slippage guard (%): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    fee_aware_timeout_bypass_sec: int = Field(
+        default=0,  # 0 = auto (2 × no_progress_timeout_sec) for NO_PROGRESS timeout exits
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Fee-aware timeout bypass after seconds (0=auto): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
@@ -1441,6 +1492,12 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": True},
         description="Maximum warm-up period in minutes after bot start (default 120 = 2 hours)"
+    )
+
+    warmup_max_trend_24h_pct: float = Field(
+        default=10.0,
+        json_schema_extra={"is_updatable": True},
+        description="Reject coins already up > this % in 24h during warmup (avoids chasing extended moves)"
     )
 
     # Phase 1.2: Circuit Breaker

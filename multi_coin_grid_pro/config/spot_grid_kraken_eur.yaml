@@ -730,10 +730,13 @@ max_stop_pct: 0.05                 # Max -5% (conservative cap for grid trading)
 
 take_profit_pct: 0.05              # 5% TP (realistisch voor huidige markt)
 
-# Item 7: Dynamic TP op basis van trendsterkte (0.70x–1.50x basis-TP)
-use_dynamic_take_profit: true
-min_take_profit_pct: 0.020         # Floor: 2.0% (dekt roundtrip fees)
-max_take_profit_pct: 0.08          # Ceiling: 8% (sterke uptrend)
+# Item 7: Trend-based TP (0.70x–1.50x basis-TP at grid creation time)
+# DISABLED: dynamic_tp_enabled (ATR-based, in-executor) already adjusts TP per-coin
+# during execution with a tighter cap (max 4%). The trend-TP ceiling (max 8%) would
+# always be overridden by the ATR cap, making this system redundant.
+use_dynamic_take_profit: false
+min_take_profit_pct: 0.020         # Floor: 2.0% (still used if use_dynamic_take_profit re-enabled)
+max_take_profit_pct: 0.08          # Ceiling: 8%  (still used if use_dynamic_take_profit re-enabled)
 
 # Item 4: Daily coin kill switch (-1R = halve size, -2R = disable voor vandaag)
 daily_kill_switch_enabled: true
@@ -742,10 +745,15 @@ r_unit_quote: 5.0                  # 1R = €5 (schaal mee met kapitaal)
 # Item 16: Kapitaalreserve voor beste setups
 capital_reserve_pct: 10.0         # 10% achtergehouden voor hoge-kwaliteit entries
 
-# Trailing TP: lock in profit when price rises past activation, exit if it drops back by delta
-# 🔧 2026-05-05 ROOT CAUSE FIX: zelfde fix als USD config (trail_delta 0.5%→3%, activation 2%→5%)
-trailing_stop_activation_pct: 0.05   # 🔧 2026-05-05: 0.02→0.05
-trailing_stop_delta_pct: 0.03        # 🔧 2026-05-05: 0.005→0.03
+# Trailing stop: twee functies
+#  1. Winst beschermen bij omslag — als positie op 2.5% staat en markt keert,
+#     sluit trailing op ~1.5% i.p.v. wachten tot stop-loss of TP
+#  2. Runners laten lopen — boven ATR-TP cap (4%) blijft trailing volgen
+# Activation = 2.5% (boven TP-min=2% zodat kleine snelle trades via TP-limit sluiten,
+# maar langzamere moves naar 2.5%+ trailing-bescherming krijgen bij omslag)
+# Minimum voor positief resultaat: activation > delta + fees = 1% + 0.52% = 1.52% ✓
+trailing_stop_activation_pct: 0.025   # 2.5% — tussen TP-min (2%) en TP-max (4%)
+trailing_stop_delta_pct: 0.010        # 1.0% pullback buffer om winst te beschermen
 
 # Dynamic TP: scale take-profit with ATR (volatile coins get wider TP, quiet coins get tighter)
 dynamic_tp_enabled: true
@@ -898,8 +906,11 @@ dynamic_slots:
 # ==============================================================================
 
 regime_coin_selection:
-  bear_allow_trading: false       # Sit out in BEAR regime
-  bear_max_grids: 0
+  # NOTE: RegimeCoinSelector.select() is NOT called in the trading tick.
+  # BEAR entry is controlled by adaptive_regime_detection.bear_auto_light_enabled.
+  # These values exist for status display and future wiring only.
+  bear_allow_trading: true        # mirrors bear_auto_light_enabled=true (BEAR-light ON)
+  bear_max_grids: 1               # 1 slot in BEAR (enforced by dynamic_slots.BEAR multiplier)
   chop_use_grid_ranking: true     # CHOP: rank by grid suitability
   chop_min_trend_pct: 0.001      # Near-zero floor: accept flat/sideways coins
   chop_max_trend_pct: 3.0        # >3% |trend| = too trendy for grid

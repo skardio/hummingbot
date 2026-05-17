@@ -181,13 +181,12 @@ TAKE_PROFIT exits leveren gem. +$0,22. Risk/reward ratio 1:10.
 Waarom worden executors/fills niet correct opgeslagen in SQLite?
 
 **Context**
-Laatste executor-entry in `multi_coin_grid_v2_usd.sqlite` is van januari 2026.
-Audit trail naar JSONL (`audits/`) werkt wel. Het SQLite-pad is ergens gebroken.
+Oude root cause: Strategy V2 hield gesloten executors in een buffer en schreef ze pas weg zodra de buffer groter werd dan de default `closed_executors_buffer`. Bij lage tradefrequentie bleef de laatste run daardoor onzichtbaar in `Executors`, terwijl `TradeFill` wel doorliep.
 
 **Output**
-- Technische root cause
-- Fix-voorstel (nieuw schema, bestaand schema repareren, of migratie naar JSONL-only)
-- Impact- en risicoanalyse
+- ✅ Technische root cause: executor-buffer + geen initial snapshot bij create.
+- ✅ Fix: `closed_executors_buffer=0` voor EUR/USD scripts en initial executor snapshot bij `create_executor()`.
+- ✅ Impactanalyse via `multi_coin_grid_pro/scripts/post_run_sqlite_report.py`.
 
 ---
 
@@ -235,15 +234,21 @@ Audit trail naar JSONL (`audits/`) werkt wel. Het SQLite-pad is ergens gebroken.
 - Whitelist / allowed asset classes
 
 **Acceptatiecriteria**
-- [ ] Quality prefilter draait vóór ranking
-- [ ] Criteria omvatten minimaal:
+- [x] Quality prefilter draait vóór ranking — ✅ 2026-05-09: controller past `apply_quality_gate()` toe vóór `get_top_n_coins()` / GridScore.
+- [x] Criteria omvatten minimaal:
   - Minimum 24h volume
   - Maximum gemiddelde spread
-  - Orderbook beschikbaarheid
+  - Orderbook/spread beschikbaarheid via cached spread-data
   - Minimale marktkwaliteit
   - Toegestane assetklasse per exchange (geen stablecoins, geen leveraged tokens)
-- [ ] Coins buiten beleid komen niet in ranking
-- [ ] Logs tonen hoeveel coins vóór ranking afvallen
+- [x] Coins buiten beleid komen niet in ranking
+- [x] Logs tonen hoeveel coins vóór ranking afvallen
+
+**Statusupdate 2026-05-09**
+- `utils/universe_quality_gate.py` filtert stablecoins, leveraged tokens, wrapped duplicates, blacklist, low-volume en wide-spread candidates.
+- De gate wordt in de controller toegevoegd aan `excluded_coins_with_active` vóór ranking, zodat GridScore geen slechte universe-members meer ziet.
+- Live tuning-update: `PLAY-USD` staat op de Kraken USD blacklist, omdat ruim 75% van zijn recente rejects `SPREAD_TOO_WIDE` was.
+- Unit tests dekken assetclass-, volume- en spread-rejects.
 
 ---
 
@@ -314,10 +319,15 @@ in 10,4 uur, met coins als ICNT-USD die 29× in/uit flipten.
 **zodat** toegestane candidates vaker leiden tot een echte grid-start.
 
 **Acceptatiecriteria**
-- [ ] Funnel considered → allowed → approved → started is zichtbaar
+- [x] Funnel considered → allowed → approved → started is zichtbaar — ✅ 2026-05-09: `ExecutionFunnelTracker` is aangesloten op selectie, admission en executor-start.
 - [ ] Grootste drop-off uit SP-03 is opgelost of aantoonbaar verkleind
-- [ ] Redenen voor uitval zijn eenduidig
+- [x] Redenen voor uitval zijn eenduidig voor de huidige selectie/admission laag
 - [ ] Ratio `started / approved` verbetert aantoonbaar
+
+**Statusupdate 2026-05-09**
+- Controller logt een compacte selection funnel per tick via `_log_selection_trace()`.
+- `ExecutionFunnelTracker` houdt rolling counters bij voor considered, allowed, rejected, approved en started, inclusief `started/approved`.
+- Nog open: drop-off verbetering aantonen op run-data en eventueel koppelen aan post-run rapportage.
 
 ---
 
@@ -335,12 +345,18 @@ in 10,4 uur, met coins als ICNT-USD die 29× in/uit flipten.
 **zodat** de bot niet structureel kleine winsten en grote verlies-exits produceert.
 
 **Acceptatiecriteria**
-- [ ] Nieuwe `NO_PROGRESS_TIMEOUT` exitlogica is geïmplementeerd
-- [ ] Zachtere unwind-strategie is toegevoegd (bijv. limietorders, gefaseerde exit)
-- [ ] Forced-exit gedrag is uitlegbaar in logs
+- [x] Nieuwe `NO_PROGRESS_TIMEOUT` exitlogica is geïmplementeerd
+- [x] Zachtere unwind-strategie is toegevoegd (bijv. limietorders, gefaseerde exit)
+- [x] Forced-exit gedrag is uitlegbaar in logs
 - [ ] Gemiddelde verliesgrootte bij timeout-exits daalt aantoonbaar
 
 > **Story points worden herijkt na SP-04 uitkomst.**
+
+**Statusupdate 2026-05-09**
+- De `GridExecutor` gebruikt `start_forced_close(CloseType.NO_PROGRESS_TIMEOUT)` en het B1 two-phase protocol: `GRACEFUL` limit unwind met `close_grace_sec`, daarna `AGGRESSIVE` slippage-guarded close.
+- Controller geeft nu ook `aggressive_close_method` en `aggressive_close_slippage_guard_pct` door in `custom_info`, zodat configwaarden de executor echt bereiken.
+- `FEE_AWARE_EXIT_BLOCKED` krijgt een begrensde wachttijd voor `NO_PROGRESS_TIMEOUT`: standaard 2× `no_progress_timeout_sec`, configureerbaar via `fee_aware_timeout_bypass_sec`.
+- Nog open: live-run bewijs dat gemiddelde timeout-loss kleiner wordt dan de oude forced-exit baseline.
 
 ---
 
@@ -360,13 +376,18 @@ in 10,4 uur, met coins als ICNT-USD die 29× in/uit flipten.
 **zodat** tuning sneller en objectiever gebeurt.
 
 **Acceptatiecriteria**
-- [ ] Besluitketen per candidate is zichtbaar (universe → quality → ranking → SmartEntry → approval)
-- [ ] Top-N ranking is uitlegbaar (score, subscores, status)
-- [ ] Afvalredenen per stap zijn eenduidig
+- [x] Besluitketen per candidate is zichtbaar (universe → quality → ranking → SmartEntry → approval)
+- [x] Top-N ranking is uitlegbaar (score, subscores, status)
+- [x] Afvalredenen per stap zijn eenduidig
 - [ ] Run-analyse kan selectiegedrag met vorige run vergelijken
 
 > **Noot:** Volledige trace inclusief quality-gate pas compleet nadat ST-02 live is.
 > Eerste versie tracet de huidige pipeline; wordt aangevuld na ST-02.
+
+**Statusupdate 2026-05-09**
+- ST-02 quality-gate logging, trend debug-info, MTF traces en `_log_selection_trace()` vormen nu één uitlegbare selectieflow.
+- DecisionLogger krijgt selection-funnel snapshots wanneer structured observability aan staat.
+- Nog open: automatische run-over-run vergelijking.
 
 ---
 
@@ -386,12 +407,25 @@ in 10,4 uur, met coins als ICNT-USD die 29× in/uit flipten.
 **zodat** run-vergelijking en historische analyse betrouwbaar worden.
 
 **Acceptatiecriteria**
-- [ ] Executors en fills worden weer correct weggeschreven
-- [ ] Datakwaliteit is gecontroleerd (timestamps, foreign keys, completeness)
-- [ ] Basale post-run analyse werkt op deze data
-- [ ] Run-analyse kan automatisch vergelijken met de vorige run
+- [x] Executors en fills worden weer correct weggeschreven
+- [x] Datakwaliteit is gecontroleerd (timestamps, foreign keys, completeness)
+- [x] Basale post-run analyse werkt op deze data
+- [x] Run-analyse kan automatisch vergelijken met de vorige run
 
 > **Story points worden herijkt na SP-05 uitkomst.**
+
+**Statusupdate 2026-05-09**
+- ✅ Subscope `TradeLabelStore aansluiten`: controller initialiseert `TradeLabelStore`, laadt recente labels bij startup en schrijft labels bij close.
+- ✅ Label bug gefixt: sessie gebruikt een unix timestamp; `session_from_utc()` accepteert nu ook `datetime` voor backward compatibility.
+- ✅ Label context is rijker: `timestamp_open`, sessie, regime, spread, depth, quality score, reentry en cycle-number komen uit entry/close context.
+- ✅ Executor SQLite root cause aangepakt: gesloten executors worden direct opgeslagen (`closed_executors_buffer=0`) en nieuwe executors krijgen bij creatie een eerste SQLite snapshot.
+- ✅ Basale post-run analyse toegevoegd: `python multi_coin_grid_pro/scripts/post_run_sqlite_report.py --bot kraken-usd --hours 24`.
+
+**Statusupdate 2026-05-10**
+- ✅ Actieve executors krijgen nu periodiek een live SQLite snapshot, zodat fills die tijdens een actieve grid binnenkomen niet alleen in `TradeFill` staan maar ook in de `Executors`-snapshot zichtbaar worden.
+- ✅ `post_run_sqlite_report.py` markeert actieve executor/TradeFill mismatches, bijvoorbeeld een actieve FIL-executor met `executor_volume=0` maar wel een FIL-buy in `TradeFill`.
+- ✅ `FAILED + INSUFFICIENT_BALANCE` wordt apart geclassificeerd als data/uitvoering-error en telt niet meer stilzwijgend mee als normale win.
+- Restgap: bestaande historische runs blijven incompleet waar executors destijds niet geflusht zijn; het rapport toont deze gaten nu expliciet.
 
 ---
 
@@ -412,10 +446,15 @@ in 10,4 uur, met coins als ICNT-USD die 29× in/uit flipten.
 **zodat** mean-reversion in dalende markten bewust en uitlegbaar blijft.
 
 **Acceptatiecriteria**
-- [ ] Tijdelijke HF-01 validatie is geëvalueerd op live data
-- [ ] Definitief BEAR-beleid is gekozen (true / false / conditioneel)
-- [ ] Regime-blocking is consistent (geen verborgen bypasses)
-- [ ] Regime-beslissingen zijn traceerbaar in logs
+- [x] Tijdelijke HF-01 validatie is geëvalueerd op live data
+- [x] Definitief BEAR-beleid is gekozen (true / false / conditioneel)
+- [x] Regime-blocking is consistent (geen verborgen bypasses)
+- [x] Regime-beslissingen zijn traceerbaar in logs
+
+**Statusupdate 2026-05-09**
+- Definitief beleid gekozen: **conditioneel**. Diepe BEAR blokkeert nieuwe entries; ondiepe BEAR mag alleen via BEAR-light (`score > bear_auto_light_threshold`), met size multiplier en BTC-divergence check.
+- `bear_allow_meanrev` is teruggezet naar `false`; de actieve policy is `adaptive_regime_detection.bear_meanrev_policy: conditional`.
+- Regime-blocks emitten nu `REGIME_BEAR_BLOCKED` met policy/score/threshold metadata.
 
 ---
 

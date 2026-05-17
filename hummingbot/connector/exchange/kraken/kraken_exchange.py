@@ -1,5 +1,6 @@
 import asyncio
 import re
+import time
 from collections import defaultdict
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
@@ -58,6 +59,8 @@ class KrakenExchange(ExchangePyBase):
         self._kraken_api_tier = KrakenAPITier(kraken_api_tier.upper() if kraken_api_tier else "STARTER")
         self._asset_pairs = {}
         self._client_order_id_nonce_provider = NonceCreator.for_microseconds()
+        self._last_private_request_ts: Optional[float] = None
+        self._last_private_request_ts_by_path: Dict[str, float] = {}
         self._rate_limits_share_pct = rate_limits_share_pct
         self._throttler = self._build_async_throttler(api_tier=self._kraken_api_tier)
 
@@ -322,13 +325,26 @@ class KrakenExchange(ExchangePyBase):
         result = None
         for retry_attempt in range(self.REQUEST_ATTEMPTS):
             try:
+                request_timing = self._track_private_request_timing(path_url=path_url) if is_auth_required else None
                 response_json = await self._api_request(path_url=path_url, method=method, params=params, data=data,
                                                         is_auth_required=is_auth_required)
 
                 if response_json.get("error") and "EAPI:Invalid nonce" in response_json.get("error", ""):
-                    self.logger().error(f"Invalid nonce error from {path_url}. " +
-                                        "Please ensure your Kraken API key nonce window is at least 10, " +
-                                        "and if needed reset your API key.")
+                    self.logger().error(
+                        "Invalid nonce error from %s on attempt %s/%s. "
+                        "last_local_nonce=%s, since_prev_private_request_ms=%s, "
+                        "since_prev_same_endpoint_request_ms=%s. "
+                        "Please ensure your Kraken API key nonce window is at least 10, "
+                        "and if needed reset your API key.",
+                        path_url,
+                        retry_attempt + 1,
+                        self.REQUEST_ATTEMPTS,
+                        getattr(self._auth, "_last_tracking_nonce", "unknown"),
+                        self._format_request_spacing_ms(
+                            None if request_timing is None else request_timing["since_last_private_request_s"]),
+                        self._format_request_spacing_ms(
+                            None if request_timing is None else request_timing["since_last_path_request_s"]),
+                    )
                 result = response_json.get("result")
                 if not result or response_json.get("error"):
                     raise IOError({"error": response_json})
@@ -352,6 +368,27 @@ class KrakenExchange(ExchangePyBase):
         if not result:
             raise IOError(f"Error fetching data from {path_url}, msg is {response_json}.")
         return result
+
+    def _track_private_request_timing(self, path_url: str) -> Dict[str, Optional[float]]:
+        now = time.perf_counter()
+        previous_private_request_ts = self._last_private_request_ts
+        previous_path_request_ts = self._last_private_request_ts_by_path.get(path_url)
+
+        self._last_private_request_ts = now
+        self._last_private_request_ts_by_path[path_url] = now
+
+        return {
+            "since_last_private_request_s": (
+                None if previous_private_request_ts is None else now - previous_private_request_ts),
+            "since_last_path_request_s": (
+                None if previous_path_request_ts is None else now - previous_path_request_ts),
+        }
+
+    @staticmethod
+    def _format_request_spacing_ms(seconds_since_request: Optional[float]) -> str:
+        if seconds_since_request is None:
+            return "n/a"
+        return f"{seconds_since_request * 1e3:.1f}"
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder):
         exchange_order_id = await tracked_order.get_exchange_order_id()

@@ -15,6 +15,7 @@ import logging
 import sqlite3
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Optional
 
 log = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ log = logging.getLogger(__name__)
 
 def session_from_utc(utc_ts: float) -> str:
     """Classify trade timestamp into session: Asia / EU / US / weekend."""
-    dt = _dt.datetime.utcfromtimestamp(utc_ts)
+    dt = utc_ts if isinstance(utc_ts, _dt.datetime) else _dt.datetime.utcfromtimestamp(utc_ts)
     if dt.weekday() >= 5:
         return "weekend"
     hour = dt.hour
@@ -96,6 +97,7 @@ class TradeLabelStore:
         self._db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
         try:
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(db_path, check_same_thread=False)
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute(_CREATE_SQL)

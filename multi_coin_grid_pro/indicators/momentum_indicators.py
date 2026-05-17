@@ -131,8 +131,12 @@ class MomentumIndicatorService:
             reason = accel_reason_5m or accel_reason_15m
 
         # Log warning once per symbol if data is missing (rate-limited)
+        # insufficient_history is expected at startup — log as DEBUG, not WARNING
         if reason:
-            self._log_warning_once(symbol, f"Incomplete metrics: {reason}")
+            if "insufficient_history" in reason:
+                self.logger.debug(f"[{self.connector_name}] {symbol}: Incomplete metrics: {reason} (startup warmup)")
+            else:
+                self._log_warning_once(symbol, f"Incomplete metrics: {reason}")
 
         return MomentumMetrics(
             timestamp=ts,
@@ -185,29 +189,48 @@ class MomentumIndicatorService:
         Returns:
             Tuple of (slope_pct, reason_if_none)
         """
-        if len(candles) < window_minutes:
+        if len(candles) < window_minutes + 1:
             return None, f"insufficient_history_for_{window_minutes}m"
 
         try:
             # Get VWAP from most recent candle (current)
             # Support both dict and object types
+            # Fall back to typical price (H+L+C)/3 when vwap field is absent (e.g. OKX candles)
             candle_now = candles[-1]
             vwap_now = candle_now.get("vwap") if isinstance(candle_now, dict) else getattr(candle_now, "vwap", None)
             if vwap_now is None or vwap_now <= 0:
-                return None, "no_vwap_current"
+                if isinstance(candle_now, dict):
+                    h, low, c = candle_now.get("high"), candle_now.get("low"), candle_now.get("close")
+                else:
+                    h = getattr(candle_now, "high", None)
+                    low = getattr(candle_now, "low", None)
+                    c = getattr(candle_now, "close", None)
+                if h and low and c:
+                    vwap_now = (float(h) + float(low) + float(c)) / 3.0
+                else:
+                    return None, "no_vwap_current"
 
             # Get VWAP from N minutes ago
             # Assuming candles are 1-minute intervals
             candle_ago = candles[-(window_minutes + 1)]
             vwap_ago = candle_ago.get("vwap") if isinstance(candle_ago, dict) else getattr(candle_ago, "vwap", None)
             if vwap_ago is None or vwap_ago <= 0:
-                return None, f"no_vwap_{window_minutes}m_ago"
+                if isinstance(candle_ago, dict):
+                    h, low, c = candle_ago.get("high"), candle_ago.get("low"), candle_ago.get("close")
+                else:
+                    h = getattr(candle_ago, "high", None)
+                    low = getattr(candle_ago, "low", None)
+                    c = getattr(candle_ago, "close", None)
+                if h and low and c:
+                    vwap_ago = (float(h) + float(low) + float(c)) / 3.0
+                else:
+                    return None, f"no_vwap_{window_minutes}m_ago"
 
             slope = (vwap_now / vwap_ago - 1.0) * 100.0
             return round(slope, 2), None
 
         except (ZeroDivisionError, ValueError, TypeError, IndexError):
-            return None, f"calculation_error_{window_minutes}m"
+            return None, f"calculation_unavailable_{window_minutes}m"
 
     def _calculate_acceleration(
         self,
@@ -228,7 +251,7 @@ class MomentumIndicatorService:
         Returns:
             Tuple of (acceleration_pct, reason_if_none)
         """
-        if len(candles) < window_minutes:
+        if len(candles) < window_minutes + 1:
             return None, f"insufficient_history_for_{window_minutes}m"
 
         try:
@@ -244,7 +267,7 @@ class MomentumIndicatorService:
             return round(accel, 2), None
 
         except (ZeroDivisionError, ValueError, TypeError, IndexError):
-            return None, f"calculation_error_{window_minutes}m"
+            return None, f"calculation_unavailable_{window_minutes}m"
 
     def _create_error_metrics(
         self,

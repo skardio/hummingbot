@@ -135,6 +135,36 @@ class TestExecutorOrchestrator(unittest.TestCase):
         self.orchestrator.execute_actions(actions)
         self.assertEqual(len(self.orchestrator.active_executors["test"]), 0)
 
+    @patch("hummingbot.strategy_v2.executors.executor_orchestrator.time.time")
+    @patch("hummingbot.strategy_v2.executors.executor_orchestrator.MarketsRecorder.get_instance")
+    def test_get_executors_report_persists_live_snapshots(self, mock_get_instance, mock_time):
+        mock_time.return_value = 100.0
+        markets_recorder_mock = MagicMock(spec=MarketsRecorder)
+        mock_get_instance.return_value = markets_recorder_mock
+
+        config_mock = PositionExecutorConfig(
+            timestamp=1234, trading_pair="ETH-USDT", connector_name="binance",
+            side=TradeType.BUY, amount=Decimal(10), entry_price=Decimal(100),
+        )
+        executor_info = ExecutorInfo(
+            id="live-exec", timestamp=1234, type="position_executor",
+            status=RunnableStatus.RUNNING, config=config_mock,
+            filled_amount_quote=Decimal("25"), net_pnl_quote=Decimal("1"), net_pnl_pct=Decimal("0.04"),
+            cum_fees_quote=Decimal("0.05"), is_trading=True, is_active=True, custom_info={"side": TradeType.BUY},
+            controller_id="test",
+        )
+        executor = MagicMock()
+        executor.is_closed = False
+        executor.executor_info = executor_info
+        executor.config = config_mock
+
+        self.orchestrator.active_executors["test"] = [executor]
+
+        report = self.orchestrator.get_executors_report()
+
+        markets_recorder_mock.store_or_update_executor.assert_called_once_with(executor)
+        self.assertEqual(report["test"], [executor_info])
+
     @patch('hummingbot.connector.markets_recorder.MarketsRecorder.get_instance')
     def test_generate_performance_report(self, mock_get_instance):
         # Create a mock for MarketsRecorder and its get_executors_by_controller method
@@ -703,28 +733,46 @@ class TestExecutorOrchestrator(unittest.TestCase):
 
     @patch("hummingbot.strategy_v2.executors.executor_orchestrator.MarketsRecorder.get_instance")
     def test_orphan_fill_adjustment_single_controller(self, mock_get_instance: MagicMock):
-        """Orphan fills should create PositionHold entries, not add to realized PnL."""
+        """Orphan fills should create PositionHold entries, not add to realized PnL.
+
+        A true orphan fill is one that:
+        - Is NOT matched by order_id in any executor's filled_orders/held_position_orders
+        - Falls OUTSIDE all executor active windows for its trading_pair
+        - Occurred AFTER the first executor ever ran for that pair (not pre-executor history)
+        - The pair HAS had at least one executor (otherwise it belongs to a different system)
+        """
         mock_markets_recorder = MagicMock(spec=MarketsRecorder)
         mock_get_instance.return_value = mock_markets_recorder
 
-        # Create an executor that tracks one order
-        executor_info = ExecutorInfo(
-            id="exec1", timestamp=1234, type="position_executor",
+        # ETH-USDT executor: tracks one order, closed at t=2000s
+        executor_eth = ExecutorInfo(
+            id="exec1", timestamp=1000, close_timestamp=2000, type="position_executor",
             status=RunnableStatus.TERMINATED, config=PositionExecutorConfig(
-                timestamp=1234, trading_pair="ETH-USDT", connector_name="binance",
+                timestamp=1000, trading_pair="ETH-USDT", connector_name="binance",
                 side=TradeType.BUY, amount=Decimal(10), entry_price=Decimal(100),
             ),
             filled_amount_quote=Decimal(100), net_pnl_quote=Decimal(5), net_pnl_pct=Decimal(5),
             cum_fees_quote=Decimal(1), is_trading=False, is_active=False,
-            custom_info={
-                "side": TradeType.BUY,
-                "filled_orders": [{"client_order_id": "tracked_order_1"}],
-            },
+            custom_info={"side": TradeType.BUY, "filled_orders": [{"client_order_id": "tracked_order_1"}]},
             controller_id="test",
             close_type=CloseType.TAKE_PROFIT,
         )
 
-        # Create TradeFills: one tracked, two orphans (one buy, one sell) for same pair
+        # SOL-USDT executor: also closed at t=2000s, no filled_orders in custom_info
+        executor_sol = ExecutorInfo(
+            id="exec2", timestamp=1000, close_timestamp=2000, type="position_executor",
+            status=RunnableStatus.TERMINATED, config=PositionExecutorConfig(
+                timestamp=1000, trading_pair="SOL-USDT", connector_name="binance",
+                side=TradeType.BUY, amount=Decimal(5), entry_price=Decimal(50),
+            ),
+            filled_amount_quote=Decimal(50), net_pnl_quote=Decimal(0), net_pnl_pct=Decimal(0),
+            cum_fees_quote=Decimal(0), is_trading=False, is_active=False,
+            custom_info={"side": TradeType.BUY},  # no filled_orders recorded
+            controller_id="test",
+            close_type=CloseType.TRAILING_STOP,
+        )
+
+        # Tracked fill for ETH-USDT (matched by order_id)
         tracked_fill = MagicMock()
         tracked_fill.order_id = "tracked_order_1"
         tracked_fill.price = Decimal("100")
@@ -733,7 +781,10 @@ class TestExecutorOrchestrator(unittest.TestCase):
         tracked_fill.trade_type = "BUY"
         tracked_fill.symbol = "ETH-USDT"
         tracked_fill.market = "binance"
+        tracked_fill.timestamp = 1500000  # ms, within ETH executor window [1000000, 2060000]
 
+        # True orphan fills for SOL-USDT: AFTER the SOL executor's close window (2000s + 60s buffer)
+        # Window ends at: 2000*1000 + 60000 = 2060000 ms. Orphan fills arrive at 3000000 ms.
         orphan_buy = MagicMock()
         orphan_buy.order_id = "orphan_buy_1"
         orphan_buy.price = Decimal("50")
@@ -742,6 +793,7 @@ class TestExecutorOrchestrator(unittest.TestCase):
         orphan_buy.trade_type = "BUY"
         orphan_buy.symbol = "SOL-USDT"
         orphan_buy.market = "binance"
+        orphan_buy.timestamp = 3000000  # ms, AFTER SOL executor close window
 
         orphan_sell = MagicMock()
         orphan_sell.order_id = "orphan_sell_1"
@@ -751,8 +803,9 @@ class TestExecutorOrchestrator(unittest.TestCase):
         orphan_sell.trade_type = "SELL"
         orphan_sell.symbol = "SOL-USDT"
         orphan_sell.market = "binance"
+        orphan_sell.timestamp = 3000000  # ms, AFTER SOL executor close window
 
-        mock_markets_recorder.get_all_executors.return_value = [executor_info]
+        mock_markets_recorder.get_all_executors.return_value = [executor_eth, executor_sol]
         mock_markets_recorder.get_all_positions.return_value = []
         mock_markets_recorder.get_all_trade_fills.return_value = [tracked_fill, orphan_buy, orphan_sell]
 
@@ -760,7 +813,7 @@ class TestExecutorOrchestrator(unittest.TestCase):
 
         orchestrator = ExecutorOrchestrator(strategy=self.mock_strategy)
 
-        # Executor PnL in cached_performance stays at executor-only value
+        # Executor PnL in cached_performance: both executors (5 + 0 = 5)
         report = orchestrator.cached_performance["test"]
         self.assertEqual(report.realized_pnl_quote, Decimal("5"))
 
@@ -768,6 +821,12 @@ class TestExecutorOrchestrator(unittest.TestCase):
         positions = orchestrator.positions_held.get("test", [])
         self.assertEqual(len(positions), 1)
         pos = positions[0]
+        self.assertEqual(pos.trading_pair, "SOL-USDT")
+        self.assertEqual(pos.buy_amount_base, Decimal("2"))
+        self.assertEqual(pos.sell_amount_base, Decimal("2"))
+        self.assertEqual(pos.buy_amount_quote, Decimal("100"))   # 50*2
+        self.assertEqual(pos.sell_amount_quote, Decimal("110"))  # 55*2
+        self.assertEqual(pos.cum_fees_quote, Decimal("0.25"))
         self.assertEqual(pos.trading_pair, "SOL-USDT")
         self.assertEqual(pos.buy_amount_base, Decimal("2"))
         self.assertEqual(pos.sell_amount_base, Decimal("2"))
@@ -862,14 +921,20 @@ class TestExecutorOrchestrator(unittest.TestCase):
 
     @patch("hummingbot.strategy_v2.executors.executor_orchestrator.MarketsRecorder.get_instance")
     def test_orphan_fill_adjustment_held_position_orders(self, mock_get_instance: MagicMock):
-        """Orders in held_position_orders should also be considered tracked."""
+        """Orders in held_position_orders should also be considered tracked.
+
+        A fill for a pair that has never had an executor is NOT classified as an orphan
+        (it belongs to a different trading system). Only fills that arrive after an executor
+        already closed for that pair are genuine orphans.
+        """
         mock_markets_recorder = MagicMock(spec=MarketsRecorder)
         mock_get_instance.return_value = mock_markets_recorder
 
-        executor_info = ExecutorInfo(
-            id="exec1", timestamp=1234, type="position_executor",
+        # ETH-USDT executor closed at t=2000s, tracks filled_1 and held_1
+        executor_eth = ExecutorInfo(
+            id="exec1", timestamp=1000, close_timestamp=2000, type="position_executor",
             status=RunnableStatus.TERMINATED, config=PositionExecutorConfig(
-                timestamp=1234, trading_pair="ETH-USDT", connector_name="binance",
+                timestamp=1000, trading_pair="ETH-USDT", connector_name="binance",
                 side=TradeType.BUY, amount=Decimal(10), entry_price=Decimal(100),
             ),
             filled_amount_quote=Decimal(100), net_pnl_quote=Decimal(0), net_pnl_pct=Decimal(0),
@@ -883,7 +948,21 @@ class TestExecutorOrchestrator(unittest.TestCase):
             close_type=CloseType.TAKE_PROFIT,
         )
 
-        # held_1 should be tracked, orphan_1 should be orphan
+        # SOL-USDT executor closed at t=2000s — needed so SOL fills qualify as orphans
+        executor_sol = ExecutorInfo(
+            id="exec2", timestamp=1000, close_timestamp=2000, type="position_executor",
+            status=RunnableStatus.TERMINATED, config=PositionExecutorConfig(
+                timestamp=1000, trading_pair="SOL-USDT", connector_name="binance",
+                side=TradeType.BUY, amount=Decimal(5), entry_price=Decimal(50),
+            ),
+            filled_amount_quote=Decimal(0), net_pnl_quote=Decimal(0), net_pnl_pct=Decimal(0),
+            cum_fees_quote=Decimal(0), is_trading=False, is_active=False,
+            custom_info={"side": TradeType.BUY},
+            controller_id="test",
+            close_type=CloseType.TRAILING_STOP,
+        )
+
+        # held_1 is tracked by the ETH executor's held_position_orders
         held_fill = MagicMock()
         held_fill.order_id = "held_1"
         held_fill.price = Decimal("100")
@@ -892,7 +971,10 @@ class TestExecutorOrchestrator(unittest.TestCase):
         held_fill.trade_type = "BUY"
         held_fill.symbol = "ETH-USDT"
         held_fill.market = "binance"
+        held_fill.timestamp = 1500000  # ms, within ETH executor window
 
+        # True orphan SELL for SOL-USDT — arrives AFTER the SOL executor's close window
+        # Close window ends at: 2000*1000 + 60000 = 2060000 ms
         orphan_fill = MagicMock()
         orphan_fill.order_id = "orphan_1"
         orphan_fill.price = Decimal("200")
@@ -901,8 +983,9 @@ class TestExecutorOrchestrator(unittest.TestCase):
         orphan_fill.trade_type = "SELL"
         orphan_fill.symbol = "SOL-USDT"
         orphan_fill.market = "binance"
+        orphan_fill.timestamp = 3000000  # ms, AFTER SOL executor close window
 
-        mock_markets_recorder.get_all_executors.return_value = [executor_info]
+        mock_markets_recorder.get_all_executors.return_value = [executor_eth, executor_sol]
         mock_markets_recorder.get_all_positions.return_value = []
         mock_markets_recorder.get_all_trade_fills.return_value = [held_fill, orphan_fill]
 
@@ -922,3 +1005,90 @@ class TestExecutorOrchestrator(unittest.TestCase):
         self.assertEqual(pos.sell_amount_base, Decimal("1"))
         self.assertEqual(pos.sell_amount_quote, Decimal("200"))
         self.assertEqual(pos.side, TradeType.SELL)  # net short
+
+    @patch("hummingbot.strategy_v2.executors.executor_orchestrator.MarketsRecorder.get_instance")
+    def test_orphan_fill_adjustment_excludes_historical_and_foreign_fills(self, mock_get_instance: MagicMock):
+        """Verify that fills are excluded when:
+        - The fill is for a pair that never had an executor (foreign-system fill).
+        - The fill arrived before the first executor ever opened for that pair (pre-executor history).
+        - The fill falls within an executor's active window (late arriving exchange fill).
+        Only fills after all executor windows, for pairs that had executors, should be orphans.
+        """
+        mock_markets_recorder = MagicMock(spec=MarketsRecorder)
+        mock_get_instance.return_value = mock_markets_recorder
+
+        # SOL-USDT executor: open=1000s, close=2000s → window [1000000ms, 2060000ms]
+        executor_sol = ExecutorInfo(
+            id="exec_sol", timestamp=1000, close_timestamp=2000, type="position_executor",
+            status=RunnableStatus.TERMINATED, config=PositionExecutorConfig(
+                timestamp=1000, trading_pair="SOL-USDT", connector_name="binance",
+                side=TradeType.BUY, amount=Decimal(5), entry_price=Decimal(50),
+            ),
+            filled_amount_quote=Decimal(50), net_pnl_quote=Decimal(1), net_pnl_pct=Decimal(2),
+            cum_fees_quote=Decimal(0), is_trading=False, is_active=False,
+            custom_info={"side": TradeType.BUY},
+            controller_id="test",
+            close_type=CloseType.TRAILING_STOP,
+        )
+
+        # 1. Foreign fill — BTC-USDT has no executor at all
+        foreign_fill = MagicMock()
+        foreign_fill.order_id = "btc_fill_1"
+        foreign_fill.symbol = "BTC-USDT"
+        foreign_fill.timestamp = 5000000  # doesn't matter, pair has no executor
+        foreign_fill.trade_type = "BUY"
+        foreign_fill.price = Decimal("30000")
+        foreign_fill.amount = Decimal("0.01")
+        foreign_fill.trade_fee_in_quote = Decimal("0.30")
+        foreign_fill.market = "binance"
+
+        # 2. Pre-executor fill — SOL-USDT fill BEFORE the first SOL executor opened
+        pre_exec_fill = MagicMock()
+        pre_exec_fill.order_id = "sol_early_fill"
+        pre_exec_fill.symbol = "SOL-USDT"
+        pre_exec_fill.timestamp = 500000  # ms — before SOL executor opened at 1000000ms
+        pre_exec_fill.trade_type = "BUY"
+        pre_exec_fill.price = Decimal("40")
+        pre_exec_fill.amount = Decimal("3")
+        pre_exec_fill.trade_fee_in_quote = Decimal("0.12")
+        pre_exec_fill.market = "binance"
+
+        # 3. In-window fill — SOL-USDT fill DURING the SOL executor's active window
+        in_window_fill = MagicMock()
+        in_window_fill.order_id = "sol_in_window"
+        in_window_fill.symbol = "SOL-USDT"
+        in_window_fill.timestamp = 1500000  # ms — inside [1000000, 2060000]
+        in_window_fill.trade_type = "SELL"
+        in_window_fill.price = Decimal("55")
+        in_window_fill.amount = Decimal("1")
+        in_window_fill.trade_fee_in_quote = Decimal("0.05")
+        in_window_fill.market = "binance"
+
+        # 4. True orphan — SOL-USDT fill AFTER the executor's close window
+        true_orphan_fill = MagicMock()
+        true_orphan_fill.order_id = "sol_late_fill"
+        true_orphan_fill.symbol = "SOL-USDT"
+        true_orphan_fill.timestamp = 5000000  # ms — after window ends at 2060000ms
+        true_orphan_fill.trade_type = "BUY"
+        true_orphan_fill.price = Decimal("60")
+        true_orphan_fill.amount = Decimal("1")
+        true_orphan_fill.trade_fee_in_quote = Decimal("0.06")
+        true_orphan_fill.market = "binance"
+
+        mock_markets_recorder.get_all_executors.return_value = [executor_sol]
+        mock_markets_recorder.get_all_positions.return_value = []
+        mock_markets_recorder.get_all_trade_fills.return_value = [
+            foreign_fill, pre_exec_fill, in_window_fill, true_orphan_fill
+        ]
+
+        self.mock_strategy.controllers = {"test": MagicMock()}
+        orchestrator = ExecutorOrchestrator(strategy=self.mock_strategy)
+
+        # Only the true orphan fill should create a position
+        positions = orchestrator.positions_held.get("test", [])
+        self.assertEqual(len(positions), 1, "Only true orphan fills should create positions")
+        pos = positions[0]
+        self.assertEqual(pos.trading_pair, "SOL-USDT")
+        self.assertEqual(pos.buy_amount_base, Decimal("1"))
+        self.assertEqual(pos.buy_amount_quote, Decimal("60"))  # 60 * 1
+        self.assertEqual(pos.cum_fees_quote, Decimal("0.06"))
