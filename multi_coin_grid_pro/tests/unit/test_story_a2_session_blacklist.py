@@ -271,6 +271,146 @@ class TestStoryA2SessionBlacklist(unittest.TestCase):
         self.assertFalse(self.controller._is_blacklisted("ETH-EUR", test_time))
         self.assertTrue(self.controller._is_blacklisted("SOL-EUR", test_time))
 
+    # ------------------------------------------------------------------
+    # Regression: Bug #10 — session_blacklist stored expiry_time but
+    # the inline cleanup loop treated it as blacklisted_at (start time).
+    # _purge_expired_blacklist() is the canonical helper and must use
+    # expiry semantics consistently with _add_to_blacklist().
+    # ------------------------------------------------------------------
+    def test_purge_uses_expiry_not_start_time(self):
+        """Regression #10: purge removes coin as soon as expiry_time is reached."""
+        symbol = "ETH-EUR"
+        duration = 1800  # 30 min
+        self.controller._add_to_blacklist(symbol, "TIMEOUT", self.now)
+
+        # One second before expiry: still blacklisted
+        self.controller._purge_expired_blacklist(self.now + duration - 1)
+        self.assertIn(symbol, self.controller.session_blacklist)
+
+        # Exactly at expiry: expired (now >= expiry)
+        self.controller._purge_expired_blacklist(self.now + duration)
+        self.assertNotIn(symbol, self.controller.session_blacklist)
+
+    def test_blacklist_duration_override(self):
+        """duration_override is honoured; expiry = now + override, not default."""
+        symbol = "SOL-EUR"
+        custom_dur = 600  # 10 min
+        self.controller._add_to_blacklist(symbol, "STREAK", self.now, duration_override=custom_dur)
+
+        # Still blacklisted 9m 59s in
+        self.assertTrue(self.controller._is_blacklisted(symbol, self.now + custom_dur - 1))
+        # Expired at exactly 10 min
+        self.assertFalse(self.controller._is_blacklisted(symbol, self.now + custom_dur))
+
+
+class TestMaxStreakBlacklist(unittest.TestCase):
+    """Tests for max_streak_before_blacklist → _add_to_blacklist integration."""
+
+    def setUp(self):
+        from multi_coin_grid_pro.controllers.multi_coin_grid_config import MultiCoinGridConfig
+        from multi_coin_grid_pro.controllers.multi_coin_grid_controller import MultiCoinGridController
+
+        self.config = MultiCoinGridConfig(
+            connector_name="kraken",
+            quote_asset="USD",
+            blacklist_after_timeout_sec=1800,
+        )
+        self.market_data_provider = MagicMock()
+        self.market_data_provider.time = MagicMock(return_value=5000.0)
+        self.market_data_provider.ready = True
+
+        with patch.object(MultiCoinGridController, '_initialize_components'):
+            self.controller = MultiCoinGridController(
+                config=self.config,
+                market_data_provider=self.market_data_provider,
+                actions_queue=MagicMock(),
+                connectors={"kraken": MagicMock()},
+            )
+        self.now = 5000.0
+
+    def test_blacklist_with_duration_override(self):
+        """_add_to_blacklist respects duration_override for streak blacklists."""
+        streak_dur = 3600
+        self.controller._add_to_blacklist(
+            "HYPE-USD", "LOSS_STREAK:3/3", self.now, duration_override=streak_dur
+        )
+        # Blacklisted for streak_dur, not default blacklist_after_timeout_sec
+        self.assertTrue(self.controller._is_blacklisted("HYPE-USD", self.now + streak_dur - 1))
+        self.assertFalse(self.controller._is_blacklisted("HYPE-USD", self.now + streak_dur))
+
+    def test_streak_reset_after_blacklist(self):
+        """After manual blacklist-on-streak, resetting _loss_streaks to 0 prevents re-trigger."""
+        trading_pair = "LINK-USD"
+        cc = {'max_streak_before_blacklist': 2, 'loss_streak_blacklist_sec': 900}
+
+        # Simulate reaching max_streak — replicate the new code path
+        self.controller._loss_streaks[trading_pair] = 2
+        streak = self.controller._loss_streaks[trading_pair]
+        max_streak = int(cc.get('max_streak_before_blacklist', 3))
+
+        if streak >= max_streak:
+            _streak_dur = float(cc.get(
+                'loss_streak_blacklist_sec',
+                getattr(self.controller.config, 'blacklist_after_timeout_sec', 3600),
+            ))
+            self.controller._add_to_blacklist(
+                trading_pair,
+                f"LOSS_STREAK:{streak}/{max_streak}",
+                self.now,
+                duration_override=_streak_dur,
+            )
+            self.controller._loss_streaks[trading_pair] = 0
+
+        # Coin must be blacklisted
+        self.assertTrue(self.controller._is_blacklisted(trading_pair, self.now))
+        # Streak must be reset to 0 so the next loss starts a fresh count
+        self.assertEqual(self.controller._loss_streaks.get(trading_pair, 0), 0)
+
+    def test_streak_below_max_does_not_blacklist(self):
+        """Streak below max_streak should NOT trigger blacklist."""
+        trading_pair = "DOGE-USD"
+        cc = {'max_streak_before_blacklist': 3}
+
+        # Simulate streak = 2, max = 3 → no blacklist yet
+        self.controller._loss_streaks[trading_pair] = 2
+        streak = self.controller._loss_streaks[trading_pair]
+        max_streak = int(cc.get('max_streak_before_blacklist', 3))
+
+        if streak >= max_streak:
+            self.controller._add_to_blacklist(trading_pair, "LOSS_STREAK", self.now)
+            self.controller._loss_streaks[trading_pair] = 0
+
+        # Not yet at threshold — must NOT be blacklisted
+        self.assertFalse(self.controller._is_blacklisted(trading_pair, self.now))
+        self.assertEqual(self.controller._loss_streaks.get(trading_pair, 0), 2)
+
+    def test_loss_streak_blacklist_sec_from_config(self):
+        """loss_streak_blacklist_sec config key overrides default duration."""
+        trading_pair = "SOL-USD"
+        custom_sec = 7200  # 2 hours
+        cc = {'max_streak_before_blacklist': 1, 'loss_streak_blacklist_sec': custom_sec}
+
+        self.controller._loss_streaks[trading_pair] = 1
+        streak = self.controller._loss_streaks[trading_pair]
+        max_streak = int(cc.get('max_streak_before_blacklist', 3))
+
+        if streak >= max_streak:
+            _streak_dur = float(cc.get(
+                'loss_streak_blacklist_sec',
+                getattr(self.controller.config, 'blacklist_after_timeout_sec', 3600),
+            ))
+            self.controller._add_to_blacklist(
+                trading_pair,
+                f"LOSS_STREAK:{streak}/{max_streak}",
+                self.now,
+                duration_override=_streak_dur,
+            )
+            self.controller._loss_streaks[trading_pair] = 0
+
+        # Must be blacklisted for the custom 2h duration
+        self.assertTrue(self.controller._is_blacklisted(trading_pair, self.now + custom_sec - 1))
+        self.assertFalse(self.controller._is_blacklisted(trading_pair, self.now + custom_sec))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -45,10 +45,10 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
     - Automatic risk management
     """
 
-    # ST-06b: Lower buffer so executors are stored to DB more frequently.
-    # Framework default=100 but our bot never reaches that threshold,
-    # causing the executors table to be empty.
-    closed_executors_buffer: int = 5
+    # ST-06b: Write executors to DB immediately on close (crash-safe).
+    # Buffer=0 means every closed executor is persisted within one tick.
+    # Framework default=100; set to 0 so crash never loses executor records.
+    closed_executors_buffer: int = 0
 
     # Strategy configuration - markets will be set dynamically by controllers
     CONFIG_NAME: str = "spot_grid_kraken_eur"  # Kraken EUR spot grid config

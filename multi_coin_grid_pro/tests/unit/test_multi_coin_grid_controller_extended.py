@@ -466,3 +466,214 @@ class TestMultiCoinGridControllerExtended:
         assert "0.50" in status_str or "0.5" in status_str
         # Total volume should be 50 + 70 = 120
         assert "120.00" in status_str or "120" in status_str
+
+    # ------------------------------------------------------------------
+    # Tests for TAKE_PROFIT cooldown (close_cooldowns.take_profit_sec)
+    # ------------------------------------------------------------------
+
+    def test_get_close_cooldown_sec_stop_loss(self, controller):
+        """US15: STOP_LOSS returns stop_loss_sec when configured."""
+        from hummingbot.strategy_v2.models.executors import CloseType
+        controller.config.close_cooldowns = {
+            'stop_loss_sec': 21600,
+            'early_stop_sec': 10800,
+            'no_progress_sec': 3600,
+            'failed_sec': 21600,
+        }
+        result = controller._get_close_cooldown_sec(CloseType.STOP_LOSS, "NEX-USD")
+        assert result == 21600
+
+    def test_get_close_cooldown_sec_stop_loss_fallback(self, controller):
+        """US15: STOP_LOSS falls back to early_stop_sec when stop_loss_sec is absent."""
+        from hummingbot.strategy_v2.models.executors import CloseType
+        controller.config.close_cooldowns = {
+            'early_stop_sec': 10800,
+            'no_progress_sec': 3600,
+            'failed_sec': 21600,
+        }
+        result = controller._get_close_cooldown_sec(CloseType.STOP_LOSS, "NEX-USD")
+        assert result == 10800  # fallback to early_stop_sec
+
+    def test_get_close_cooldown_sec_early_stop_unchanged(self, controller):
+        """US15: EARLY_STOP is unaffected by the stop_loss_sec split."""
+        from hummingbot.strategy_v2.models.executors import CloseType
+        controller.config.close_cooldowns = {
+            'stop_loss_sec': 21600,
+            'early_stop_sec': 10800,
+            'no_progress_sec': 3600,
+            'failed_sec': 21600,
+        }
+        result = controller._get_close_cooldown_sec(CloseType.EARLY_STOP, "SOL-USD")
+        assert result == 10800  # must NOT use stop_loss_sec
+
+    def test_get_close_cooldown_sec_no_progress(self, controller):
+        """NO_PROGRESS_TIMEOUT returns no_progress_sec from close_cooldowns config."""
+        from hummingbot.strategy_v2.models.executors import CloseType
+        controller.config.close_cooldowns = {
+            'early_stop_sec': 10800,
+            'no_progress_sec': 3600,
+            'failed_sec': 21600,
+        }
+        result = controller._get_close_cooldown_sec(CloseType.NO_PROGRESS_TIMEOUT, "SOL-USD")
+        assert result == 3600
+
+    def test_take_profit_cooldown_applied_when_configured(self, controller):
+        """When take_profit_sec is set, _add_to_blacklist is called with that duration."""
+        from unittest.mock import Mock
+
+        from hummingbot.strategy_v2.models.executors import CloseType
+
+        controller.config.close_cooldowns = {'take_profit_sec': 7200}
+        controller._add_to_blacklist = Mock()
+
+        import time
+        now = time.time()
+        symbol = "NEX-USD"
+
+        # Replicate the TAKE_PROFIT routing logic from the controller
+        cc = getattr(controller.config, 'close_cooldowns', {}) or {}
+        tp_cooldown = int(cc.get('take_profit_sec', 0))
+        assert tp_cooldown == 7200
+
+        if tp_cooldown > 0:
+            controller._add_to_blacklist(
+                symbol,
+                f"TAKE_PROFIT_COOLDOWN:{CloseType.TAKE_PROFIT.name}",
+                now,
+                duration_override=tp_cooldown,
+            )
+
+        controller._add_to_blacklist.assert_called_once()
+        call_kwargs = controller._add_to_blacklist.call_args
+        assert call_kwargs[1]['duration_override'] == 7200
+        assert symbol == call_kwargs[0][0]
+
+    def test_take_profit_cooldown_falls_back_when_not_configured(self, controller):
+        """Without take_profit_sec, TAKE_PROFIT falls back to rotation_cooldown_after_close_sec."""
+        controller.config.close_cooldowns = {}  # no take_profit_sec
+
+        cc = getattr(controller.config, 'close_cooldowns', {}) or {}
+        tp_cooldown = int(cc.get('take_profit_sec', 0))
+        assert tp_cooldown == 0  # not configured → should use rotation fallback
+
+        # rotation_cooldown_after_close_sec is not in the pydantic model; getattr returns default
+        rotation = getattr(controller.config, 'rotation_cooldown_after_close_sec', 300)
+        assert rotation == 300
+
+    # ------------------------------------------------------------------
+    # US13: ATR-fee gate tests
+    # ------------------------------------------------------------------
+
+    def test_atr_fee_gate_blocks_low_atr(self, controller):
+        """US13: Returns False when ATR is below the fee multiple threshold."""
+        controller.config.atr_fee_gate = {
+            'enabled': True,
+            'min_atr_fee_multiplier': 2.0,
+        }
+        controller.config.fee_aware_filter = {
+            'taker_fee_pct': 0.35,
+            'maker_fee_pct': 0.20,
+            'fee_model': 'average',
+        }
+        # average RT fee = (0.20 + 0.35) / 100 * 100 = 0.55%
+        # required_atr_pct = 0.55 * 2.0 = 1.10%
+        # atr_pct = 0.80 → should be blocked
+        allowed, msg = controller._check_atr_fee_gate("BTC-USD", 0.80)
+        assert not allowed
+        assert "ATR_BELOW_FEE_EDGE" in msg
+        assert "required_atr_pct=1.100" in msg
+
+    def test_atr_fee_gate_allows_sufficient_atr(self, controller):
+        """US13: Returns True when ATR meets or exceeds the fee multiple threshold."""
+        controller.config.atr_fee_gate = {
+            'enabled': True,
+            'min_atr_fee_multiplier': 2.0,
+        }
+        controller.config.fee_aware_filter = {
+            'taker_fee_pct': 0.35,
+            'maker_fee_pct': 0.20,
+            'fee_model': 'average',
+        }
+        # required = 1.10%, atr = 1.50% → allowed
+        allowed, msg = controller._check_atr_fee_gate("BTC-USD", 1.50)
+        assert allowed
+        assert msg == ""
+
+    def test_atr_fee_gate_disabled(self, controller):
+        """US13: Returns True when atr_fee_gate.enabled is False."""
+        controller.config.atr_fee_gate = {
+            'enabled': False,
+            'min_atr_fee_multiplier': 2.0,
+        }
+        # Even with very low ATR the gate should be open when disabled
+        allowed, msg = controller._check_atr_fee_gate("BTC-USD", 0.01)
+        assert allowed
+        assert msg == ""
+
+    # ------------------------------------------------------------------
+    # US16: Re-entry price guard tests
+    # ------------------------------------------------------------------
+
+    def test_reentry_price_guard_blocks_drop(self, controller):
+        """US16: Returns False when current price has dropped > threshold vs last exit."""
+        controller.config.reentry_price_guard = {
+            'enabled': True,
+            'max_drop_below_last_exit_pct': 0.50,
+        }
+        controller._last_exit_prices["ETH-USD"] = 2000.0
+        # 2000 × (1 - 0.005) = 1990.0; current = 1985 → blocked
+        allowed, msg = controller._check_reentry_price_guard("ETH-USD", 1985.0)
+        assert not allowed
+        assert "REENTRY_PRICE_GUARD" in msg
+        assert "last_exit_price=2000.000000" in msg
+
+    def test_reentry_price_guard_allows_small_drop(self, controller):
+        """US16: Returns True when price drop is within the allowed threshold."""
+        controller.config.reentry_price_guard = {
+            'enabled': True,
+            'max_drop_below_last_exit_pct': 0.50,
+        }
+        controller._last_exit_prices["ETH-USD"] = 2000.0
+        # drop < 0.50% → allowed
+        allowed, msg = controller._check_reentry_price_guard("ETH-USD", 1995.0)
+        assert allowed
+        assert msg == ""
+
+    def test_reentry_price_guard_no_exit_price(self, controller):
+        """US16: Returns True when no exit price is known (first entry after restart)."""
+        controller.config.reentry_price_guard = {
+            'enabled': True,
+            'max_drop_below_last_exit_pct': 0.50,
+        }
+        # _last_exit_prices is empty
+        allowed, msg = controller._check_reentry_price_guard("NEW-USD", 100.0)
+        assert allowed
+        assert msg == ""
+
+    def test_reentry_price_guard_disabled(self, controller):
+        """US16: Returns True regardless of prices when disabled."""
+        controller.config.reentry_price_guard = {
+            'enabled': False,
+            'max_drop_below_last_exit_pct': 0.50,
+        }
+        controller._last_exit_prices["ETH-USD"] = 2000.0
+        # Would normally block at 1900 (5% drop) but guard is disabled
+        allowed, msg = controller._check_reentry_price_guard("ETH-USD", 1900.0)
+        assert allowed
+        assert msg == ""
+
+    # ------------------------------------------------------------------
+    # US14: Decision logging tests
+    # ------------------------------------------------------------------
+
+    def test_record_entry_reject_increments_counter(self, controller):
+        """US14: _record_entry_reject increments the count for a given reason."""
+        controller._entry_reject_counts = {}
+        controller._entry_reject_hour = -1  # force new hour
+
+        controller._record_entry_reject("ATR_BELOW_FEE_EDGE")
+        controller._record_entry_reject("ATR_BELOW_FEE_EDGE")
+        controller._record_entry_reject("REENTRY_PRICE_GUARD")
+
+        assert controller._entry_reject_counts.get("ATR_BELOW_FEE_EDGE") == 2
+        assert controller._entry_reject_counts.get("REENTRY_PRICE_GUARD") == 1

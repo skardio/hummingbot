@@ -13,6 +13,7 @@ Each coin can have custom thresholds via coin_profiles in config.
 """
 import logging
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -124,6 +125,8 @@ class SmartEntryFilter:
         self.exchange_connector = exchange_connector
         self.connector_name = connector_name
         self.event_logger = event_logger  # EPIC v3.4: Store event logger
+        # In-memory parabolic cooldown store (symbol -> expiry timestamp)
+        self._parabolic_cooldowns: Dict[str, float] = {}
 
         self.logger.info("=" * 80)
         self.logger.info("🧠 SmartEntryFilter v2.0 initialized")
@@ -367,6 +370,167 @@ class SmartEntryFilter:
 
         return cfg
 
+    def _check_vwap_slope_guard(
+        self,
+        symbol: str,
+        vwap_dev_pct: float,
+        vwap_slope_15m_pct: Optional[float],
+        regime: str,  # noqa: ARG002 — reserved for future regime-aware thresholds
+        vwap_slope_5m_pct: Optional[float] = None,  # CA3: dual-window confirmation
+    ) -> Tuple[bool, str]:
+        """
+        VWAP slope guard ported to SmartEntry v2.
+
+        CA3: Supports dual-window confirmation (Story 9).
+        When vwap_slope_dual_confirmation=True (default) AND both slopes are
+        available, rejects only when BOTH the 5m AND 15m VWAP slopes are
+        flat/negative at high deviation — reducing false positives during healthy
+        consolidations.  When only 15m data is available, degrades gracefully to
+        single-window mode. When vwap_slope_dual_confirmation=False, always uses
+        the single 15m window.
+
+        Shadow mode logs the rejection but still allows entry.
+
+        Returns (allowed, reject_reason).
+        """
+        if not self.base_cfg.vwap_slope_guard_enabled:
+            return True, ""
+        if vwap_dev_pct <= 0:
+            return True, ""
+        dev_threshold = self.base_cfg.vwap_slope_deviation_high_pct
+        if vwap_dev_pct < dev_threshold:
+            return True, ""
+
+        shadow = self.base_cfg.vwap_slope_guard_shadow_mode
+
+        # CA3: Dual-window confirmation mode (Story 9)
+        if self.base_cfg.vwap_slope_dual_confirmation and vwap_slope_5m_pct is not None:
+            # Both slopes available — require BOTH to be flat to reject
+            if vwap_slope_15m_pct is None:
+                if self.base_cfg.vwap_slope_log_details:
+                    self.logger.debug(
+                        f"[VWAP_SLOPE] {symbol}: 15m slope unavailable in dual mode — guard skipped"
+                    )
+                return True, ""
+            slope_threshold_5m = self.base_cfg.vwap_slope_min_pct_5m
+            slope_threshold_15m = self.base_cfg.vwap_slope_min_pct_15m
+            slope_5m_flat = vwap_slope_5m_pct <= slope_threshold_5m
+            slope_15m_flat = vwap_slope_15m_pct <= slope_threshold_15m
+            if slope_5m_flat and slope_15m_flat:
+                reason = (
+                    f"VWAP_GUARD_REJECT "
+                    f"(dev={vwap_dev_pct:.1f}%>={dev_threshold}%, "
+                    f"5m_slope={vwap_slope_5m_pct:.2f}%<={slope_threshold_5m}%, "
+                    f"15m_slope={vwap_slope_15m_pct:.2f}%<={slope_threshold_15m}% "
+                    f"[dual-window: both flat])"
+                )
+                tag = "SHADOW" if shadow else "LIVE"
+                if self.base_cfg.vwap_slope_log_details:
+                    self.logger.info(f"[VWAP_SLOPE][{tag}] {symbol}: {reason}")
+                if shadow:
+                    return True, ""
+                return False, reason
+            # Only one window flat → at least one still has momentum, allow entry
+            if self.base_cfg.vwap_slope_log_details and (slope_5m_flat or slope_15m_flat):
+                self.logger.debug(
+                    f"[VWAP_SLOPE] {symbol}: dual-window PASS "
+                    f"(5m={'FLAT' if slope_5m_flat else 'OK'}, "
+                    f"15m={'FLAT' if slope_15m_flat else 'OK'})"
+                )
+            return True, ""
+
+        # Single-window mode: 15m only (when dual_confirmation=False OR 5m data missing)
+        if vwap_slope_15m_pct is None:
+            if self.base_cfg.vwap_slope_log_details:
+                self.logger.debug(
+                    f"[VWAP_SLOPE] {symbol}: 15m slope unavailable — guard skipped"
+                )
+            return True, ""
+        slope_threshold = self.base_cfg.vwap_slope_min_pct_15m
+        if vwap_slope_15m_pct <= slope_threshold:
+            reason = (
+                f"VWAP_SLOPE_FLAT_WHILE_DEVIATION_HIGH "
+                f"(dev={vwap_dev_pct:.1f}%>={dev_threshold}%, "
+                f"15m_slope={vwap_slope_15m_pct:.2f}%<={slope_threshold}%)"
+            )
+            tag = "SHADOW" if shadow else "LIVE"
+            if self.base_cfg.vwap_slope_log_details:
+                self.logger.info(f"[VWAP_SLOPE][{tag}] {symbol}: {reason}")
+            if shadow:
+                return True, ""
+            return False, reason
+        return True, ""
+
+    def _check_parabolic_detector(
+        self,
+        symbol: str,
+        vwap_dev_pct: float,
+        accel_5m_pct: Optional[float],
+        accel_15m_pct: Optional[float],
+    ) -> Tuple[bool, str]:
+        """
+        Parabolic blow-off top detector ported to SmartEntry v2.
+
+        Triggers a cooldown when ALL three conditions are met:
+          1. VWAP deviation >= parabolic_vwap_dev_min_pct
+          2. 5m acceleration >= parabolic_accel_5m_min_pct
+          3. 15m acceleration >= parabolic_accel_15m_min_pct
+
+        Cooldowns are stored in-memory (resets on restart).
+        Shadow mode logs and adds the cooldown but still allows entry.
+
+        Returns (allowed, reject_reason).
+        """
+        if not self.base_cfg.parabolic_detector_enabled:
+            return True, ""
+        now = time.time()
+        cooldown_sec = self.base_cfg.parabolic_cooldown_minutes * 60
+        expiry = self._parabolic_cooldowns.get(symbol)
+        if expiry and now < expiry:
+            remaining = int(expiry - now)
+            reason = (
+                f"PARABOLIC_COOLDOWN_ACTIVE "
+                f"(remaining={remaining}s of {cooldown_sec}s)"
+            )
+            shadow = self.base_cfg.parabolic_detector_shadow_mode
+            if self.base_cfg.parabolic_log_details:
+                tag = "SHADOW" if shadow else "LIVE"
+                self.logger.info(f"[PARABOLIC][{tag}] {symbol}: {reason}")
+            if shadow:
+                return True, ""
+            return False, reason
+        if accel_5m_pct is None or accel_15m_pct is None:
+            if self.base_cfg.parabolic_log_details:
+                self.logger.debug(
+                    f"[PARABOLIC] {symbol}: acceleration data unavailable — guard skipped"
+                )
+            return True, ""
+        dev_threshold = self.base_cfg.parabolic_vwap_dev_min_pct
+        accel_5m_threshold = self.base_cfg.parabolic_accel_5m_min_pct
+        accel_15m_threshold = self.base_cfg.parabolic_accel_15m_min_pct
+        if (
+            vwap_dev_pct >= dev_threshold
+            and accel_5m_pct >= accel_5m_threshold
+            and accel_15m_pct >= accel_15m_threshold
+        ):
+            self._parabolic_cooldowns[symbol] = now + cooldown_sec
+            reason = (
+                f"PARABOLIC_DETECTED "
+                f"(dev={vwap_dev_pct:.1f}%>={dev_threshold}%, "
+                f"accel5={accel_5m_pct:.2f}%>={accel_5m_threshold}%, "
+                f"accel15={accel_15m_pct:.2f}%>={accel_15m_threshold}%)"
+            )
+            shadow = self.base_cfg.parabolic_detector_shadow_mode
+            if self.base_cfg.parabolic_log_details:
+                tag = "SHADOW" if shadow else "LIVE"
+                self.logger.info(
+                    f"[PARABOLIC][{tag}] {symbol}: {reason} → COOLDOWN {cooldown_sec}s"
+                )
+            if shadow:
+                return True, ""
+            return False, reason
+        return True, ""
+
     def allows_entry(
         self,
         symbol: str,
@@ -377,6 +541,7 @@ class SmartEntryFilter:
         bid_price: Optional[float] = None,
         ask_price: Optional[float] = None,
         vwap_slope_15m_pct: Optional[float] = None,  # EPIC v3.4 Story 6
+        vwap_slope_5m_pct: Optional[float] = None,   # CA3: dual-window VWAP guard
         accel_5m_pct: Optional[float] = None,  # EPIC v3.4 Story 6
         accel_15m_pct: Optional[float] = None,  # EPIC v3.4 Story 6
         regime: str = "CHOP",  # EPIC v3.4 Story 6
@@ -392,7 +557,8 @@ class SmartEntryFilter:
             order_size_eur: Order size for depth checks
             bid_price: Optional bid price override
             ask_price: Optional ask price override
-            vwap_slope_15m_pct: VWAP momentum slope (EPIC v3.4)
+            vwap_slope_15m_pct: VWAP momentum slope over 15m (EPIC v3.4)
+            vwap_slope_5m_pct: VWAP momentum slope over 5m (CA3: dual-window guard)
             accel_5m_pct: 5-minute price acceleration (EPIC v3.4)
             accel_15m_pct: 15-minute price acceleration (EPIC v3.4)
             regime: Market regime (BULL/CHOP/BEAR) (EPIC v3.4)
@@ -579,6 +745,41 @@ class SmartEntryFilter:
             return False, f"🧠 {symbol}: NO BUY – 4h trend {
                 ind.trend_4h_pct:+.2f}% > {
                 cfg['max_trend_4h_pct']}% (post-rally risk)", trace
+
+        # 6c) VWAP Slope Guard — flat momentum at high VWAP deviation (EPIC v3.4 + CA3)
+        slope_ok, slope_reason = self._check_vwap_slope_guard(
+            symbol=symbol,
+            vwap_dev_pct=vwap_dev,
+            vwap_slope_15m_pct=vwap_slope_15m_pct,
+            vwap_slope_5m_pct=vwap_slope_5m_pct,
+            regime=regime,
+        )
+        if not slope_ok:
+            trace.finalize(
+                accepted=False,
+                rejected_by="vwap_slope_guard",
+                final_reason="VWAP slope flat at high deviation",
+            )
+            trace.reason_code = ReasonCode.VWAP_DEVIATION_TOO_HIGH.value
+            trace.stage = Stage.SMART_ENTRY.value
+            return False, f"🧠 {symbol}: NO BUY – {slope_reason}", trace
+
+        # 6d) Parabolic Detector — extreme blow-off top + cooldown (EPIC v3.4)
+        parabolic_ok, parabolic_reason = self._check_parabolic_detector(
+            symbol=symbol,
+            vwap_dev_pct=vwap_dev,
+            accel_5m_pct=accel_5m_pct,
+            accel_15m_pct=accel_15m_pct,
+        )
+        if not parabolic_ok:
+            trace.finalize(
+                accepted=False,
+                rejected_by="parabolic_detector",
+                final_reason="parabolic blow-off detected",
+            )
+            trace.reason_code = ReasonCode.ACCEL_BLOWOFF.value
+            trace.stage = Stage.SMART_ENTRY.value
+            return False, f"🧠 {symbol}: NO BUY – {parabolic_reason}", trace
 
         # 7) 24h Trend Sanity Checks
         trend_24h_max_ok = trace_percentage_check(

@@ -87,6 +87,16 @@ class MultiCoinGridConfig(ControllerConfigBase):
         )
     )
 
+    # OKX EU Unified USD Orderbook: pairs trade as BTC-USD but balance is held in USDC.
+    # Set balance_currency: USDC when quote_asset is USD to read the correct wallet balance.
+    balance_currency: Optional[str] = Field(
+        default=None,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Override balance currency (leave empty to use quote_asset): ",
+            prompt_on_new=False,
+        )
+    )
+
     # Whitelisted Trading Pairs (loaded at startup for order book subscriptions)
     # IMPORTANT: Kraken WebSocket limit is ~25-30 subscriptions
     whitelisted_pairs: Optional[List[str]] = Field(
@@ -653,10 +663,39 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    no_progress_max_extension_sec: Optional[int] = Field(
+        default=None,  # None = regime-aware default (regime_progress_sec × 2)
+        client_data=ClientFieldData(
+            prompt=lambda mi: "No-progress max extension (seconds, None=auto 2× base): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    fee_aware_timeout_bypass_sec: int = Field(
+        default=0,  # 0 = auto/disabled depending on executor handling
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Fee-aware timeout bypass after seconds (0=auto): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     close_grace_sec: int = Field(
         default=600,  # ST-05b: 10 min for graceful close (LIMIT MAKER) before aggressive (MARKET)
         client_data=ClientFieldData(
             prompt=lambda mi: "Close grace period (seconds): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Ensure TP >= one grid step so TP never fires below a meaningful profit level.
+    # Must be True for coarse step-size exchanges (INJ on Kraken, QNT, etc.).
+    coerce_tp_to_step: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Coerce take-profit to minimum grid step? (True/False): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True}
@@ -842,6 +881,40 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # US5: Per-connector parameter overrides.
+    # Allows exchange-specific tuning without duplicating the full config.
+    # Supported keys per connector (all optional):
+    #   min_grid_level_spacing_pct (float): minimum spacing between grid levels
+    #   taker_fee_pct (float): override fee rate for fee-aware calculations
+    # Example YAML:
+    #   connector_overrides:
+    #     kraken_spot:
+    #       min_grid_level_spacing_pct: 0.75
+    #     bitget_spot:
+    #       min_grid_level_spacing_pct: 0.50
+    #       taker_fee_pct: 0.10
+    connector_overrides: Dict[str, Dict] = Field(
+        default_factory=dict,
+        json_schema_extra={"is_updatable": True}
+    )
+
+    def resolve_connector_config(self, connector_name: str) -> Dict:
+        """Return the override dict for *connector_name*, or {} if none configured."""
+        return dict(self.connector_overrides.get(connector_name, {}))
+
+    def get_effective_blacklist(self, connector_name: str) -> set:
+        """Return the union of the global blacklist and the per-connector blacklist (US6).
+
+        The global blacklist applies across all exchange instances; the per-connector
+        blacklist (from ``connector_overrides[connector_name].blacklist``) is additive
+        so a coin can be blocked on one exchange without affecting others.
+        """
+        global_bl: set = set(self.blacklist or [])
+        conn_bl: set = set(
+            self.connector_overrides.get(connector_name, {}).get('blacklist', [])
+        )
+        return global_bl | conn_bl
+
     # Hybrid Grid v2.0: Telegram Alerts
     telegram: Optional[dict] = Field(
         default=None,
@@ -908,6 +981,31 @@ class MultiCoinGridConfig(ControllerConfigBase):
 
     # Enhanced close cooldowns (escalating, per-outcome)
     close_cooldowns: dict = Field(
+        default_factory=dict,
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # US13: ATR-fee gate config
+    atr_fee_gate: dict = Field(
+        default_factory=dict,
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # Entry trend filter: block entries with trend_score below threshold
+    # Validated: type-12 (NO_PROGRESS_TIMEOUT) avg trend_score=1.09, type-3 (TAKE_PROFIT) avg=2.20
+    entry_trend_filter: Optional[dict] = Field(
+        default=None,
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # ATR coin selection config (soft pre-filter + ranking signal)
+    atr_coin_selection: dict = Field(
+        default_factory=dict,
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # US16: Re-entry price guard config
+    reentry_price_guard: dict = Field(
         default_factory=dict,
         json_schema_extra={"is_updatable": True}
     )
@@ -1206,6 +1304,21 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # Post-only (LIMIT_MAKER) order placement.
+    # Set to True on exchanges that support post-only orders (Kraken, OKX).
+    # Must be False on Bitget: its ORDER_TYPES dict does not map LIMIT_MAKER
+    # and would raise a KeyError when placing an order.
+    use_post_only_orders: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Use post-only (LIMIT_MAKER) orders for grid? "
+                              "True = maker fees guaranteed (Kraken/OKX). "
+                              "False = plain LIMIT (required for Bitget): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False}
+    )
+
     # PHASE 1: Slippage Protection (Fix #1)
     max_entry_spread_pct: float = Field(
         default=0.5,
@@ -1441,6 +1554,12 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": True},
         description="Maximum warm-up period in minutes after bot start (default 120 = 2 hours)"
+    )
+
+    warmup_max_trend_24h_pct: float = Field(
+        default=10.0,
+        json_schema_extra={"is_updatable": True},
+        description="Reject coins already up more than this percent in 24h during warmup"
     )
 
     # Phase 1.2: Circuit Breaker

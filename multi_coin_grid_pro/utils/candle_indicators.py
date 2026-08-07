@@ -28,7 +28,10 @@ class CandleIndicatorsCalculator:
 
     def calculate_rsi(self, closes: List[Decimal], period: int = 14) -> float:
         """
-        Berekent RSI(14) van close prices.
+        Berekent RSI(14) van close prices met Wilder's Smoothed methode.
+
+        Wilder's RSI gebruikt een exponentieel gewogen gemiddelde voor gains/losses,
+        waardoor extreme waarden (0.0 en 100.0) realistischer zijn dan bij simpele gemiddelden.
 
         Returns:
             RSI waarde 0-100, of 50.0 als insufficient data
@@ -37,27 +40,32 @@ class CandleIndicatorsCalculator:
             return 50.0  # Neutral RSI
 
         # Calculate price changes
-        changes = []
-        for i in range(1, len(closes)):
-            changes.append(float(closes[i] - closes[i - 1]))
+        changes = [float(closes[i] - closes[i - 1]) for i in range(1, len(closes))]
 
         if len(changes) < period:
             return 50.0
 
-        # Separate gains and losses
-        gains = [max(c, 0) for c in changes[-period:]]
-        losses = [abs(min(c, 0)) for c in changes[-period:]]
-
+        # Seed with simple average of first `period` changes
+        gains = [max(c, 0.0) for c in changes[:period]]
+        losses = [abs(min(c, 0.0)) for c in changes[:period]]
         avg_gain = sum(gains) / period
         avg_loss = sum(losses) / period
 
+        # Apply Wilder's smoothing for remaining bars
+        for change in changes[period:]:
+            gain = max(change, 0.0)
+            loss = abs(min(change, 0.0))
+            avg_gain = (avg_gain * (period - 1) + gain) / period
+            avg_loss = (avg_loss * (period - 1) + loss) / period
+
         if avg_loss == 0:
-            return 100.0  # No losses = overbought
+            return 99.0 if avg_gain > 0 else 50.0  # Extreme bull, but not literal 100
 
         rs = avg_gain / avg_loss
-        rsi = 100 - (100 / (1 + rs))
+        rsi = 100.0 - (100.0 / (1.0 + rs))
 
-        return rsi
+        # Clamp to valid range (floating point safety)
+        return max(1.0, min(99.0, rsi))
 
     def calculate_vwap(
         self,

@@ -159,7 +159,7 @@ def analyze_trade(session):
 
 def main():
     # Find all log files for current USD bot session
-    usd_logs = sorted(glob.glob('/home/mo/repos/hummingbot/logs/logs_multi_coin_grid_v2_usd_2026-04-02-22-12-41.log*'))
+    usd_logs = sorted(glob.glob('/home/mo/repos/hummingbot/logs/logs_multi_coin_grid_v2_usd_2026-05-18-23-33-19.log*'))
     eur_logs = sorted(glob.glob('/home/mo/repos/hummingbot/logs/logs_multi_coin_grid_v2_2026-04-02-06-52-05.log*'))
 
     print("=" * 100)

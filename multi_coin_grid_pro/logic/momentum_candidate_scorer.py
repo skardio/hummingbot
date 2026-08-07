@@ -6,11 +6,14 @@ It converts existing trend/indicator inputs into a scored candidate and a
 deterministic rejection reason list.
 """
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Optional
 
 from multi_coin_grid_pro.core.reason_codes import ReasonCode
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SCORER_WEIGHTS = {
     "trend_1h": 0.25,
@@ -105,7 +108,7 @@ class MomentumCandidateScorer:
             if btc_trend_obj is not None else 0.0
         )
 
-        volume_expansion = self._volume_expansion(trend_obj)
+        volume_expansion = self._volume_expansion(trend_obj, symbol=str(symbol))
         relative_strength = 0.0 if btc_trend_obj is None else trend_4h - btc_4h
         spread_pct = self._to_float(spread)
         rsi_value = self._to_float(rsi, default=50.0)
@@ -252,28 +255,73 @@ class MomentumCandidateScorer:
         return 0.0
 
     @staticmethod
-    def _volume_expansion(trend_obj) -> float:
+    def _volume_expansion(trend_obj, symbol: str = "?") -> float:
+        """Derive volume expansion ratio from the trend object.
+
+        Falls back to 1.0 (neutral) when no usable volume data exists. This
+        happens routinely after the bot has been running for more than ~5 hours
+        because ticker-based candle updates carry volume=0. In that situation
+        every fallback is logged at DEBUG level with a ``vol_exp_fallback``
+        marker so the caller can diagnose the data gap.
+        """
+        trading_pair = symbol or getattr(trend_obj, "symbol", "?")
+
         if trend_obj is None:
+            logger.debug(
+                "vol_exp_fallback trading_pair=%s candle_count=0 "
+                "non_zero_volume_count=0 fallback_reason=no_trend_obj "
+                "returned_volume_expansion=1.0",
+                trading_pair,
+            )
             return 1.0
+
         for name in ("volume_expansion", "volume_expansion_ratio", "volume_ratio"):
             if hasattr(trend_obj, name):
                 value = MomentumCandidateScorer._to_float(getattr(trend_obj, name), default=1.0)
                 return max(0.0, value)
 
         candles = getattr(trend_obj, "candles", None) or []
-        if len(candles) < 21:
+        candle_count = len(candles)
+
+        if candle_count < 21:
+            logger.debug(
+                "vol_exp_fallback trading_pair=%s candle_count=%d "
+                "non_zero_volume_count=0 fallback_reason=insufficient_candles "
+                "returned_volume_expansion=1.0",
+                trading_pair, candle_count,
+            )
             return 1.0
 
         # Live ticker-created candles may have volume=0 because ticker data
         # does not carry candle volume. Treat those as unavailable, not as a
         # real volume collapse, and compare the latest non-zero candle against
         # the preceding non-zero baseline.
+        #
+        # NOTE: After the bot has been running for >5 hours, ALL candles in
+        # the [-60:] window are ticker-created and therefore have volume=0.
+        # When this happens non_zero_volumes will be empty and we fall back to
+        # 1.0, making the volume dimension blind.
+        #
+        # TODO(vol-refresh): TrendCalculator should periodically re-fetch the
+        # most recent 5-minute OHLCV candles from the REST API (e.g. every 60
+        # minutes, fetch the last 2 h of candles) so that the candle array
+        # always contains fresh volume data. Until that is implemented, the
+        # volume dimension scores 0 for long-running bots and momentum scoring
+        # relies only on trend/RS/spread/RSI.
         volumes = [
             MomentumCandidateScorer._to_float(getattr(candle, "volume", 0.0))
             for candle in candles[-60:]
         ]
         non_zero_volumes = [volume for volume in volumes if volume > 0]
-        if len(non_zero_volumes) < 2:
+        non_zero_count = len(non_zero_volumes)
+
+        if non_zero_count < 2:
+            logger.debug(
+                "vol_exp_fallback trading_pair=%s candle_count=%d "
+                "non_zero_volume_count=%d fallback_reason=all_ticker_candles_zero_volume "
+                "returned_volume_expansion=1.0",
+                trading_pair, candle_count, non_zero_count,
+            )
             return 1.0
 
         recent_non_zero = non_zero_volumes[-21:]
@@ -281,6 +329,12 @@ class MomentumCandidateScorer:
         baseline_values = recent_non_zero[:-1]
         baseline = sum(baseline_values) / max(1, len(baseline_values))
         if baseline <= 0:
+            logger.debug(
+                "vol_exp_fallback trading_pair=%s candle_count=%d "
+                "non_zero_volume_count=%d fallback_reason=zero_baseline "
+                "returned_volume_expansion=1.0",
+                trading_pair, candle_count, non_zero_count,
+            )
             return 1.0
         return max(0.0, latest / baseline)
 

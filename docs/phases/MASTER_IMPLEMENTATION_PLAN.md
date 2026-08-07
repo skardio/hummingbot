@@ -1,7 +1,7 @@
 # Master Implementation Plan — Multi-Coin Grid Bot
 
-> **Generated:** 2026-03-13 | **Revised:** 2026-03-14 (v5 — T0/T1/T2 complete, headless fixed, config optimized, T3 filter relaxation applied)
-> **Based on:** 4-round professional review (Strategy, Architecture, Risk, Production) + 2 plan reviews
+> **Generated:** 2026-03-13 | **Revised:** 2026-05-31 (v6 — T3.1 Codex audit bugs added, Phase 2 entry quality epic DONE, entry_regime + crash-safe buffer added)
+> **Based on:** 4-round professional review (Strategy, Architecture, Risk, Production) + 2 plan reviews + Codex pipeline audit 2026-05-25
 > **Review files:** `.github/review-bundles/ROUND_{1..4}_*.md`
 > **Target capital:** €25,000+ (current €300 trading budget on $1475 exchange balance — rest is long-term coin investments)
 > **Cross-round verdict:** Paper trading only until T3 proof gate passes
@@ -257,6 +257,67 @@
 
 ---
 
+## TIER 3.1: Codex Audit Bug Fixes (discovered 2026-05-25)
+
+> **Source:** Codex pipeline audit — `CODEX_AUDIT_RESULTS_2026_05_25.md` (read-only, no code changed during audit)
+> **Also includes:** wiring gaps from CHATGPT_BACKLOG_REVIEW.md (2026-04-28) + open items from EPIC_ENTRY_QUALITY_PHASE2.md
+> **Priority:** CA1–CA4 should be fixed before trusting any risk or performance numbers.
+
+| # | Item | Priority | Effort | File / Location |
+|---|------|----------|--------|-----------------|
+| **CA1** | ~~`session_blacklist` timestamp semantics bug — `_add_to_blacklist()` stores **expiry** timestamp but selection-cleanup reads same value as `blacklisted_at` → coins stay blacklisted much longer than intended~~ **✅ DONE (2026-05-31)** — both cleanup paths verified to use `now >= expiry_time` semantics; CA1 verification tests added | HIGH | 1h | `multi_coin_grid_controller.py` L6735-6737 vs L4440-4464 |
+| **CA2** | ~~`max_streak_before_blacklist` takes no action — tracker logs streak count but never blacklists the coin when threshold is reached; loss-streak protection is silent dead code~~ **✅ DONE (2026-05-31)** — `_add_to_blacklist()` called at `streak >= max_streak`, streak reset to 0 after blacklist; CA2 verification tests added | HIGH | 2h | `multi_coin_grid_controller.py` L7259-7268 |
+| **CA3** | ~~**VWAP/parabolic guards not active in SmartEntry v2** — v2 is the live path (gates 0–7 only); VWAP-slope + parabolic guards exist in legacy SmartEntry but legacy is only fallback. Guards appear configured and expected to run but never execute~~ **✅ DONE (2026-05-31)** — Root cause: `vwap_slope_5m_pct` from `MomentumIndicatorService` was computed but never passed to `allows_entry()`, so `vwap_slope_dual_confirmation=True` (configured in all 4 bot YAMLs) was silently ignored. Fix: `allows_entry()` + `_check_vwap_slope_guard()` extended with `vwap_slope_5m_pct`; dual-window logic (require BOTH 5m AND 15m flat) implemented; controller `_check_smart_entry_v2()` now passes `vwap_slope_5m_pct` from momentum_metrics; graceful degradation to single-15m when 5m unavailable; reject reason `VWAP_GUARD_REJECT` (dual) / `VWAP_SLOPE_FLAT_WHILE_DEVIATION_HIGH` (single). 12 new tests in `TestCA3VwapDualWindow`. Parabolic guard already present in v2 — no change needed. | CRITICAL | 4h | `logic/smart_entry.py` + `multi_coin_grid_controller.py` |
+| **CA4** | ~~**Maker-fee config assumption incorrect** — Bitget has no `LIMIT_MAKER` → all orders use `OrderType.LIMIT` (taker fills). Kraken/OKX use `fee_model: best_case` which assumes maker fees → profitability is overstated~~ **✅ DONE (2026-05-31)** — Bitget `fee_aware_filter.fee_model` changed `best_case`→`average` (RT 0.20%→0.30%); ATR gate required ATR now correctly 0.60% (was 0.40%); `FeeAwareFilter.config_warnings()` added to detect `best_case`+no-post-only inconsistency; `test_ca4_fee_model.py` 22 tests. Kraken/OKX remain `best_case` (LIMIT_MAKER guaranteed). | HIGH | 2h | YAML configs + `multi_coin_grid_controller.py` L10850-10869 |
+| **CA5** | ~~GlobalRiskManager per-coin PnL never fed — controller does not call `register_close_trade()` on executor close → per-coin -1R/-2R loss kill switch, `SessionEdgeDetector`, and `TradeLabelStore` don't receive live data~~ **✅ DONE (2026-05-31)** — CA5 block inserted in `_sync_risk_state()` after Phase 1 loss-streak try/except; idempotency via `_realised_executors_tracked`; exit_type mapped from CloseType; CA5 tests added. Note: `SessionEdgeDetector` and `TradeLabelStore` are not directly fed via `register_close_trade()` — left as follow-up | HIGH | 3h | Wire `risk_manager.register_close_trade()` into `_sync_risk_state()` |
+| **CA6** | ~~Grid suitability only post-filters top-N — `get_top_n_coins()` receives no `grid_scorer` argument~~ **✅ DONE (2026-05-31)** — Root cause: controller passed `grid_scorer=None`; internal `use_grid_ranking` logic was dead. Fix: controller now passes `grid_scorer=self.grid_suitability_scorer`; when scorer is active (not `logging_only`), coins ranked by mean-reversion fitness inside `get_top_n_coins()` before trimming to slots. `TestCA6GridScorerPassthrough` — 6 passing tests. | MEDIUM | 3h | `trend_calculator.py` + `multi_coin_grid_controller.py` |
+| **CA7** | ~~ATR ranking uses `abs(trend_value)` in auto mode — a -8% crash trend ranks above a +2% recovery~~ **✅ DONE (2026-05-31)** — Fix: `_atr_rank_key` and simple auto sort now use `max(tv, 0.0)` instead of `abs(tv)` in auto mode; crash coins get `trend_norm=0` (not a boost), still qualify via gate check (`abs >= min_trend_pct`). `TestCA7AtrRanking` — 10 passing tests. | MEDIUM | 1h | `trend_calculator.py` L1808-1814 |
+| **CA8** | ~~`CoinSelector.filter_pairs()` not called~~ **N/A — dead code (2026-05-31)**: controller already has equivalent inline filtering (quote-asset, volume, blacklist, spread) in auto-discovery path (L3368–3517). `CoinSelector` class retained for potential future refactor. `TestCA8CoinSelectorDeadCode` — 6 tests confirm class works independently. | MEDIUM | 2h | `multi_coin_grid_controller.py` L3368-3517 |
+| **CA9** | **`MetaCoinRanker` dead code** — instantiated but `.rank()` / `.get_preferred_coins()` never called in controller | MEDIUM | 1h | Remove or wire into coin selection |
+| **CA10** | **US17: CHOP entry policy evaluation** — after ATR-fee gate data (US13/US14, now live), analyze if additional CHOP filters are needed. No hard block without data | LOW | Analysis | After 1+ full live run post-US13 |
+
+### Proof Gate T3.1
+
+- [x] `session_blacklist` cleanup logic uses correct expiry semantics (verified with `TestCA1BlacklistExpiry` — 4 passing tests)
+- [x] Loss-streak blacklist triggers correctly at `max_streak_before_blacklist` threshold (`TestCA2LossStreakBlacklist` — 5 passing tests)
+- [x] SmartEntry v2 executes VWAP-slope dual-window guard (`vwap_slope_5m_pct` passed; `VWAP_GUARD_REJECT` in log on detection; `TestCA3VwapDualWindow` — 12 passing tests)
+- [x] Fee model in configs reflects actual order type capabilities per exchange (Bitget `average`, Kraken/OKX `best_case` with LIMIT_MAKER; `TestCA4FeeModel` — 22 passing tests)
+- [x] `register_close_trade()` called on all executor closes (`TestCA5RegisterCloseTrade` — 13 passing tests); per-coin PnL non-zero after 24h (live verification pending)
+- [x] `grid_scorer` passed to `get_top_n_coins()`; grid ranking activates when scorer enabled and not `logging_only` (`TestCA6GridScorerPassthrough` — 6 passing tests)
+- [x] ATR ranking in auto mode does not boost negative trends (`max(tv, 0.0)`); crash coins rank last not first (`TestCA7AtrRanking` — 10 passing tests)
+- [x] `CoinSelector.filter_pairs()` confirmed dead code; equivalent inline filtering present in controller L3368–3517; `TestCA8CoinSelectorDeadCode` — 6 passing tests
+
+---
+
+## TIER 3.2: Operational Improvements Done (May 2026)
+
+> **Source:** `EPIC_GRID_BOT_RISK_AND_EDGE_IMPROVEMENTS.md` (US1–US10, all done 2026-05-20/22)
+> **Source:** `EPIC_ENTRY_QUALITY_PHASE2.md` (US11–US16, all done 2026-05-22)
+> **Also done:** `entry_regime` observability in all 4 bots (2026-05-30), `closed_executors_buffer = 0` crash-safe (2026-05-30)
+
+| US | What | Date |
+|----|------|------|
+| US1 | Netto edge gate per-connector (fee_aware_filter + economic_edge_gate per exchange) | 2026-05-20 |
+| US2 | Fee-aware exit max hold time (prevents 68k blocks) | 2026-05-22 |
+| US3 | Hard stop-loss overrules fee-aware exit | 2026-05-22 |
+| US4 | Absolute max hold time (prevents 12h+ open positions) | 2026-05-22 |
+| US5 | Grid spacing calibrated per exchange (Kraken 0.80%, OKX/Bitget 0.60%) | 2026-05-22 |
+| US6 | Performance-based blacklisting per exchange instance | 2026-05-22 |
+| US7 | Blacklist + coin profiles consistent across configs | 2026-05-22 |
+| US8 | BEAR regime behaviour made unambiguous | 2026-05-20 |
+| US9 | Position size temporarily reduced during tuning | 2026-05-20 |
+| US10 | Exit decision logging improved | 2026-05-22 |
+| US11 | `max_streak_before_blacklist: 3 → 2` all configs | 2026-05-22 |
+| US12 | `min_grid_level_spacing_pct` fee-realistic (Kraken 0.80%) | 2026-05-22 |
+| US13 | ATR-fee gate (`atr_fee_gate`) — blocks low-ATR entries | 2026-05-22 |
+| US14 | Decision logging: reject reason codes + hourly summary | 2026-05-22 |
+| US15 | `stop_loss_sec` mapped separately from `early_stop_sec` in cooldown logic | 2026-05-22 |
+| US16 | Re-entry price guard after close | 2026-05-22 |
+| — | `entry_regime` stored in executor `custom_info` at grid creation | 2026-05-30 |
+| — | `closed_executors_buffer = 0` in all 4 bots — crash-safe DB writes | 2026-05-30 |
+
+---
+
 ## TIER 3.5: Strategy Validation (1-2 weeks)
 
 > **Gate:** T3 proof gate must pass first. This tier answers: "Does the strategy have positive EV at all?"
@@ -378,8 +439,10 @@
 | **T2: Operations** | 8 | ~2 days | ✅ DONE (2026-03-14) | Process supervision, backups, stale order cleanup, rotation cooldown |
 | **T2.5: Headless Launch** | 4 bugs | ~4h | ✅ DONE (2026-03-14) | Fix headless mode: ptpython, filename, MQTT, importlib.reload |
 | **T2.6: Config Optimization** | 1 | ~30min | ✅ DONE (2026-03-14) | $300 budget: 2 slots, 3 grids, eliminate capital deadlock |
-| **T3: Fill Rate** | 3 | ~2-4 days | **⬅️ NEXT** — F4 (WS/orderbook) first | Fix data pipeline, grid distribution, RSI filter |
-| **T3.5: Strategy Validation** | 4 | ~1-2 weeks | **After T3** — does strategy have positive EV? | Replay backtest, regime detection, pair selection, param sweep |
+| **T3: Fill Rate** | 3 | ~2-4 days | ✅ DONE (2026-03-14) | SmartEntry filter relaxation, grid distribution, WS data |
+| **T3.1: Codex Audit Bug Fixes** | 10 | ~2-3 days | **⬅️ NEXT** | Fix session_blacklist, streak kill, VWAP v2, fee model, PnL wiring |
+| **T3.2: May 2026 Improvements** | 18 | — | ✅ DONE (2026-05-22/30) | Exit quality, ATR gate, entry logging, entry_regime, crash-safe buffer |
+| **T3.5: Strategy Validation** | 7 | ~1-2 weeks | **After T3.1** — does strategy have positive EV? | Replay backtest, regime detection, pair selection, param sweep |
 | **T4: Risk Architecture** | 6 | ~2 weeks | After T3.5 — includes A6 (risk coordinator) | Unify risk, correlation, HWM drawdown, warmup gate |
 | **T5: Code Quality** | 10 | ~45+ days | Ongoing, long-term (A6 moved to T4) | Decompose God class, fix async, tests |
 | **T5.5: AI Foundation** | 3 | ~2-3 weeks | After T1+T2 complete | Decision/outcome logging + dataset export |
@@ -390,7 +453,7 @@
 | **T9: Correlation Buckets** | 4 | ~2 weeks | After T8+2w | Correlation matrix, bucket allocation, portfolio beta, sector diversification |
 | **T10: Fee Optimization** | 4 | ~2 weeks | After T3+T3.5 | Maker-only fees, ATR-proportional spacing, real-fee backtest, post-only orders |
 
-**Total: 82 items.** T0+T1+T2 = ✅ DONE. T2.5 headless fix = ✅ DONE. T2.6 config optimized for $300. Next: T3 fill rate fix.
+**Total: 92+ items.** T0–T2.6 = ✅ DONE. T3 fill rate = ✅ DONE. T3.2 May 2026 improvements = ✅ DONE. Next: T3.1 Codex audit bug fixes.
 
 ---
 

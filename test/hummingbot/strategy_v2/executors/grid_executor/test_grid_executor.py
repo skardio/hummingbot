@@ -929,6 +929,52 @@ class TestGridExecutor(IsolatedAsyncioWrapperTestCase, LoggerMixinForTest):
         executor.update_grid_levels()
         self.assertEqual(len(executor.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]), 0)
 
+    @patch.object(GridExecutor, "get_price", return_value=Decimal("100"))
+    def test_process_order_failed_event_detects_okx_compliance_restriction(self, _):
+        self.strategy.connectors["okx"] = self.strategy.connectors["binance"]
+        config = GridExecutorConfig(
+            id="test",
+            timestamp=123,
+            side=TradeType.BUY,
+            connector_name="okx",
+            trading_pair="HYPE-USD",
+            start_price=Decimal("100"),
+            end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+                trailing_stop=TrailingStop(
+                    activation_price=Decimal("0.05"),
+                    trailing_delta=Decimal("0.005")
+                )
+            )
+        )
+        executor = self.get_grid_executor_from_config(config)
+
+        event = MarketOrderFailureEvent(
+            timestamp=1234567890,
+            order_id="OID-BUY-1",
+            order_type=OrderType.LIMIT
+        )
+
+        with patch(
+            "builtins.str",
+            return_value=(
+                "OSError: Error submitting order OID-BUY-1: "
+                "sCode=51155 sMsg=You can't trade this pair or borrow this crypto "
+                "due to local compliance restrictions."
+            ),
+        ):
+            executor.process_order_failed_event(None, None, event)
+
+        self.assertTrue(executor._nl_restricted)
+        self.assertEqual(executor._nl_restricted_coin, "HYPE-USD")
+        self.assertEqual(executor._status, RunnableStatus.TERMINATED)
+
     @patch.object(GridExecutor, 'adjust_order_candidates')
     @patch.object(GridExecutor, "get_price")
     async def test_validate_sufficient_balance_spot(self, mock_price, mock_adjust_order_candidates):

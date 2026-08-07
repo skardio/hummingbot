@@ -1,6 +1,8 @@
 import asyncio
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from aiohttp.client_exceptions import ClientConnectionResetError
+
 from hummingbot.connector.exchange.okx import okx_constants as CONSTANTS, okx_web_utils as web_utils
 from hummingbot.core.data_type.common import TradeType
 from hummingbot.core.data_type.order_book_message import OrderBookMessage, OrderBookMessageType
@@ -170,6 +172,11 @@ class OkxAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
             self.logger().info("Subscribed to public order book and trade channels...")
         except asyncio.CancelledError:
+            raise
+        except ClientConnectionResetError:
+            self.logger().warning(
+                "WebSocket connection reset while subscribing to public order book channels — will reconnect."
+            )
             raise
         except Exception:
             self.logger().exception("Unexpected error occurred subscribing to order book trading and delta streams...")

@@ -217,3 +217,54 @@ class TestMomentumCandidateScorer:
         assert candidate.primary_rejection_reason == ReasonCode.MOMENTUM_REGIME_BLOCKED.value
         assert ReasonCode.MOMENTUM_RSI_TOO_HIGH.value in candidate.all_rejection_reasons
         assert ReasonCode.MOMENTUM_SCORE_TOO_LOW.value in candidate.all_rejection_reasons
+
+
+class TestVolumeExpansionFallback:
+    """Unit tests for _volume_expansion() fallback behaviour.
+
+    These tests verify that the method returns the correct value (and does not
+    crash) for the three representative input shapes, and that the ``symbol``
+    parameter reaches the log output via the fallback branches.
+    """
+
+    def test_real_volumes_returns_computed_ratio(self):
+        """20 baseline candles (vol=100) + 1 latest (vol=200) → ratio ≈ 2.0, not fallback."""
+        trend_obj = SimpleNamespace(
+            symbol="TEST-USDT",
+            candles=[candle(100)] * 20 + [candle(200)],
+        )
+        result = MomentumCandidateScorer._volume_expansion(trend_obj, symbol="TEST-USDT")
+        assert result > 1.5, f"Expected computed ratio ~2.0, got {result}"
+        assert result != 1.0, "Should NOT have fallen back to 1.0 with real volume data"
+
+    def test_all_zero_volumes_returns_fallback(self, caplog):
+        """100 ticker-created candles (vol=0) → silent fallback to 1.0."""
+        import logging
+        trend_obj = SimpleNamespace(
+            symbol="TEST-USDT",
+            candles=[candle(0)] * 100,
+        )
+        with caplog.at_level(logging.DEBUG, logger="multi_coin_grid_pro.logic.momentum_candidate_scorer"):
+            result = MomentumCandidateScorer._volume_expansion(trend_obj, symbol="TEST-USDT")
+
+        assert result == 1.0
+        assert any(
+            "vol_exp_fallback" in record.message and "all_ticker_candles_zero_volume" in record.message
+            for record in caplog.records
+        ), "Expected a vol_exp_fallback log with fallback_reason=all_ticker_candles_zero_volume"
+
+    def test_empty_candle_list_returns_fallback(self, caplog):
+        """Empty candle list → fallback to 1.0 (insufficient_candles)."""
+        import logging
+        trend_obj = SimpleNamespace(
+            symbol="TEST-USDT",
+            candles=[],
+        )
+        with caplog.at_level(logging.DEBUG, logger="multi_coin_grid_pro.logic.momentum_candidate_scorer"):
+            result = MomentumCandidateScorer._volume_expansion(trend_obj, symbol="TEST-USDT")
+
+        assert result == 1.0
+        assert any(
+            "vol_exp_fallback" in record.message and "insufficient_candles" in record.message
+            for record in caplog.records
+        ), "Expected a vol_exp_fallback log with fallback_reason=insufficient_candles"

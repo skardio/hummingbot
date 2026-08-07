@@ -543,5 +543,484 @@ class TestSmartEntryFilter(unittest.TestCase):
             )
 
 
+class TestVwapSlopeGuardAndParabolic(unittest.TestCase):
+    """Tests for VWAP slope guard and parabolic detector in SmartEntry v2."""
+
+    # Indicators that pass all gates 0–6b when vwap_max_deviation_pct is large.
+    # price=1.20, vwap=1.00 → dev = +20.0% (above any 15% threshold)
+    _BASE_IND = dict(
+        price=Decimal("1.20"),
+        rsi_14=50.0,
+        vwap=Decimal("1.00"),
+        atr_pct=2.5,
+        wick_ratio=0.50,
+        trend_1h_pct=0.5,
+        trend_4h_pct=0.3,
+        trend_24h_pct=1.0,
+        change_5m_pct=0.2,
+    )
+
+    def _make_cfg(self, **overrides):
+        defaults = dict(
+            rsi_buy_max=60.0,
+            rsi_extreme_low=25.0,
+            rsi_block_min=70.0,
+            vwap_max_deviation_pct=25.0,   # permit 20% dev through gate 2
+            min_wick_ratio=0.25,
+            max_atr_pct_for_grid=6.0,
+            min_atr_pct_for_grid=0.5,
+            max_5m_spike_pct=2.5,
+            max_down_accel_pct=-1.0,
+            max_up_accel_pct=1.5,
+            max_trend_24h_pct=8.0,
+            min_trend_24h_pct=-12.0,
+            slippage_check_enabled=False,
+            depth_check_enabled=False,
+            require_price=False,
+            require_orderbook=False,
+            vwap_slope_guard_enabled=False,
+            parabolic_detector_enabled=False,
+        )
+        defaults.update(overrides)
+        return SmartEntryBaseConfig(**defaults)
+
+    def _make_filter(self, **cfg_overrides):
+        logger = logging.getLogger("test_vwap_parabolic")
+        logger.setLevel(logging.CRITICAL)
+        cfg = self._make_cfg(**cfg_overrides)
+        return SmartEntryFilter(cfg, {}, logger)
+
+    # ── VWAP slope guard ──────────────────────────────────────────────────────
+
+    def test_vwap_slope_guard_blocks_live_when_conditions_met(self):
+        """Live mode: high deviation + flat 15m slope → entry blocked."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, reason, _ = f.allows_entry(
+            "BTC-EUR", ind, vwap_slope_15m_pct=0.02,  # flat slope
+        )
+        self.assertFalse(allowed)
+        self.assertIn("VWAP_SLOPE_FLAT_WHILE_DEVIATION_HIGH", reason)
+
+    def test_vwap_slope_guard_shadow_does_not_block(self):
+        """Shadow mode: same conditions → entry still allowed."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=True,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "BTC-EUR", ind, vwap_slope_15m_pct=0.02,
+        )
+        self.assertTrue(allowed)
+
+    def test_vwap_slope_guard_passes_when_slope_missing(self):
+        """Missing slope data → fail open (entry allowed)."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_deviation_high_pct=15.0,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "BTC-EUR", ind, vwap_slope_15m_pct=None,
+        )
+        self.assertTrue(allowed)
+
+    def test_vwap_slope_guard_passes_when_deviation_low(self):
+        """Price close to VWAP → guard not triggered even if slope is flat."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        # price 2% above vwap — well below 15% threshold
+        ind = CandleIndicators(**{**self._BASE_IND, "vwap": Decimal("1.176")})
+        allowed, _, _ = f.allows_entry(
+            "BTC-EUR", ind, vwap_slope_15m_pct=0.01,
+        )
+        self.assertTrue(allowed)
+
+    def test_vwap_slope_guard_passes_when_slope_healthy(self):
+        """High deviation but healthy slope → entry allowed."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "BTC-EUR", ind, vwap_slope_15m_pct=0.50,  # healthy slope
+        )
+        self.assertTrue(allowed)
+
+    # ── Parabolic detector ────────────────────────────────────────────────────
+
+    def test_parabolic_blocks_live_when_all_conditions_met(self):
+        """Live mode: high dev + high accel_5m + high accel_15m → blocked."""
+        f = self._make_filter(
+            parabolic_detector_enabled=True,
+            parabolic_detector_shadow_mode=False,
+            parabolic_vwap_dev_min_pct=18.0,
+            parabolic_accel_5m_min_pct=2.5,
+            parabolic_accel_15m_min_pct=6.0,
+            parabolic_cooldown_minutes=30,
+        )
+        ind = CandleIndicators(**self._BASE_IND)  # dev=20% > 18%
+        allowed, reason, _ = f.allows_entry(
+            "ETH-EUR", ind, accel_5m_pct=3.0, accel_15m_pct=7.0,
+        )
+        self.assertFalse(allowed)
+        self.assertIn("PARABOLIC_DETECTED", reason)
+
+    def test_parabolic_shadow_does_not_block(self):
+        """Shadow mode: parabolic conditions → entry still allowed."""
+        f = self._make_filter(
+            parabolic_detector_enabled=True,
+            parabolic_detector_shadow_mode=True,
+            parabolic_vwap_dev_min_pct=18.0,
+            parabolic_accel_5m_min_pct=2.5,
+            parabolic_accel_15m_min_pct=6.0,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "ETH-EUR", ind, accel_5m_pct=3.0, accel_15m_pct=7.0,
+        )
+        self.assertTrue(allowed)
+
+    def test_parabolic_cooldown_blocks_subsequent_entry(self):
+        """After detection the cooldown blocks the next attempt."""
+        f = self._make_filter(
+            parabolic_detector_enabled=True,
+            parabolic_detector_shadow_mode=False,
+            parabolic_vwap_dev_min_pct=18.0,
+            parabolic_accel_5m_min_pct=2.5,
+            parabolic_accel_15m_min_pct=6.0,
+            parabolic_cooldown_minutes=30,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        # First call: triggers detection + sets cooldown
+        f.allows_entry("SOL-EUR", ind, accel_5m_pct=3.0, accel_15m_pct=7.0)
+        # Second call (accel now mild): must still be blocked by cooldown
+        allowed, reason, _ = f.allows_entry(
+            "SOL-EUR", ind, accel_5m_pct=0.1, accel_15m_pct=0.1,
+        )
+        self.assertFalse(allowed)
+        self.assertIn("PARABOLIC_COOLDOWN_ACTIVE", reason)
+
+    def test_parabolic_passes_when_accel_missing(self):
+        """Missing acceleration data → fail open (entry allowed)."""
+        f = self._make_filter(
+            parabolic_detector_enabled=True,
+            parabolic_detector_shadow_mode=False,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "ADA-EUR", ind, accel_5m_pct=None, accel_15m_pct=None,
+        )
+        self.assertTrue(allowed)
+
+    def test_parabolic_passes_when_only_partial_conditions_met(self):
+        """Only two of three conditions → not parabolic, entry allowed."""
+        f = self._make_filter(
+            parabolic_detector_enabled=True,
+            parabolic_detector_shadow_mode=False,
+            parabolic_vwap_dev_min_pct=18.0,
+            parabolic_accel_5m_min_pct=2.5,
+            parabolic_accel_15m_min_pct=6.0,
+        )
+        ind = CandleIndicators(**self._BASE_IND)  # dev=20% ✓
+        # accel_5m ✓ but accel_15m < 6.0 ✗
+        allowed, _, _ = f.allows_entry(
+            "BTC-EUR", ind, accel_5m_pct=3.0, accel_15m_pct=4.0,
+        )
+        self.assertTrue(allowed)
+
+
+class TestCA3VwapDualWindow(unittest.TestCase):
+    """CA3: Dual-window VWAP slope guard tests for SmartEntry v2 live path."""
+
+    # Indicators: price=1.20, vwap=1.00 → dev=+20% (above any 15% threshold).
+    _BASE_IND = dict(
+        price=Decimal("1.20"),
+        rsi_14=50.0,
+        vwap=Decimal("1.00"),
+        atr_pct=2.5,
+        wick_ratio=0.50,
+        trend_1h_pct=0.5,
+        trend_4h_pct=0.3,
+        trend_24h_pct=1.0,
+        change_5m_pct=0.2,
+    )
+
+    def _make_filter(self, **cfg_overrides):
+        defaults = dict(
+            rsi_buy_max=60.0,
+            rsi_extreme_low=25.0,
+            rsi_block_min=70.0,
+            vwap_max_deviation_pct=25.0,
+            min_wick_ratio=0.25,
+            max_atr_pct_for_grid=6.0,
+            min_atr_pct_for_grid=0.5,
+            max_5m_spike_pct=2.5,
+            max_down_accel_pct=-1.0,
+            max_up_accel_pct=1.5,
+            max_trend_24h_pct=8.0,
+            min_trend_24h_pct=-12.0,
+            slippage_check_enabled=False,
+            depth_check_enabled=False,
+            require_price=False,
+            require_orderbook=False,
+            vwap_slope_guard_enabled=False,
+            parabolic_detector_enabled=False,
+        )
+        defaults.update(cfg_overrides)
+        logger = logging.getLogger("test_ca3")
+        logger.setLevel(logging.CRITICAL)
+        cfg = SmartEntryBaseConfig(**defaults)
+        return SmartEntryFilter(cfg, {}, logger)
+
+    # ── Dual-window: both slopes flat → reject ────────────────────────────────
+
+    def test_dual_window_both_flat_live_blocks(self):
+        """Both 5m and 15m slopes flat at high deviation → entry blocked (live)."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_dual_confirmation=True,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_5m=0.05,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, reason, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=0.01,   # flat (< 0.05)
+            vwap_slope_15m_pct=0.02,  # flat (< 0.10)
+        )
+        self.assertFalse(allowed)
+        self.assertIn("VWAP_GUARD_REJECT", reason)
+        self.assertIn("dual-window", reason)
+
+    def test_dual_window_shadow_does_not_block(self):
+        """Shadow mode: both slopes flat → entry still allowed."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=True,
+            vwap_slope_dual_confirmation=True,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_5m=0.05,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=0.01,
+            vwap_slope_15m_pct=0.02,
+        )
+        self.assertTrue(allowed)
+
+    # ── Dual-window: only one slope flat → allow ──────────────────────────────
+
+    def test_dual_window_only_15m_flat_allows(self):
+        """15m flat but 5m healthy → dual confirmation NOT met → allowed."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_dual_confirmation=True,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_5m=0.05,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=0.50,   # healthy 5m slope
+            vwap_slope_15m_pct=0.02,  # flat 15m slope
+        )
+        self.assertTrue(allowed)
+
+    def test_dual_window_only_5m_flat_allows(self):
+        """5m flat but 15m healthy → dual confirmation NOT met → allowed."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_dual_confirmation=True,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_5m=0.05,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=0.02,   # flat 5m slope
+            vwap_slope_15m_pct=0.50,  # healthy 15m slope
+        )
+        self.assertTrue(allowed)
+
+    # ── Dual-window: missing 5m data → degrade to single 15m ─────────────────
+
+    def test_dual_window_missing_5m_degrades_to_single_15m(self):
+        """Dual mode + 5m data missing → degrades to single 15m check."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_dual_confirmation=True,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        # 5m not available → degrades to single-window on 15m
+        allowed, reason, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=None,
+            vwap_slope_15m_pct=0.02,  # flat
+        )
+        self.assertFalse(allowed)
+        self.assertIn("VWAP_SLOPE_FLAT_WHILE_DEVIATION_HIGH", reason)
+
+    def test_dual_window_both_missing_fails_open(self):
+        """Both slopes missing in dual mode → guard skipped (fail open)."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_dual_confirmation=True,
+            vwap_slope_deviation_high_pct=15.0,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=None,
+            vwap_slope_15m_pct=None,
+        )
+        self.assertTrue(allowed)
+
+    # ── Guard disabled → no reject ────────────────────────────────────────────
+
+    def test_guard_disabled_never_rejects(self):
+        """VWAP guard disabled → no rejection even with extreme conditions."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=False,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=0.0,
+            vwap_slope_15m_pct=0.0,
+        )
+        self.assertTrue(allowed)
+
+    # ── Single-window mode (dual_confirmation=False) ──────────────────────────
+
+    def test_single_window_mode_uses_15m_only(self):
+        """Single window mode: 15m flat → blocked regardless of 5m health."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_dual_confirmation=False,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        # 5m is healthy but 15m flat → single-window rejects on 15m alone
+        allowed, reason, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=0.50,   # healthy — ignored in single-window mode
+            vwap_slope_15m_pct=0.02,  # flat
+        )
+        self.assertFalse(allowed)
+        self.assertIn("VWAP_SLOPE_FLAT_WHILE_DEVIATION_HIGH", reason)
+
+    # ── Reject reason visible to why-no-trade system ──────────────────────────
+
+    def test_reject_reason_contains_guard_name(self):
+        """VWAP_GUARD_REJECT appears in reject reason for why-no-trade logging."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_dual_confirmation=True,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_5m=0.05,
+            vwap_slope_min_pct_15m=0.10,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, reason, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=0.01,
+            vwap_slope_15m_pct=0.01,
+        )
+        self.assertFalse(allowed)
+        # The reason returned to the controller ends up in why-no-trade logs
+        self.assertIn("VWAP_GUARD_REJECT", reason)
+
+    # ── Parabolic guard disabled → no reject ─────────────────────────────────
+
+    def test_parabolic_guard_disabled_no_reject(self):
+        """Parabolic guard disabled → no rejection even with extreme acceleration."""
+        f = self._make_filter(
+            parabolic_detector_enabled=False,
+        )
+        ind = CandleIndicators(**self._BASE_IND)
+        allowed, _, _ = f.allows_entry(
+            "ETH-EUR", ind, accel_5m_pct=10.0, accel_15m_pct=20.0,
+        )
+        self.assertTrue(allowed)
+
+    # ── Existing gates 0-7 unaffected ─────────────────────────────────────────
+
+    def test_existing_gates_still_reject_independently(self):
+        """RSI overbought still rejects even when VWAP guard would pass."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_dual_confirmation=True,
+        )
+        # RSI overbought → gate 1 should reject before VWAP guard is reached
+        ind = CandleIndicators(**{**self._BASE_IND, "rsi_14": 75.0})
+        allowed, reason, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=0.50,
+            vwap_slope_15m_pct=0.50,
+        )
+        self.assertFalse(allowed)
+        self.assertIn("RSI", reason)
+
+    def test_clean_candidate_with_both_guards_enabled_allowed(self):
+        """Clean candidate passes both VWAP and parabolic guards."""
+        f = self._make_filter(
+            vwap_slope_guard_enabled=True,
+            vwap_slope_guard_shadow_mode=False,
+            vwap_slope_dual_confirmation=True,
+            vwap_slope_deviation_high_pct=15.0,
+            vwap_slope_min_pct_5m=0.05,
+            vwap_slope_min_pct_15m=0.10,
+            parabolic_detector_enabled=True,
+            parabolic_detector_shadow_mode=False,
+            parabolic_vwap_dev_min_pct=18.0,
+            parabolic_accel_5m_min_pct=2.5,
+            parabolic_accel_15m_min_pct=6.0,
+        )
+        # price close to VWAP (dev ~2%) → VWAP guard never triggers at dev < 15%
+        ind = CandleIndicators(**{**self._BASE_IND, "vwap": Decimal("1.18")})
+        allowed, reason, _ = f.allows_entry(
+            "BTC-EUR", ind,
+            vwap_slope_5m_pct=0.20,
+            vwap_slope_15m_pct=0.15,
+            accel_5m_pct=0.5,
+            accel_15m_pct=1.0,
+        )
+        self.assertTrue(allowed)
+        self.assertIn("BUY ALLOWED", reason)
+
+
 if __name__ == "__main__":
     unittest.main()

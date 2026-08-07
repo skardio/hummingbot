@@ -8,12 +8,13 @@ This document provides AI assistants with all paths, locations, and commands nee
 
 ## Bot Overview
 
-| Bot | Connector | Quote | Config | Database | Status |
-|-----|-----------|-------|--------|----------|--------|
-| Kraken EUR | `kraken` | EUR | `multi_coin_grid_pro/config/spot_grid_kraken_eur.yaml` | `data/multi_coin_grid_v2.sqlite` | Active |
-| Kraken USD | `kraken` | USD | `multi_coin_grid_pro/config/spot_grid_kraken_usd.yaml` | `data/multi_coin_grid_v2_usd.sqlite` | Active |
-| Bitget USDT | `bitget` | USDT | `multi_coin_grid_pro/spot_bitget/config/spot_grid_bitget.yaml` | `data/spot_grid_bitget.sqlite` | Active |
-| Bitget Futures | `bitget` | USDT | `multi_coin_grid_pro/spot_bitget/config/futures_grid_bitget.yaml` | `data/futures_grid_bitget.sqlite` | Active |
+| Bot | Connector | Quote | Script | Config | Database |
+|-----|-----------|-------|--------|--------|----------|
+| Kraken EUR | `kraken` | EUR | `scripts/multi_coin_grid_v2.py` | `multi_coin_grid_pro/config/spot_grid_kraken_eur.yaml` | `data/multi_coin_grid_v2.sqlite` |
+| Kraken USD | `kraken` | USD | `scripts/multi_coin_grid_v2_usd.py` | `multi_coin_grid_pro/config/spot_grid_kraken_usd.yaml` | `data/multi_coin_grid_v2_usd.sqlite` |
+| Bitget Spot | `bitget` | USDT | `scripts/spot_grid_bitget.py` | `multi_coin_grid_pro/spot_bitget/config/spot_grid_bitget.yaml` | `data/spot_grid_bitget.sqlite` |
+| OKX Spot | `okx` | USD | `scripts/spot_grid_okx.py` | `multi_coin_grid_pro/spot_okx/config/spot_grid_okx.yaml` | `data/spot_grid_okx.sqlite` |
+| Bitget Futures | `bitget` | USDT | — | `multi_coin_grid_pro/spot_bitget/config/futures_grid_bitget.yaml` | `data/futures_grid_bitget.sqlite` |
 
 ---
 
@@ -86,12 +87,13 @@ grep "gate_passed" logs/events/events_*.jsonl | tail -20
 
 ### Main Trading Databases (SQLite)
 
-| Bot | Database Path |
-|-----|---------------|
-| Kraken EUR | `data/multi_coin_grid_v2.sqlite` |
-| Kraken USD | `data/multi_coin_grid_v2_usd.sqlite` |
-| Bitget Spot | `data/spot_grid_bitget.sqlite` |
-| Bitget Futures | `data/futures_grid_bitget.sqlite` |
+| Bot | Database Path | controller_id |
+|-----|---------------|---------------|
+| Kraken EUR | `data/multi_coin_grid_v2.sqlite` | `multi_coin_grid` |
+| Kraken USD | `data/multi_coin_grid_v2_usd.sqlite` | `multi_coin_grid_usd` |
+| Bitget Spot | `data/spot_grid_bitget.sqlite` | `spot_grid_bitget` |
+| OKX Spot | `data/spot_grid_okx.sqlite` | `spot_grid_okx` |
+| Bitget Futures | `data/futures_grid_bitget.sqlite` | `futures_grid_bitget` |
 
 ### Database Schema (Important Tables)
 
@@ -116,13 +118,45 @@ SELECT datetime(creation_timestamp/1000, 'unixepoch', 'localtime') as time,
 FROM "Order" WHERE symbol LIKE '%BTC%' ORDER BY creation_timestamp DESC LIMIT 20;
 ```
 
-**Executors** - Grid executor state (note: may lag behind actual trades):
+**Executors** - Grid executor state.
+
+> **Note**: `closed_executors_buffer = 0` (since May 2026) — executors are written to DB immediately on close, no lag.
+
 ```sql
-SELECT id, datetime(timestamp, 'unixepoch', 'localtime') as start_time,
-       status, is_active, net_pnl_quote, filled_amount_quote,
-       json_extract(config, '$.trading_pair') as pair
-FROM Executors ORDER BY timestamp DESC LIMIT 10;
+SELECT id,
+       datetime(timestamp, 'unixepoch', 'localtime') as start_time,
+       datetime(close_timestamp, 'unixepoch', 'localtime') as end_time,
+       close_type,
+       ROUND(net_pnl_quote, 4) as pnl,
+       json_extract(config, '$.trading_pair') as pair,
+       json_extract(custom_info, '$.entry_regime') as entry_regime,
+       json_extract(custom_info, '$.realized_buy_size_quote') as bought,
+       json_extract(custom_info, '$.realized_sell_size_quote') as sold,
+       json_extract(custom_info, '$.held_position_value') as held
+FROM Executors ORDER BY close_timestamp DESC LIMIT 10;
 ```
+
+**close_type enum:**
+| Value | Name | Meaning |
+|-------|------|---------|
+| 1 | TIME_LIMIT | Max hold time reached |
+| 2 | STOP_LOSS | Stop loss triggered |
+| 3 | TAKE_PROFIT | Take profit hit (normal win) |
+| 4 | TRAILING_STOP | Trailing stop triggered |
+| 5 | EARLY_STOP | Controller requested early close (regime flip, etc.) |
+| 8 | FAILED | Bot restarted mid-trade — coins may be orphaned in wallet |
+| 11 | CLOSE_ORDER_FAILED | Close order placement failed |
+| 12 | NO_PROGRESS_TIMEOUT | Stuck after buy, no sell progress |
+| 13 | HARD_CAP_TIME_LIMIT | Absolute max hold time exceeded |
+
+**custom_info JSON fields (saved at close):**
+- `entry_regime` — market regime at entry: `BULL`, `CHOP`, or `BEAR`
+- `entry_trend_pct` — trend momentum % at entry
+- `entry_grid_score` — composite score dict at entry
+- `realized_buy_size_quote` — total bought (quote)
+- `realized_sell_size_quote` — total sold (quote)
+- `held_position_value` — value still held at close (> 0 = potential orphan)
+- `early_stop_reason` — text reason for EARLY_STOP closes
 
 ### Cooldown Databases
 
@@ -215,6 +249,36 @@ sqlite3 data/multi_coin_grid_v2_usd.sqlite \
 ---
 
 ## Common Issues & Debugging
+
+### Type-8 (FAILED) Losses — Zombie Close + Orphan Pattern
+
+**Symptom:** `net_pnl_quote = -(full buy amount)` in DB, coins still in exchange wallet.
+
+**How it happens:**
+1. Bot buys coins (e.g. 19 UNI for $77)
+2. Close order placed as LIMIT_MAKER — price moves, order never fills ("zombie_close")
+3. `NO_PROGRESS_TIMEOUT` tries to force-close but `FEE_AWARE_EXIT_BLOCKED` prevents it
+4. Bot restarts → executor reconciled as FAILED, `held_position_value=0`
+5. DB records `net_pnl = -(buy_size)` — coins remain in wallet as orphans
+
+**Check in logs:**
+```bash
+grep -E "zombie_close|FAILED.*orphan|auto_sell|held_position" logs/logs_*.log | tail -20
+```
+
+**Check in DB:**
+```sql
+SELECT json_extract(config, '$.trading_pair') as pair,
+       net_pnl_quote,
+       json_extract(custom_info, '$.held_position_value') as held,
+       datetime(close_timestamp, 'unixepoch') as closed
+FROM Executors WHERE close_type = 8
+ORDER BY close_timestamp DESC LIMIT 20;
+```
+
+**Prevention:** `auto_sell_orphaned_positions: true` in YAML config — on restart, orphaned coins are auto-sold.
+
+---
 
 ### "Bot bought but didn't sell" (Stuck Position)
 

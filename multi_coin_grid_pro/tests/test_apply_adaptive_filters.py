@@ -49,7 +49,7 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
     def test_apply_bull_filters(self):
         """Test applying BULL regime filters"""
         bull_filters = {
-            'rsi_buy_min': 20.0,
+            'rsi_extreme_min': 20.0,
             'rsi_buy_max': 85.0,
             'vwap_max_deviation_pct': 7.0,
             'max_up_accel_pct': 3.0,
@@ -76,7 +76,7 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
         """Test applying CHOP regime filters"""
         chop_filters = {
             'rsi_buy_max': 78.0,
-            'rsi_buy_min': 25.0,
+            'rsi_extreme_min': 25.0,
             'vwap_max_deviation_pct': 4.5,
             'max_up_accel_pct': 1.8,
             'max_down_accel_pct': -2.5,
@@ -94,7 +94,7 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
         """Test applying BEAR regime filters"""
         bear_filters = {
             'rsi_buy_max': 70.0,
-            'rsi_buy_min': 20.0,
+            'rsi_extreme_min': 20.0,
             'vwap_max_deviation_pct': 3.5,
             'max_up_accel_pct': 1.5,
             'max_down_accel_pct': -2.0,
@@ -153,10 +153,10 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
         self.assertEqual(self.controller._regime_grid_spacing_mult, 1.5)
         self.assertEqual(self.controller._regime_entry_confidence_min, 0.70)
 
-    def test_key_mapping_rsi_buy_min(self):
-        """Test that rsi_buy_min correctly maps to rsi_extreme_low"""
+    def test_key_mapping_rsi_extreme_min(self):
+        """Test that rsi_extreme_min correctly maps to rsi_extreme_low"""
         filters = {
-            'rsi_buy_min': 15.0,
+            'rsi_extreme_min': 15.0,
         }
 
         MultiCoinGridController._apply_adaptive_filters(self.controller, filters)
@@ -198,7 +198,7 @@ class TestApplyAdaptiveFilters(unittest.TestCase):
             'rsi_buy_max': 75.0,    # wants 75 — NOT clamped (BULL regime can raise RSI max)
             'atr_min_pct': 0.05,    # wants 0.05 — NOT clamped (regime can lower ATR min)
             'max_up_accel_pct': 8.0,  # wants 8, YAML says max 5
-            'rsi_buy_min': 10.0,    # wants 10, YAML extreme_low says 18
+            'rsi_extreme_min': 10.0,  # wants 10, YAML extreme_low says 18
             'max_down_accel_pct': -3.0,  # wants -3 (looser), YAML says -6
         }
 

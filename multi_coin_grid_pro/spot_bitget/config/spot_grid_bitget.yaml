@@ -158,7 +158,7 @@ adaptive_filters:
     grid_spacing_mult: 1.5
     max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid even in BEAR)
     entry_confidence_min: 0.80      # T3-F3: unchanged (was already 0.80)
-    bear_allow_meanrev: true        # 🔧 FIX: false→true (allow counter-trend trades)
+    bear_allow_meanrev: false       # 🔧 2026-05-20: true→false (bear_auto_light_enabled=true is de actieve BEAR-gate; score-gebaseerd ipv binaire override)
 
 # ==============================================================================
 # GRID SUITABILITY SCORER (Per-Coin Mean-Reversion Fitness)
@@ -234,6 +234,31 @@ blacklist:
   - RAVE-USDT            # 123k volume, 0.43% spread, lost money on 9 buy-fills
   - PAXG-USDT            # low intraday edge, fee bleed on micro-grid
   - ALGO-USDT            # low volatility, poor grid performance
+  # 2026-05-30 Gevalideerde analyse: structurele verliezers (0% winrate of dominante type-12 verliezen)
+  - HYPE-USDT            # 11 type-12 trades, -€5.52 type-12 PnL, -€6.14 all-time; grootste verliezer
+  - ETH-USDT             # 0% winrate over 23 trades, 9 type-12 in mei, -€3.17 all-time
+  - BNB-USDT             # 0% winrate, enkel -€5.11 catastrofe (FAILED type 8), -€5.30 all-time
+  - BTC-USDT             # 0% winrate, type-12 gemiddeld 403 min (langste!), -€1.58 all-time
+  - PEPE-USDT            # 0% winrate in mei, 5 type-12 trades, geen winstgevende trades ooit
+  - ZEC-USDT             # 0% winrate, alle trades verliesgevend
+  - GRASS-USDT           # 0% winrate, -€1.50 all-time
+  # 2026-05-30 TIJDELIJK GEPAUZEERD — slechte mei-run; herbeoordelen na type-12 fix (~2 weken)
+  # Verwijder '#' om te heractiveren zodra type-12 frequentie verbeterd is:
+  - SOL-USDT            # 19 type-12 trades, maar bruto fees zijn 2× de prijsverliezen; wacht op evaluatie
+  - XRP-USDT            # 11 type-12, -€0.66 mei; pauzeer tot entry filter verbeterd
+  - LINK-USDT           # 6 type-12, -€0.85 mei, 18.2% winrate; pauzeer
+  - ADA-USDT            # 0% winrate mei, 5 type-12; pauzeer
+  - TAO-USDT            # 4 type-12, -€0.98 all-time; te weinig data, observeer 2-3 weken
+  - CRV-USDT            # enige STOP_LOSS trade -€2.96; analyseer stop_loss setting nader
+  # 2026-06-03 Analyse huidige run + all-time: 0% winrate of structurele verliezers
+  - H-USDT              # 0 TP, 0 NP, -$1.72 in 1 trade (grote daling, SL hit); onbekende coin
+  - FARTCOIN-USDT       # 1 TP, 2 NO_PROG, -$1.83 all-time; meme coin, te trending
+  - INJ-USDT            # 0 TP, 5 NO_PROG, -$1.23 huidige run; 3× NO_PROG ook na coerce_tp_to_step fix
+  - RIVER-USDT          # 0 TP, 1 NO_PROG, -$1.03 all-time; 0% winrate
+  - TRX-USDT            # 0 TP, 12 NO_PROG, -$0.60 all-time; 0% winrate, pure trend
+  - MON-USDT            # 0 TP, 3 NO_PROG, -$0.53 all-time; 0% winrate
+  - TRUMP-USDT           # 2026-07-11 30-dagen analyse: -1.32 USDT netto, 50% winrate, grote individuele verliezen (-1.48); leave-one-out bijna break-even zonder deze pair
+  - UNI-USDT             # 2026-07-11 30-dagen analyse: -1.37 USDT netto, 38% winrate, 5/8 trades NO_PROGRESS_TIMEOUT; leave-one-out bijna break-even zonder deze pair
 
 # ==============================================================================
 # DYNAMIC COIN DISCOVERY - Now works for Bitget!
@@ -305,14 +330,19 @@ market_regime:
 # ==============================================================================
 
 time_based_rules:
-  enabled: false
+  enabled: true   # 🔧 2026-05-30: false→true (entry-uren blokkeren; gevalideerd op 4.5 maanden data)
 
-  # Low liquidity hours (UTC)
-  low_liquidity_hours: [0, 1, 2]
+  # Low liquidity hours (UTC). Conversie: CEST=UTC+2, CET=UTC+1
+  # Gevalideerde slechte uren (4.5 mnd analyse):
+  #   UTC 17 = 19:00 lokaal ← SLECHTSTE (-€5.38 historisch)
+  #   UTC 18 = 20:00 lokaal
+  #   UTC 19 = 21:00 lokaal
+  #   UTC 21 = 23:00 lokaal
+  low_liquidity_hours: [17, 18, 19, 21]
   low_liquidity_action: "monitor_only"
 
-  # High liquidity window (UTC)
-  high_liquidity_hours: [13, 14, 15, 16, 17, 18]
+  # High liquidity window (UTC) — bonus_pct is currently unused by controller
+  high_liquidity_hours: [13, 14, 15, 16]  # 15:00-18:00 lokaal (17,18 UTC → low_liq wins)
   high_liquidity_bonus_pct: 10.0
 
   # Size multiplier cap
@@ -320,8 +350,7 @@ time_based_rules:
 
   # Weekend behavior
   weekend_trading_enabled: true
-  weekend_risk_multiplier: 0.5
-
+  weekend_risk_multiplier: 1.0
   # Conflict resolution
   low_liquidity_overrides_weekend: true
 
@@ -447,9 +476,9 @@ regime_coin_selection:
 
 fee_aware_filter:
   enabled: true
-  taker_fee_pct: 0.20            # Bitget taker fee (lower than Kraken)
+  taker_fee_pct: 0.20            # Bitget taker fee (conservative; covers potential taker fills)
   maker_fee_pct: 0.10            # Bitget maker fee
-  fee_model: best_case           # 🔧 FIX 2026-05-02b: average→best_case (grid orders = limit/maker; maker+maker=0.20% RT)
+  fee_model: average             # CA4 FIX 2026-05-31: best_case→average — Bitget lacks LIMIT_MAKER so maker fills are not guaranteed; taker+maker=0.30% RT
   min_net_profit_pct: 0.2        # Min expected profit after fees
   # V2-04: Expected-Fill Hourly Profit Model
   hourly_profit_check_enabled: false  # false = shadow mode (logs only), true = blocks entry
@@ -486,9 +515,53 @@ economic_edge_gate:
 close_cooldowns:
   failed_sec: 21600              # 6h cooldown after FAILED
   early_stop_sec: 10800          # 3h cooldown after EARLY_STOP
+  stop_loss_sec: 21600           # 🔧 US15 2026-05-22: 6h cooldown after STOP_LOSS
   no_progress_sec: 3600          # 1h cooldown after timeout
   loss_streak_multiplier: 1.5    # Escalate cooldown per consecutive loss
-  max_streak_before_blacklist: 3  # Long blacklist after N losses
+  max_streak_before_blacklist: 2  # 🔧 US11 2026-05-22: 3→2 (2 opeenvolgende verliezen = voldoende bewijs)
+
+# ==============================================================================
+# US13: ATR-FEE GATE
+# Blocks entry when ATR is too low to cover roundtrip fees.
+# Bitget taker=0.20% maker=0.10% → average RT fee=0.30% → required ATR=0.60% (2.0×)
+# ==============================================================================
+atr_fee_gate:
+  enabled: true
+  min_atr_fee_multiplier: 2.0   # ATR must be >= 2× roundtrip fee
+
+# ==============================================================================
+# ENTRY TREND FILTER
+# Blokkeert entries met een te lage trend_score.
+# Gevalideerd op 4.5 maanden data (Jan-Mei 2026):
+#   - type-3  (TAKE_PROFIT)         gemiddeld trend_score = 2.20
+#   - type-12 (NO_PROGRESS_TIMEOUT) gemiddeld trend_score = 1.09  ← hoofdprobleem
+# trend_score = 0.2×(60m%) + 0.4×(240m%) + 0.4×(1440m%)
+# min_entry_trend_score: 1.5 snijdt het slechtste kwartiel van type-12 trades af.
+# ==============================================================================
+entry_trend_filter:
+  enabled: true
+  min_entry_trend_score: 1.5    # 🔧 2026-05-30: type-12 avg=1.09 vs type-3 avg=2.20
+
+# ==============================================================================
+# ATR COIN SELECTION
+# prefilter_ratio=0.75 → soft threshold = 0.60% × 0.75 = 0.45%
+# ==============================================================================
+atr_coin_selection:
+  enabled: true
+  prefilter_ratio: 0.50         # soft threshold = required_atr × ratio (0.60% × 0.50 = 0.30%)
+  use_as_ranking_signal: true
+
+# ==============================================================================
+# US16: RE-ENTRY PRICE GUARD
+# Blocks re-entry when current price has dropped significantly since last exit.
+# ==============================================================================
+reentry_price_guard:
+  enabled: true
+  max_drop_below_last_exit_pct: 0.50  # Block if price dropped > 0.50% vs last exit mid-price
+  apply_after_close_types:
+    - TAKE_PROFIT
+    - STOP_LOSS
+    - EARLY_STOP
 
 # ==============================================================================
 # REGIME-BASED TIMEOUTS
@@ -1344,7 +1417,7 @@ grid_range_pct_down: 2.0          # 🚀 0.8→2.0% (wider for pullbacks)
 grid_range_pct_up: 5.0            # 🚀 1.2→5.0% (wider for uptrends)
 
 num_grids: 7                      # 🔧 FIX: 10→7 (order math: 6×7×2=84)
-min_grid_level_spacing_pct: 0.6   # Min spacing/level: 3× Bitget RT fee (0.20%)
+min_grid_level_spacing_pct: 0.75  # 🔧 2026-05-30: 0.6→0.75 (2.5× Bitget RT fee 0.30% average; was 0.60/0.20=3×; meer marge voor fees + slippage)
 
 use_dynamic_grid_sizer: true
 
@@ -1462,9 +1535,9 @@ trailing_stop_delta_pct: 0.010
 
 # Dynamic TP: scale take-profit with ATR (volatile coins get wider TP, quiet coins get tighter)
 dynamic_tp_enabled: true
-dynamic_tp_atr_multiplier: 0.35     # TP = ATR% × multiplier (e.g., 4% ATR × 0.35 = 1.4%)
-dynamic_tp_min_pct: 0.015           # 🔧 TUNED 2026-04-03: 0.01→0.015 (floor 1.5%, net 1.3% na 0.2% RT fees)
-dynamic_tp_max_pct: 0.03            # 🔧 TUNED 2026-04-02: 0.02→0.03 (cap 3.0%, capture bigger moves)
+dynamic_tp_atr_multiplier: 0.60     # 🔧 2026-05-31: 0.35→0.60 (0.35 gaf altijd floor; bij ATR 4% nu 2.4%, bij 6% = 3.6%)
+dynamic_tp_min_pct: 0.020           # 🔧 2026-05-31: 0.015→0.020 (Bitget RT fees 0.20% → 2% floor geeft 1.8% netto)
+dynamic_tp_max_pct: 0.04            # 🔧 2026-05-31: 0.03→0.04 (ruimere cap voor volatiele coins)
 
 # Context-Aware Time Exits (stall + no fills check)
 time_based_stop_minutes: 360      # 6 hours (grids need time!)
@@ -1512,6 +1585,7 @@ telegram:
 
 max_open_orders: 100              # 🔧 FIX: 30→100 (Bitget allows 200/symbol)
 order_frequency: 3
+use_post_only_orders: false       # Bitget ORDER_TYPES dict lacks LIMIT_MAKER — use plain LIMIT
 # max_entry_spread_pct: removed (handled in smart_entry_filter)
 
 min_switch_interval_seconds: 1800   # 🔧 TUNED 2026-04-03: 600→1800 (30 min cooldown, voorkom rapid-fire switches)
@@ -1535,9 +1609,11 @@ soft_exit_extend_seconds: 1800     # ⏳ Extend by 30 min if trend bullish
 # TIMEOUT LIFECYCLE - prevents stuck positions
 no_fill_timeout_sec: 3600          # T0-Q10: Was 1200 (20 min) → 3600 (60 min)
 no_progress_timeout_sec: 3600     # 🔧 TUNED 2026-04-02: 5400→3600 (1 uur, cut stalled positions faster)
+no_progress_max_extension_sec: 3600  # 🔧 2026-05-30: was regime*2 (10800 in CHOP, 14400 in BULL); cap to 1h to cut losing positions faster
 no_progress_min_loss_pct: 0.5     # 🔧 TUNED 2026-04-03: 1.0→0.5 (align met Kraken, kap bags eerder)
 no_progress_atr_multiplier: 1.5   # 🎯 PRO: Require adverse move > 1.5×ATR
 close_grace_sec: 600              # ST-05b: 120→600 (10 min graceful LIMIT orders before aggressive market exit)
+coerce_tp_to_step: true            # Zorg dat TP >= 1 grid-stap (nodig voor coarse step-size exchanges zoals Bitget INJ)
 
 min_startup_wait_seconds: 60       # 🚀 FIX: 90→60 (1 min startup delay)
 

@@ -1,0 +1,736 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.1, pluggy-1.6.0 -- /home/mo/repos/hummingbot/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/mo/repos/hummingbot
+configfile: pyproject.toml
+plugins: anyio-4.11.0, asyncio-1.3.0, cov-7.0.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 32 items / 30 deselected / 2 selected
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor.py::TestGridExecutor::test_process_order_failed_event PASSED [ 50%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor.py::TestGridExecutor::test_process_order_failed_event_detects_okx_compliance_restriction FAILED [100%]
+
+=================================== FAILURES ===================================
+_ TestGridExecutor.test_process_order_failed_event_detects_okx_compliance_restriction _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor.TestGridExecutor testMethod=test_process_order_failed_event_detects_okx_compliance_restriction>
+_ = <MagicMock name='get_price' id='132983827598272'>
+
+    @patch.object(GridExecutor, "get_price", return_value=Decimal("100"))
+    def test_process_order_failed_event_detects_okx_compliance_restriction(self, _):
+        config = GridExecutorConfig(
+            id="test",
+            timestamp=123,
+            side=TradeType.BUY,
+            connector_name="okx",
+            trading_pair="HYPE-USD",
+            start_price=Decimal("100"),
+            end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+                trailing_stop=TrailingStop(
+                    activation_price=Decimal("0.05"),
+                    trailing_delta=Decimal("0.005")
+                )
+            )
+        )
+>       executor = self.get_grid_executor_from_config(config)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor.py:955:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor.py:59: in get_grid_executor_from_config
+    executor = GridExecutor(self.strategy, config, self.update_interval)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:73: in __init__
+    self.trading_rules = self.get_trading_rules(self.config.connector_name, self.config.trading_pair)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x78f2b5ce0d10>
+connector_name = 'okx', trading_pair = 'HYPE-USD'
+
+    def get_trading_rules(self, connector_name: str, trading_pair: str) -> TradingRule:
+        """
+        Retrieves the trading rules for the specified trading pair from the specified connector.
+
+        :param connector_name: The name of the connector.
+        :param trading_pair: The trading pair.
+        :return: The trading rules.
+        """
+>       connector = self.connectors[connector_name]
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'okx'
+
+hummingbot/strategy_v2/executors/executor_base.py:313: KeyError
+=============================== warnings summary ===============================
+hummingbot/connector/exchange/foxbit/foxbit_utils.py:132
+  /home/mo/repos/hummingbot/hummingbot/connector/exchange/foxbit/foxbit_utils.py:132: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    connector: str = Field(default="foxbit", client_data=None)
+
+hummingbot/connector/exchange/foxbit/foxbit_utils.py:131
+  /home/mo/repos/hummingbot/hummingbot/connector/exchange/foxbit/foxbit_utils.py:131: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class FoxbitConfigMap(BaseConnectorConfigMap):
+
+hummingbot/connector/exchange/foxbit/foxbit_utils.py:165
+  /home/mo/repos/hummingbot/hummingbot/connector/exchange/foxbit/foxbit_utils.py:165: PydanticDeprecatedSince20: The `construct` method is deprecated; use `model_construct` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    KEYS = FoxbitConfigMap.construct()
+
+hummingbot/strategy_v2/executors/data_types.py:40
+  /home/mo/repos/hummingbot/hummingbot/strategy_v2/executors/data_types.py:40: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class ConnectorPair(BaseModel):
+
+.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:319
+.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:319
+  /home/mo/repos/hummingbot/.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:319: PydanticDeprecatedSince20: `json_encoders` is deprecated. See https://docs.pydantic.dev/2.12/concepts/serialization/#custom-serializers for alternatives. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warnings.warn(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:30
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:30: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    blacklist: Optional[List[str]] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:43
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:43: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    log_level: Optional[str] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:53
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:53: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    paper_trading: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:64
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:64: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    instance_id: Optional[str] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:74
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:74: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    connector_name: str = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:82
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:82: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    quote_asset: str = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:92
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:92: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    balance_currency: Optional[str] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:102
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:102: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    whitelisted_pairs: Optional[List[str]] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:112
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:112: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_dynamic_pair_discovery: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:122
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:122: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    manual_trading_pairs: Optional[List[str]] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:134
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:134: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_coins_to_monitor: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:144
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:144: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_24h_volume_eur: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:155
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:155: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_simultaneous_coins: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:168
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:168: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_dynamic_pair_manager: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:178
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:178: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    pair_scan_interval_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:190
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:190: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_spread_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:202
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:202: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    switch_grace_period_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:242
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:242: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    staleness_guard_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:252
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:252: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_price_age_ms: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:264
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:264: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_orderbook_age_ms: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:279
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:279: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    auto_quarantine: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:294
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:294: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    exclude_expensive_coins: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:304
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:304: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    coin_rotation_threshold: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:314
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:314: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    pool_membership_cooldown_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:328
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:328: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    coin_discovery_refresh_interval_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:341
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:341: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_lookback_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:351
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:351: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_lookback_short_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:360
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:360: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_lookback_mid_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:369
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:369: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_lookback_long_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:378
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:378: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    switch_threshold_percent: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:387
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:387: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    exit_short_threshold: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:396
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:396: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    exit_mid_threshold: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:405
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:405: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    downtrend_gate_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:414
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:414: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    downtrend_gate_1h_min: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:423
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:423: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    downtrend_gate_4h_min: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:432
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:432: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    downtrend_gate_24h_min: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:442
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:442: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    emergency_exit_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:451
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:451: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    hard_stop_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:460
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:460: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_loss_exit_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:469
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:469: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_loss_exit_min_net_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:479
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:479: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_grid_profit_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:489
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:489: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_startup_wait_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:498
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:498: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_multi_timeframe: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:507
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:507: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_min_change_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:516
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:516: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    price_update_interval: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:526
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:526: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_coin_monitoring_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:535
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:535: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    session_blacklist_duration_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:545
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:545: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_switch_interval_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:555
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:555: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_hold_time_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:564
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:564: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_hold_time_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:580
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:580: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    soft_hold_time_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:589
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:589: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    hard_hold_time_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:598
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:598: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    soft_exit_min_trend_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:607
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:607: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    soft_exit_max_loss_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:616
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:616: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    soft_exit_extend_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:629
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:629: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_fill_timeout_sec: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:638
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:638: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_progress_timeout_sec: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:648
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:648: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_progress_min_loss_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:657
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:657: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_progress_atr_multiplier: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:666
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:666: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    fee_aware_timeout_bypass_sec: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:675
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:675: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    close_grace_sec: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:688
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:688: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    blacklist_after_timeout_sec: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:701
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:701: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    aggressive_close_method: str = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:710
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:710: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    aggressive_close_slippage_guard_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:719
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:719: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_close_retries: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:728
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:728: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    smart_switch_k: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:737
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:737: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    switch_cost_multiplier: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:747
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:747: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    grid_range_pct_down: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:756
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:756: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    grid_range_pct_up: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:765
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:765: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    num_grids: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:774
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:774: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_grid_level_spacing_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:784
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:784: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_smart_entry_filter: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:793
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:793: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    smart_entry_filter: dict = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:803
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:803: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    momentum_sleeve: dict = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:832
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:832: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    dynamic_slots: dict = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:845
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:845: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    core_universe: Optional[List[str]] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:855
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:855: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    coin_profiles: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:865
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:865: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    telegram: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:875
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:875: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_dynamic_grid_sizer: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:884
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:884: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    dynamic_grid_sizer: dict = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:941
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:941: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_atr_grid_ranges: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:950
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:950: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    atr_multiplier_down: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:959
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:959: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    atr_multiplier_up: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:968
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:968: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_asymmetric_grids: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:977
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:977: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    smart_refill_threshold_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:987
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:987: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    total_amount_quote: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:996
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:996: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_order_amount_quote: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1007
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1007: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    stop_loss_pct: Optional[Decimal] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1016
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1016: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    take_profit_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1026
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1026: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trailing_stop_activation_pct: Optional[Decimal] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1034
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1034: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trailing_stop_delta_pct: Optional[Decimal] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1062
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1062: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_professional_risk_mgmt: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1074
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1074: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    atr_stop_multiplier: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1083
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1083: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_stop_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1092
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1092: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_stop_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1102
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1102: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_dynamic_take_profit: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1111
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1111: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_take_profit_pct: Optional[Decimal] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1120
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1120: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_take_profit_pct: Optional[Decimal] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1129
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1129: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    time_based_stop_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1138
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1138: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    time_stop_requires_stall: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1147
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1147: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    price_stall_threshold_atr: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1156
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1156: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_minutes_since_last_fill: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1165
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1165: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_rolling_pnl_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1174
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1174: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_win_rate_threshold: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1183
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1183: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    pause_cooldown_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1192
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1192: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    resume_min_pnl_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1201
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1201: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_pause_extensions: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1210
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1210: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_open_orders: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1219
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1219: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    order_frequency: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1229
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1229: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_entry_spread_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1239
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1239: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_daily_loss_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1247
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1247: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_weekly_loss_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1255
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1255: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_monthly_loss_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1264
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1264: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_daily_loss_eur: Optional[float] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1275
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1275: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_exposure_per_coin_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1284
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1284: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_total_exposure_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1294
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1294: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_reference_balance_quote: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1302
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1302: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_bucket_limits: Optional[Dict[str, float]] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1310
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1310: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_max_daily_loss_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1318
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1318: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_max_balance_per_trade_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1326
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1326: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_max_total_open_risk_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1334
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1334: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_exit_cooldown_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1342
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1342: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    r_unit_quote: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1350
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1350: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    daily_kill_switch_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1358
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1358: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_symbol_switch_cooldown_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1366
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1366: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_consecutive_loss_cooldown_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1376
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1376: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    capital_reserve_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1389
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1389: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    auto_sell_orphaned_positions: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1399
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1399: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_min_entry_strength: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1407
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1407: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_min_exit_strength: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1415
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1415: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_confirmation_timeframes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1425
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1425: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warmup_override_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1435
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1435: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warmup_4h_strong_min: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1445
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1445: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warmup_1h_min_if_4h_strong: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1455
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1455: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warmup_max_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1472
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1472: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    circuit_breaker_volatility_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1481
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1481: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    circuit_breaker_time_window: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1491
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1491: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    api_error_max_retries: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1500
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1500: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    api_error_backoff_time: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1513
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1513: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    market_regime: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1526
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1526: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    time_based_rules: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1539
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1539: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    performance_tracking: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1552
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1552: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    liquidity_aware_sizing: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1565
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1565: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    orderbook_liquidity: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1583
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1583: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    orderbook_prefetch: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1603
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1603: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    debug_trace_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1613
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1613: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    debug_trace_format: str = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1623
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1623: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    debug_trace_log_accepted: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1633
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1633: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    debug_trace_log_rejected: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1644
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1644: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    adaptive_regime_detection: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1654
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1654: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    adaptive_filters: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1665
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1665: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    grid_suitability: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1676
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1676: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_multi_timeframe_buy: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1686
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1686: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    mtf_1h_min_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1696
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1696: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    mtf_4h_min_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1706
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1706: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    mtf_24h_min_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1716
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1716: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    mtf_declining_1h_max: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1726
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1726: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    mtf_declining_4h_max: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1737
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1737: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    observability: Optional[dict] = Field(
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor.py::TestGridExecutor::test_process_order_failed_event
+  /home/mo/repos/hummingbot/test/isolated_asyncio_wrapper_test_case.py:76: DeprecationWarning: There is no current event loop
+    cls.main_event_loop = asyncio.get_event_loop()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor.py::TestGridExecutor::test_process_order_failed_event_detects_okx_compliance_restriction
+=========== 1 failed, 1 passed, 30 deselected, 166 warnings in 2.72s ===========

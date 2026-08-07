@@ -90,7 +90,7 @@ class FeeAwareFilter:
         Fee models:
         - worst_case: both sides taker (safest, most conservative)
         - average:    one side maker, one side taker (realistic for grids)
-        - best_case:  both sides maker (optimistic)
+        - best_case:  both sides maker (optimistic, requires post-only orders)
         """
         if self.use_maker_fees:
             # Legacy compat: explicit use_maker_fees overrides fee_model
@@ -102,6 +102,35 @@ class FeeAwareFilter:
             return self.taker_fee_pct + self.maker_fee_pct
         else:  # worst_case (default)
             return self.taker_fee_pct * 2
+
+    def config_warnings(self, use_post_only_orders: bool = True) -> list:
+        """Return a list of config inconsistency warnings (CA4).
+
+        Args:
+            use_post_only_orders: Whether the connector uses LIMIT_MAKER/post-only
+                orders, guaranteeing maker fills. Set to False for Bitget.
+
+        Returns:
+            List of warning strings, empty if config is consistent.
+        """
+        warnings = []
+        if self.fee_model == 'best_case' and not use_post_only_orders:
+            warnings.append(
+                f"fee_model='best_case' assumes maker+maker ({self.maker_fee_pct * 2:.3f}% RT) "
+                f"but use_post_only_orders=False means orders may be taker-filled. "
+                f"Consider fee_model='average' ({self.taker_fee_pct + self.maker_fee_pct:.3f}% RT)."
+            )
+        if self.taker_fee_pct < 0 or self.maker_fee_pct < 0:
+            warnings.append(
+                f"Negative fee rates detected: taker={self.taker_fee_pct}, "
+                f"maker={self.maker_fee_pct}. Check config units (percent points, e.g. 0.20=0.20%)."
+            )
+        if self.taker_fee_pct > 2.0 or self.maker_fee_pct > 2.0:
+            warnings.append(
+                f"Unusually high fee rates: taker={self.taker_fee_pct}%, "
+                f"maker={self.maker_fee_pct}%. Check config units (percent points, not decimals)."
+            )
+        return warnings
 
     def check(
         self,

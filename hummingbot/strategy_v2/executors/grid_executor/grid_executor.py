@@ -191,6 +191,24 @@ class GridExecutor(ExecutorBase):
         self._zombie_order_watchdog_sec = 60.0  # Reset zombie close orders after 60s
         # ==============================================================================
 
+        # ==============================================================================
+        # US2/US10: Fee-aware exit rate limiting and bypass tracking
+        # _fee_aware_block_last_log: rate-limits FEE_AWARE_EXIT_BLOCKED to once per
+        # 60 seconds per close_type to prevent log spam (observed 68k events/run).
+        # _fee_aware_block_count: cumulative blocked-exit counter per close_type,
+        # reported in the rate-limited log line so no information is lost.
+        # ==============================================================================
+        self._fee_aware_block_last_log: dict = {}   # close_type_key -> last log timestamp
+        self._fee_aware_block_count: dict = {}      # close_type_key -> total blocked count
+        # ==============================================================================
+
+        # ==============================================================================
+        # ACCUMULATION RISK MONITOR: logging-only, no automatic close
+        # Fires when buy-level accumulation exceeds threshold. Data collection phase only.
+        # ==============================================================================
+        self._accumulation_warn_last_log: float = 0.0
+        # ==============================================================================
+
     @property
     def is_perpetual(self) -> bool:
         """
@@ -852,14 +870,13 @@ class GridExecutor(ExecutorBase):
                     f"since_progress={since_last_progress / 60:.1f}m >= {no_progress_timeout / 60:.1f}m | "
                     f"inventory={float(self.position_size_base):.4f} orders=({stall_detail}) | "
                     f"unrealized_pnl={float(unrealized_pnl_pct):.2f}% | "
-                    f"Grid deadlocked - forcing unwind"
+                    f"Grid deadlocked - forcing unwind (fee-guard bypassed)"
                 )
-                if not fee_aware_close_allowed(
-                    CloseType.NO_PROGRESS_TIMEOUT,
-                    current_price=getattr(self, "mid_price", None),
-                    stage="no_progress_stalled",
-                ):
-                    return False
+                # Fee-aware guard is intentionally bypassed for stalled grids:
+                # a deadlocked grid (no open orders, no working close orders) can
+                # NEVER execute sell orders and therefore can NEVER reach break-even.
+                # Waiting for break-even is impossible — the capital is permanently
+                # locked until we force-close.
                 self._timeout_close_triggered = True
                 self._timeout_close_type = CloseType.NO_PROGRESS_TIMEOUT
                 self.start_forced_close(CloseType.NO_PROGRESS_TIMEOUT)
@@ -975,6 +992,41 @@ class GridExecutor(ExecutorBase):
             # Story B1: Start two-phase unwind protocol (graceful → aggressive)
             self.start_forced_close(CloseType.HARD_CAP_TIME_LIMIT)
             return True
+
+        # ── ACCUMULATION RISK MONITOR (logging only — no close) ──────────────────
+        # Historical data (6m, 392 trades): trades with >=4 filled BUY orders have
+        # only 9.7% TP rate. This block logs a WARNING so we can validate the signal
+        # in production before deciding whether to act on it.
+        accum_warn_min_fills = custom_info.get('accumulation_warn_min_buy_orders', 4)
+        accum_warn_min_age = custom_info.get('accumulation_warn_min_age_sec', 5400)  # 90 min
+        if (accum_warn_min_fills > 0
+                and age_sec >= accum_warn_min_age
+                and now - getattr(self, '_accumulation_warn_last_log', 0.0) >= 300):  # max once per 5 min
+            # Current live accumulation: BUY levels that haven't completed their sell yet
+            live_buy_levels = (
+                len(self.levels_by_state.get(GridLevelStates.OPEN_ORDER_FILLED, []))
+                + len(self.levels_by_state.get(GridLevelStates.CLOSE_ORDER_PLACED, []))
+            )
+            # Cumulative BUY orders placed over the trade lifetime (from filled_orders log)
+            all_filled = self.custom_info.get('filled_orders', []) if hasattr(self, 'custom_info') else []
+            cumulative_buy_orders = sum(
+                1 for fo in all_filled if isinstance(fo, dict) and fo.get('trade_type') == 'BUY'
+            )
+            if live_buy_levels >= accum_warn_min_fills or cumulative_buy_orders >= accum_warn_min_fills:
+                self.update_position_metrics()
+                unrealized_pct = float(self.get_net_pnl_pct() * 100)
+                self._accumulation_warn_last_log = now
+                self.logger().warning(
+                    f"[ACCUM_RISK_WATCH] {self.config.trading_pair} | "
+                    f"live_buy_levels={live_buy_levels} | "
+                    f"cumulative_buy_orders={cumulative_buy_orders} | "
+                    f"age={age_sec / 60:.1f}min | "
+                    f"unrealized_pnl={unrealized_pct:.2f}% | "
+                    f"threshold={accum_warn_min_fills}fills+{accum_warn_min_age / 60:.0f}min | "
+                    f"NO_PROGRESS_triggered={self._timeout_close_triggered} | "
+                    f"ACTION=none(logging_only)"
+                )
+        # ─────────────────────────────────────────────────────────────────────────────
 
         return False
 
@@ -2479,9 +2531,12 @@ class GridExecutor(ExecutorBase):
         return required
 
     def _is_fee_guarded_close_type(self, close_type: Optional[CloseType]) -> bool:
+        # US4: HARD_CAP_TIME_LIMIT is intentionally excluded — an absolute position
+        # hold limit must always close regardless of fee-aware break-even status.
+        # Keeping a position open past the hard cap trades a known fee loss for an
+        # unknown (and potentially larger) market loss.
         return close_type in {
             CloseType.TIME_LIMIT,
-            CloseType.HARD_CAP_TIME_LIMIT,
             CloseType.NO_PROGRESS_TIMEOUT,
             CloseType.TRAILING_STOP,
             CloseType.EARLY_STOP,
@@ -2567,9 +2622,31 @@ class GridExecutor(ExecutorBase):
         current_price: Optional[Decimal] = None,
         stage: str = "close",
     ) -> bool:
-        """Block non-emergency forced exits below fee-aware break-even."""
+        """Block non-emergency forced exits below fee-aware break-even.
+
+        US2: After ``fee_aware_timeout_bypass_sec`` seconds the guard is lifted
+        regardless of P&L — a hard time-box prevents indefinite capital lock-up.
+        US4: HARD_CAP_TIME_LIMIT bypasses the guard via _is_fee_guarded_close_type.
+        US10: FEE_AWARE_EXIT_BLOCKED is rate-limited to one log line per 60 s per
+        close_type to prevent log spam (observed 68 000+ events in a single run).
+        """
         if not self._is_fee_guarded_close_type(close_type):
             return True
+
+        # US2: Time-based bypass — after the configured hold limit the fee guard
+        # is overridden so the position can always be closed.
+        custom_info = self.config.custom_info or {}
+        bypass_sec = int(custom_info.get("fee_aware_timeout_bypass_sec", 0))
+        if bypass_sec > 0:
+            age_sec = self._strategy.current_timestamp - self._start_timestamp
+            if age_sec >= bypass_sec:
+                self.logger().warning(
+                    f"⏰ FEE_AWARE_BYPASS_FORCED: {self.config.trading_pair} | "
+                    f"hold={age_sec / 60:.1f}m >= bypass={bypass_sec / 60:.1f}m | "
+                    f"close_type={close_type.name if close_type else 'UNKNOWN'} | "
+                    f"Fee-aware guard overridden by max hold time (US2)"
+                )
+                return True
 
         snapshot = self._fee_aware_break_even_snapshot(current_price=current_price)
         price = snapshot["current_price"]
@@ -2593,7 +2670,21 @@ class GridExecutor(ExecutorBase):
         if allowed:
             self.logger().info(f"🧮 FEE_AWARE_EXIT_CHECK {stage}: {log_payload}")
         else:
-            self.logger().warning(f"🛡️ FEE_AWARE_EXIT_BLOCKED {stage}: {log_payload}")
+            # US10: Rate-limit BLOCKED log to once per 60 s per close_type.
+            log_key = f"{close_type.name if close_type else 'UNKNOWN'}_{stage}"
+            self._fee_aware_block_count[log_key] = (
+                self._fee_aware_block_count.get(log_key, 0) + 1
+            )
+            now = self._strategy.current_timestamp
+            last_log = self._fee_aware_block_last_log.get(log_key, 0.0)
+            if now - last_log >= 60:
+                count = self._fee_aware_block_count[log_key]
+                self.logger().warning(
+                    f"🛡️ FEE_AWARE_EXIT_BLOCKED {stage} "
+                    f"(×{count} since last log): {log_payload}"
+                )
+                self._fee_aware_block_last_log[log_key] = now
+                self._fee_aware_block_count[log_key] = 0
 
         return allowed
 
@@ -3406,6 +3497,10 @@ class GridExecutor(ExecutorBase):
             elif close_type == CloseType.EARLY_STOP:
                 # Early stop uses same logic as stop_loss
                 use_limit_order = self._stop_loss_order_type == OrderType.LIMIT
+            elif close_type == CloseType.TRAILING_STOP:
+                # Trailing stop uses stop_loss order type: MARKET guarantees execution
+                # when price is falling fast (a LIMIT order can miss and result in a loss)
+                use_limit_order = self._stop_loss_order_type == OrderType.LIMIT
             else:
                 # Regular exits (take_profit, etc.) use LIMIT by default
                 use_limit_order = True
@@ -4108,31 +4203,46 @@ class GridExecutor(ExecutorBase):
             self._cancel_request_times.pop(order_id, None)
             self._cancel_retry_count.pop(order_id, None)
 
-        # CRITICAL: Check for Kraken NL-restriction errors first
+        # CRITICAL: Check for exchange compliance restriction errors first
         # Pattern: "EAccount:Invalid permissions:STBL trading restricted for NL."
         error_msg_full = str(event)  # Preserve case for matching
         error_msg = error_msg_full.lower()
 
-        # Detect NL-restriction pattern
+        # Detect known exchange restriction patterns that should terminate the executor
+        # instead of retrying the same order forever.
         is_nl_restricted = (
             "trading restricted for nl" in error_msg
             or ("invalid permissions" in error_msg and "trading restricted" in error_msg)
         )
+        is_okx_local_compliance_restricted = (
+            "scode=51155" in error_msg
+            and "local compliance restrictions" in error_msg
+        )
 
-        if is_nl_restricted:
+        is_exchange_restricted = is_nl_restricted or is_okx_local_compliance_restricted
+
+        if is_exchange_restricted:
             # Extract coin from trading pair (e.g., "STBL-EUR" -> "STBL-EUR")
             trading_pair = self.config.trading_pair
-            self.logger().warning(
-                f"🚫 NL-RESTRICTION: {trading_pair} is restricted for NL accounts on Kraken\n"
-                f"   Error: {error_msg_full}\n"
-                f"   This coin will be auto-blacklisted to prevent retries."
-            )
+            if is_okx_local_compliance_restricted:
+                self.logger().warning(
+                    f"🚫 OKX-COMPLIANCE-RESTRICTION: {trading_pair} cannot be traded by this account\n"
+                    f"   Error: {error_msg_full}\n"
+                    f"   This coin will be auto-blacklisted to prevent retries."
+                )
+            else:
+                self.logger().warning(
+                    f"🚫 NL-RESTRICTION: {trading_pair} is restricted for NL accounts on Kraken\n"
+                    f"   Error: {error_msg_full}\n"
+                    f"   This coin will be auto-blacklisted to prevent retries."
+                )
             # Mark this executor with NL-restriction flag for controller to detect
             self._nl_restricted = True
             self._nl_restricted_coin = trading_pair
             # Also store in custom_info so ExecutorInfo can access it
-            self._custom_info['nl_restricted'] = True
-            self._custom_info['nl_restricted_coin'] = trading_pair
+            if self.config.custom_info is not None:
+                self.config.custom_info['nl_restricted'] = True
+                self.config.custom_info['nl_restricted_coin'] = trading_pair
             # Terminate executor immediately - no point retrying
             self._status = RunnableStatus.TERMINATED
             return  # Skip normal error processing
@@ -4316,8 +4426,8 @@ class GridExecutor(ExecutorBase):
 
         :return: The unrealized pnl in quote asset.
         """
-        open_filled_levels = self.levels_by_state[GridLevelStates.OPEN_ORDER_FILLED] + self.levels_by_state[
-            GridLevelStates.CLOSE_ORDER_PLACED]
+        open_filled_levels = self.levels_by_state.get(GridLevelStates.OPEN_ORDER_FILLED, []) + self.levels_by_state.get(
+            GridLevelStates.CLOSE_ORDER_PLACED, [])
         side_multiplier = 1 if self.config.side == TradeType.BUY else -1
         executed_amount_base = Decimal(sum([level.active_open_order.order.amount for level in open_filled_levels]))
         if executed_amount_base == Decimal("0"):
@@ -4392,6 +4502,26 @@ class GridExecutor(ExecutorBase):
             for order in regular_filled_orders if order["trade_type"] == TradeType.SELL.name
         ])
         self.realized_fees_quote = self.realized_buy_fees_quote + self.realized_sell_fees_quote
+
+        # Residual-dust correction: when step-size quantization leaves a tiny
+        # unsellable base residual (< min_order_size), remove its proportional
+        # cost from realized_buy_size_quote so TAKE_PROFIT PnL is not negative.
+        if self.close_type != CloseType.POSITION_HOLD and self.realized_buy_size_quote > 0:
+            total_buy_base = sum(
+                Decimal(order["executed_amount_base"])
+                for order in regular_filled_orders if order["trade_type"] == TradeType.BUY.name
+            )
+            total_sell_base = sum(
+                Decimal(order["executed_amount_base"])
+                for order in regular_filled_orders if order["trade_type"] == TradeType.SELL.name
+            )
+            residual_base = total_buy_base - total_sell_base
+            min_order_size = self.trading_rules.min_order_size
+            if Decimal("0") < residual_base < min_order_size:
+                avg_entry = self.realized_buy_size_quote / total_buy_base
+                residual_cost = residual_base * avg_entry
+                self.realized_buy_size_quote -= residual_cost
+
         self.realized_pnl_quote = self.calculate_realized_net_pnl(
             realized_sell_quote=self.realized_sell_size_quote,
             realized_buy_quote=self.realized_buy_size_quote,

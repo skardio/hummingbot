@@ -50,6 +50,7 @@ OKX_TICKERS_PATH = '/api/v5/market/tickers'
 OKX_ORDER_BOOK_PATH = '/api/v5/market/books'
 
 # Auth required
+OKX_ACCOUNT_INSTRUMENTS_PATH = '/api/v5/account/instruments'  # Account-specific (jurisdiction-filtered)
 OKX_PLACE_ORDER_PATH = "/api/v5/trade/order"
 OKX_ORDER_DETAILS_PATH = '/api/v5/trade/order'
 OKX_ORDER_CANCEL_PATH = '/api/v5/trade/cancel-order'
@@ -96,6 +97,7 @@ RATE_LIMITS = [
     RateLimit(WS_LOGIN_LIMIT_ID, limit=1, time_interval=15),
     RateLimit(limit_id=OKX_SERVER_TIME_PATH, limit=10, time_interval=2),
     RateLimit(limit_id=OKX_INSTRUMENTS_PATH, limit=20, time_interval=2),
+    RateLimit(limit_id=OKX_ACCOUNT_INSTRUMENTS_PATH, limit=20, time_interval=2),
     RateLimit(limit_id=OKX_TICKER_PATH, limit=20, time_interval=2),
     RateLimit(limit_id=OKX_TICKERS_PATH, limit=20, time_interval=2),
     RateLimit(limit_id=OKX_ORDER_BOOK_PATH, limit=20, time_interval=2),

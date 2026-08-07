@@ -84,6 +84,7 @@ def _check_liquidity_proxy_available() -> bool:
 
 MIN_TREND_THRESHOLD = 0.5  # Minimum +0.5% trend_score required for selection
 MIN_CANDLES_FOR_WARMUP = 360  # Minimum 360 candles (30h × 60/5m) for valid trends
+MIN_CANDLES_ABSOLUTE_FLOOR = 14  # Absolute minimum to avoid trading on near-empty history
 TARGET_HISTORICAL_CANDLES = 720  # Target 720 candles (60h) for full history
 
 
@@ -179,6 +180,7 @@ class CoinTrend:
     price_history: List[Dict] = field(default_factory=list)  # LEGACY compatibility
     candles: List[CandleData] = field(default_factory=list)  # NEW: Full OHLCV
     last_updated: float = 0.0
+    atr_pct: float = 0.0  # Latest ATR(14) as % of price from 5m candles (cached)
 
     # Phase 2.5: Multi-Timeframe Trends
     trend_60m: float = 0.0  # 1-hour trend
@@ -221,7 +223,8 @@ class TrendCalculator:
         bot_start_time: Optional[float] = None,
         base_connector: Optional[ConnectorBase] = None,
         data_freshness_callback: Optional[callable] = None,
-        warmup_max_minutes: int = 120
+        warmup_max_minutes: int = 120,
+        use_time_based_validation_warmup: bool = False,
     ):
         """
         Initialize trend calculator
@@ -233,6 +236,8 @@ class TrendCalculator:
             base_connector: Base connector for price fetching in paper trading mode (optional)
             data_freshness_callback: Optional callback to mark data as fresh (Task 2.1.1)
             warmup_max_minutes: Maximum warm-up period in minutes (default 120 = 2 hours)
+            use_time_based_validation_warmup: If True, validation warmup follows runtime warmup flag.
+                If False, keeps legacy strict 360-candle validation gate.
         """
         self.connector = connector
         self.base_connector = base_connector  # Base connector for price fetching in paper trading
@@ -247,12 +252,17 @@ class TrendCalculator:
         # Phase 2.5: Multi-timeframe support
         self.bot_start_time = bot_start_time if bot_start_time else time.time()
         self.warmup_max_minutes = warmup_max_minutes
+        self.use_time_based_validation_warmup = use_time_based_validation_warmup
         self.trend_lookback_short_minutes = 60  # 1 hour
         self.trend_lookback_mid_minutes = 240  # 4 hours
         self.trend_lookback_long_minutes = 1440  # 24 hours
         self._historical_data_loaded = False  # Track if we've loaded historical data
         # Symbols that don't exist on the exchange — never retry after first failure
         self._permanently_failed_symbols: set = set()
+
+        # Periodic volume refresh — see refresh_candle_volumes()
+        self._last_volume_refresh: float = 0.0
+        self._volume_refresh_interval_seconds: int = 3600  # 60 minutes
 
     async def load_historical_data(self, symbols: List[str]) -> None:
         """
@@ -448,6 +458,191 @@ class TrendCalculator:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
 
+    # -------------------------------------------------------------------------
+    # Periodic volume refresh
+    # -------------------------------------------------------------------------
+
+    def _make_ccxt_exchange(self):
+        """Return a (ccxt_exchange_instance, exchange_name_str) tuple.
+
+        Builds a ccxt exchange object from the configured connector name, applying
+        the same options used by load_historical_data.  Returns (None, name) and
+        logs a warning when the exchange is not supported by ccxt.
+        """
+        import ccxt
+
+        exchange_name = self.connector.name.replace("_paper_trade", "")
+        ccxt_exchange_map = {
+            "bitget_perpetual": "bitget",
+            "binance_perpetual": "binance",
+            "bybit_perpetual": "bybit",
+            "gate_io_perpetual": "gateio",
+            "okx_perpetual": "okx",
+            "kraken": "kraken",
+            "binance": "binance",
+            "bitget": "bitget",
+            "kucoin": "kucoin",
+        }
+        ccxt_name = ccxt_exchange_map.get(exchange_name, exchange_name)
+        exchange_class = getattr(ccxt, ccxt_name, None)
+        if not exchange_class:
+            logger.warning(
+                "vol_refresh_failed reason=unsupported_exchange "
+                "exchange=%s ccxt_name=%s",
+                exchange_name, ccxt_name,
+            )
+            return None, exchange_name
+
+        exchange_options: dict = {}
+        if "perpetual" in exchange_name:
+            exchange_options = {"defaultType": "swap", "options": {"defaultType": "swap"}}
+        return exchange_class(exchange_options), exchange_name
+
+    @staticmethod
+    def _merge_ohlcv_into_candles(
+        existing: List[CandleData],
+        ohlcv: list,
+        *,
+        current_candle_start: Optional[int] = None,
+    ) -> List[CandleData]:
+        """Merge REST OHLCV rows into an existing candle list without duplicates.
+
+        Strategy
+        --------
+        * Build a lookup keyed by 5-minute-aligned timestamps from *existing*.
+        * For each REST row:
+          - If a matching candle exists:
+              - Always overwrite ``volume`` (REST is authoritative for closed candles).
+              - Overwrite OHLC only for **fully closed** candles (ts_key < current window)
+                to avoid clobbering live ticker-derived OHLC for the current window.
+          - If no matching candle exists, create a new ``CandleData``.
+        * Return the merged list sorted ascending by timestamp, capped at 720 entries.
+
+        Args:
+            existing: Current in-memory candle list for one symbol.
+            ohlcv: Raw OHLCV rows from ccxt — ``[[ts_ms, o, h, l, c, v], ...]``.
+            current_candle_start: 5-min-aligned Unix timestamp (seconds) for the
+                current candle window.  Defaults to ``int(time.time() / 300) * 300``.
+        """
+        if current_candle_start is None:
+            current_candle_start = int(time.time() / 300) * 300
+
+        # Build mutable lookup: 5-min-aligned key → CandleData
+        index: Dict[int, CandleData] = {
+            int(c.timestamp / 300) * 300: c for c in existing
+        }
+
+        for row in ohlcv:
+            ts_key = int(row[0] / 1000 / 300) * 300  # ms → s → 5-min floor
+            rest_vol = Decimal(str(row[5]))
+
+            if ts_key in index:
+                candle = index[ts_key]
+                # Always update volume — this is the primary purpose of the refresh
+                candle.volume = rest_vol
+                # Overwrite OHLC only for closed candles so we don't discard live
+                # ticker updates for the current 5-minute window
+                if ts_key < current_candle_start:
+                    candle.open = Decimal(str(row[1]))
+                    candle.high = Decimal(str(row[2]))
+                    candle.low = Decimal(str(row[3]))
+                    candle.close = Decimal(str(row[4]))
+            else:
+                index[ts_key] = CandleData(
+                    timestamp=float(ts_key),
+                    open=Decimal(str(row[1])),
+                    high=Decimal(str(row[2])),
+                    low=Decimal(str(row[3])),
+                    close=Decimal(str(row[4])),
+                    volume=rest_vol,
+                )
+
+        merged = sorted(index.values(), key=lambda c: c.timestamp)
+        return merged[-720:]
+
+    async def refresh_candle_volumes(self, symbols: Optional[List[str]] = None) -> None:
+        """Re-fetch recent 5-minute OHLCV from the REST API and merge volume data
+        into the in-memory candle arrays for all tracked symbols.
+
+        This method is called automatically as a background task from
+        ``update_all_trends_v2`` every ``_volume_refresh_interval_seconds`` (default
+        3600 s = 60 min).  It fixes the structural limitation where ticker-created
+        candles always carry ``volume=0``, which makes the momentum scorer's volume
+        dimension blind after the bot has been running for more than ~5 hours.
+
+        ccxt fetches are dispatched to a thread-pool executor via
+        ``asyncio.to_thread`` so the asyncio event loop is never blocked.
+
+        Failure behaviour
+        -----------------
+        * If the exchange is unsupported → warning + early return.
+        * If a per-symbol fetch fails → warning for that symbol, continue with rest.
+        * Existing candle data is **never discarded** on failure.
+        """
+        now = time.time()
+        if now - self._last_volume_refresh < self._volume_refresh_interval_seconds:
+            return
+
+        # Stamp immediately to prevent concurrent re-entry if the task takes long
+        self._last_volume_refresh = now
+
+        tracked = [s for s in (symbols or list(self.trends.keys())) if s in self.trends]
+        if not tracked:
+            return
+
+        logger.info(
+            "vol_refresh_started symbols=%d interval_s=%d",
+            len(tracked), self._volume_refresh_interval_seconds,
+        )
+
+        exchange, exchange_name = self._make_ccxt_exchange()
+        if exchange is None:
+            return
+
+        is_perpetual = "perpetual" in exchange_name
+        since_ms = int((now - 2 * 3600) * 1000)  # last 2 hours
+
+        refreshed = 0
+        for symbol in tracked:
+            try:
+                ccxt_symbol = symbol.replace("-", "/")
+                if is_perpetual:
+                    parts = ccxt_symbol.split("/")
+                    if len(parts) == 2:
+                        ccxt_symbol = f"{ccxt_symbol}:{parts[1]}"
+
+                ohlcv = await asyncio.to_thread(
+                    exchange.fetch_ohlcv,
+                    ccxt_symbol,
+                    "5m",
+                    since_ms,
+                    24,  # 2 h × 12 candles/h = 24 candles
+                )
+                if not ohlcv:
+                    logger.debug("vol_refresh_empty pair=%s", symbol)
+                    continue
+
+                self.trends[symbol].candles = self._merge_ohlcv_into_candles(
+                    self.trends[symbol].candles, ohlcv
+                )
+                refreshed += 1
+                logger.debug(
+                    "vol_refresh_success pair=%s candles_fetched=%d",
+                    symbol, len(ohlcv),
+                )
+                await asyncio.sleep(0.1)  # Small delay to respect rate limits
+
+            except Exception as exc:
+                logger.warning(
+                    "vol_refresh_failed pair=%s reason=%s",
+                    symbol, exc,
+                )
+
+        logger.info(
+            "vol_refresh_completed refreshed=%d/%d",
+            refreshed, len(tracked),
+        )
+
     async def update_coin_trend(self, symbol: str) -> Optional[CoinTrend]:
         """
         Update trend for a single coin
@@ -457,6 +652,20 @@ class TrendCalculator:
 
         Returns:
             Updated CoinTrend or None if error
+
+        Note — ticker candles and volume blindness:
+            Each price tick appended to ``trend.candles`` has ``volume=Decimal("0")``
+            because the exchange ticker does not carry per-candle volume.  After the
+            bot has been running for ~5 hours the entire [-60:] window examined by
+            ``MomentumCandidateScorer._volume_expansion()`` consists of these
+            zero-volume candles, so volume expansion always falls back to 1.0 (the
+            momentum scoring volume dimension becomes blind).
+
+            TODO(vol-refresh): Add a periodic task (e.g. every 60 min) that
+            re-fetches the last 2 h of 5-minute OHLCV from the exchange REST API
+            and back-fills the ``volume`` field for matching candle timestamps in
+            ``trend.candles``.  The infrastructure already exists in
+            ``load_historical_data`` — this is a targeted enhancement only.
         """
         try:
             # Convert / to - format (Kraken uses - format, not / format)
@@ -1075,6 +1284,12 @@ class TrendCalculator:
                         logger.info(f"🔄 Retrying {len(failed_symbols)} failed symbols...")
                         await self.update_all_trends_v2(failed_symbols, retry_on_failure=False)
 
+        # Periodically refresh REST volume data for all tracked symbols.
+        # Runs as a background task so it never delays trend updates.
+        # The 60-min gate is enforced inside refresh_candle_volumes().
+        if time.time() - self._last_volume_refresh >= self._volume_refresh_interval_seconds:
+            asyncio.create_task(self.refresh_candle_volumes())
+
     def get_best_coin(self, min_trend_pct: float, exclude_coins: Optional[List[str]] = None,
                       orderbook_config: Optional[dict] = None) -> Optional[str]:
         """
@@ -1285,10 +1500,38 @@ class TrendCalculator:
 
         return best_symbol
 
+    @staticmethod
+    def _calculate_atr_pct(candles: list, period: int = 14) -> float:
+        """Compute ATR(period) as % of last close from a list of CandleData.
+
+        Uses True Range: max(H-L, |H-prev_close|, |L-prev_close|).
+        Requires at least period+1 candles (same minimum as CandleIndicatorsCalculator)
+        so that ATR used for coin selection and SmartEntry are comparable.
+        Returns 0.0 when candle data is insufficient.
+        """
+        if not candles or len(candles) < period + 1:
+            return 0.0
+        trs = []
+        for i in range(1, len(candles)):
+            h = float(candles[i].high)
+            lo = float(candles[i].low)
+            prev_c = float(candles[i - 1].close)
+            tr = max(h - lo, abs(h - prev_c), abs(lo - prev_c))
+            trs.append(tr)
+        if not trs:
+            return 0.0
+        last_period_trs = trs[-period:]
+        atr = sum(last_period_trs) / len(last_period_trs)
+        last_close = float(candles[-1].close)
+        if last_close <= 0:
+            return 0.0
+        return (atr / last_close) * 100.0
+
     def get_top_n_coins(self, n: int, min_trend_pct: float, exclude_coins: Optional[List[str]] = None,
                         orderbook_config: Optional[dict] = None,
                         trade_direction: str = "long",
-                        grid_scorer=None) -> List[str]:
+                        grid_scorer=None,
+                        atr_selection_config: Optional[dict] = None) -> List[str]:
         """
         Find top N coins, optionally ranked by grid suitability.
 
@@ -1316,12 +1559,26 @@ class TrendCalculator:
             grid_scorer: Optional GridSuitabilityScorer instance. When
                          provided and enabled, coins are ranked by grid
                          suitability instead of trend strength.
+            atr_selection_config: Optional dict with ATR-based coin-selection config:
+                - required_atr_pct: float — required ATR (full, e.g. 0.80)
+                - prefilter_ratio: float — soft-filter fraction (e.g. 0.75)
+                - use_as_ranking_signal: bool — rank by ATR quality when True
 
         Returns:
             List of symbols for top N coins, or empty list if no coins meet criteria
         """
         # Normalize trade_direction
         trade_direction = str(trade_direction).lower()
+
+        # Parse ATR coin-selection config
+        atr_soft_threshold = 0.0
+        atr_required = 0.0
+        atr_use_ranking = False
+        if atr_selection_config and atr_selection_config.get('enabled', False):
+            atr_required = float(atr_selection_config.get('required_atr_pct', 0.0))
+            prefilter_ratio = float(atr_selection_config.get('prefilter_ratio', 0.75))
+            atr_soft_threshold = atr_required * prefilter_ratio
+            atr_use_ranking = bool(atr_selection_config.get('use_as_ranking_signal', True))
 
         # Parse orderbook config with mode support
         depth_filtering_enabled = False
@@ -1359,6 +1616,8 @@ class TrendCalculator:
         qualifying_coins = []
         all_coins = []  # Track ALL coins for fallback purposes
         depth_filtered_count = 0
+        atr_filtered_count = 0
+        atr_candidates_seen = 0  # coins that reached the ATR check
 
         for symbol, trend in self.trends.items():
             # Skip excluded coins (e.g., coins in cooldown or already active)
@@ -1434,6 +1693,19 @@ class TrendCalculator:
                         logger.warning(f"⚠️ {symbol}: Depth check failed ({e}), allowing through")
                     # Don't filter on errors - let SmartEntry handle it
 
+            # ATR SOFT PRE-FILTER: eliminate coins below 75% of required ATR at selection time
+            if atr_soft_threshold > 0 and trend.candles:
+                atr = self._calculate_atr_pct(trend.candles)
+                trend.atr_pct = atr  # cache for ranking and downstream SmartEntry
+                atr_candidates_seen += 1
+                if atr < atr_soft_threshold:
+                    atr_filtered_count += 1
+                    logger.debug(
+                        f"🔕 ATR pre-filter: {symbol} atr={atr:.3f}% < soft_threshold={atr_soft_threshold:.3f}% "
+                        f"(required={atr_required:.3f}%) — skipped at selection"
+                    )
+                    continue
+
             # SIMPLIFIED: Just use consensus_trend_pct directly (always in percentage format like 7.98 for 7.98%)
             # No need for complex multi-timeframe checks - consensus is already the best metric
             trend_value = trend.consensus_trend_pct
@@ -1466,6 +1738,16 @@ class TrendCalculator:
             # Only include coins that meet the trend requirement for their direction
             if passes:
                 qualifying_coins.append((symbol, trend_value))
+
+        # ATR SELECTION SUMMARY — log after full scan so we can spot over-filtering
+        if atr_soft_threshold > 0:
+            logger.info(
+                f"[COIN_SELECTION_ATR_SUMMARY] candidates={atr_candidates_seen} "
+                f"atr_filtered={atr_filtered_count} "
+                f"remaining={atr_candidates_seen - atr_filtered_count} "
+                f"required_atr_pct={atr_required:.3f}% "
+                f"soft_threshold_pct={atr_soft_threshold:.3f}%"
+            )
 
         # ===== RANKING STRATEGY =====
         # When grid_scorer is provided and enabled, rank by grid suitability
@@ -1517,11 +1799,36 @@ class TrendCalculator:
                 f"{len(blocked)} filtered (threshold={min_score})"
             )
         else:
-            # Legacy: Sort by trend strength based on direction
-            if trade_direction == "short":
+            # Legacy: Sort by trend strength based on direction,
+            # optionally blended with ATR quality when atr_use_ranking is enabled.
+            if atr_use_ranking and atr_required > 0:
+                # Blended score: 70% trend strength + 30% ATR quality
+                # trend_norm: 0–1 (20%+ trend → 1.0)
+                # atr_quality_norm: 0–1 (2× required ATR → 1.0)
+                # This keeps trend as the primary driver while ATR breaks ties
+                # and boosts coins with better volatility profile.
+                def _atr_rank_key(item):
+                    sym, tv = item
+                    trend_obj = self.trends.get(sym)
+                    atr = trend_obj.atr_pct if trend_obj else 0.0
+                    # CA7: In auto mode, don't boost negative trends — a -8% crash
+                    # must not rank above a +2% recovery.  Long/short: abs is safe
+                    # because the gate already enforces direction.
+                    effective_tv = max(tv, 0.0) if trade_direction == "auto" else abs(tv)
+                    trend_norm = min(effective_tv, 20.0) / 20.0
+                    atr_quality_norm = min(atr / atr_required, 2.0) / 2.0
+                    return trend_norm * 0.70 + atr_quality_norm * 0.30
+
+                qualifying_coins.sort(key=_atr_rank_key, reverse=True)
+                logger.info(
+                    f"📊 ATR blended ranking: 70% trend + 30% ATR quality "
+                    f"(required={atr_required:.3f}%, soft_threshold={atr_soft_threshold:.3f}%)"
+                )
+            elif trade_direction == "short":
                 qualifying_coins.sort(key=lambda x: x[1], reverse=False)
             elif trade_direction == "auto":
-                qualifying_coins.sort(key=lambda x: abs(x[1]), reverse=True)
+                # CA7: rank by positive momentum only — crash coins get 0, not a boost
+                qualifying_coins.sort(key=lambda x: max(x[1], 0.0), reverse=True)
             else:  # long
                 qualifying_coins.sort(key=lambda x: x[1], reverse=True)
 
@@ -1529,7 +1836,8 @@ class TrendCalculator:
         if trade_direction == "short":
             all_coins.sort(key=lambda x: x[1], reverse=False)
         elif trade_direction == "auto":
-            all_coins.sort(key=lambda x: abs(x[1]), reverse=True)
+            # CA7: same as qualifying_coins — no crash boost in fallback list
+            all_coins.sort(key=lambda x: max(x[1], 0.0), reverse=True)
         else:
             all_coins.sort(key=lambda x: x[1], reverse=True)
 
@@ -1600,8 +1908,27 @@ class TrendCalculator:
         # Get candle count
         candle_count = trend.candle_count
 
-        # Check warmup status (< 360 candles)
-        if candle_count < MIN_CANDLES_FOR_WARMUP:
+        # Legacy-safe default: keep strict 360-candle gate unless explicitly opted in.
+        if not self.use_time_based_validation_warmup and candle_count < MIN_CANDLES_FOR_WARMUP:
+            return TrendSelection(
+                symbol=symbol,
+                trend_1h=trend.trend_60m,
+                trend_4h=trend.trend_240m,
+                trend_24h=trend.trend_1440m,
+                trend_score_pct=trend.trend_score,
+                passes=False,
+                status=TrendStatus.WARMUP,
+                candle_count=candle_count,
+                consensus_pct=trend.consensus_trend_pct,
+                volatility=trend.volatility
+            )
+
+        # Opt-in mode: tie WARMUP to runtime warmup flag, with a minimal safety floor.
+        long_trend_warmup = getattr(trend, "long_trend_warmup", False)
+        if self.use_time_based_validation_warmup and (
+            candle_count < MIN_CANDLES_ABSOLUTE_FLOOR
+            or (candle_count < MIN_CANDLES_FOR_WARMUP and long_trend_warmup)
+        ):
             return TrendSelection(
                 symbol=symbol,
                 trend_1h=trend.trend_60m,

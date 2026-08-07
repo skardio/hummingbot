@@ -216,10 +216,10 @@ class EventAggregator:
         """
         events = self.read_events(period.start_time, period.end_time)
 
-        # Count events by type
-        total_intents = len(events)
+        # Count events by type (only gate events count as intents, not config_loaded etc.)
         denied = sum(1 for e in events if e.get('event_type') == 'gate_denied')
         approved = sum(1 for e in events if e.get('event_type') == 'gate_passed')
+        total_intents = denied + approved
 
         # Count rejections by reason code
         rejection_counts = Counter()

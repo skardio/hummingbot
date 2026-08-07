@@ -23,14 +23,16 @@ You are the planner for a crypto trading bot codebase.
 - Exchange constraints: min order size, tick/step sizes, rate limits, partial fills.
 - Idempotency: retries must not duplicate orders (use `order_intent_id`).
 - Time: clock drift, candle boundaries, latency, websocket disconnects.
-- Market regimes: trending/chop/volatile, news spikes.
+- Market regimes: trending/chop/volatile, news spikes. The `RegimeDetector` outputs BULL/CHOP/BEAR (tri-state). A separate `MarketRegimeFilter` (binary) also exists but is secondary.
 - Account state: open positions, pending orders, funding, fees.
 - Slippage: include buffer in min_notional validation.
 - Injectable clock: no `time.time()` in core logic for testability.
 - **Decimal precision**: floating-point comparisons can cause false "insufficient balance" — plan for tolerance.
 - **Budget locking**: open limit orders (especially sells) lock budget and can block all trading if not managed.
-- **Orphaned state**: fills can arrive during downtime — plan for detecting positions/orders without matching executors on startup.
+- **Orphaned state**: fills can arrive during downtime — plan for detecting positions/orders without matching executors on startup. Use `auto_sell_orphaned_positions: true` in config.
 - **market_list safety**: never touch orders/positions on pairs outside the configured `market_list` (protect manual trades).
+- **Type-8 FAILED losses**: the biggest loss driver is bot restart mid-trade (zombie_close + FEE_AWARE_EXIT_BLOCKED deadlock). Plans that involve restarts must account for this.
+- **DB persistence**: `closed_executors_buffer = 0` — executors are written to DB immediately on close. No buffering.
 
 ## Circuit breakers to plan for
 - Exchange connectivity timeout -> halt trading on disconnect.

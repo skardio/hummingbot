@@ -4,7 +4,7 @@ import glob
 import re
 from collections import Counter
 
-base = 'logs_multi_coin_grid_v2_usd_2026-04-29-16-43-47'
+base = 'logs/logs_multi_coin_grid_v2_usd_2026-05-18-23-33-19'
 files = sorted(glob.glob(base + '.log.*'), key=lambda x: -int(x.split('.')[-1])) + [base + '.log']
 print(f'Analyzing {len(files)} log files...\n')
 

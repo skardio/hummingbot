@@ -1,6 +1,8 @@
 import asyncio
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from aiohttp.client_exceptions import ClientConnectionResetError
+
 from hummingbot.connector.exchange.okx import okx_constants as CONSTANTS
 from hummingbot.connector.exchange.okx.okx_auth import OkxAuth
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
@@ -81,6 +83,11 @@ class OkxAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 await websocket_assistant.send(subscribe_orders_request)
             self.logger().info("Subscribed to private account and orders channels...")
         except asyncio.CancelledError:
+            raise
+        except ClientConnectionResetError:
+            self.logger().warning(
+                "WebSocket connection reset while subscribing to private channels — will reconnect."
+            )
             raise
         except Exception:
             self.logger().exception("Unexpected error occurred subscribing to order book trading and delta streams...")

@@ -71,6 +71,9 @@ class QGAConfig(ControllerConfigBase):
     interval: str = "1s"
     dynamic_grid_range: bool = Field(default=False, json_schema_extra={"is_updatable": True})
     show_terminated_details: bool = False
+    # Ensure take-profit >= one grid step so TP never fires below a meaningful
+    # profit level.  Must be True for exchanges with coarse step-sizes (INJ, QNT).
+    coerce_tp_to_step: bool = Field(default=True, json_schema_extra={"is_updatable": True})
 
     @property
     def quote_asset_allocation(self) -> Decimal:
@@ -462,7 +465,7 @@ class QuantumGridAllocator(ControllerBase):
                 max_orders_per_batch=self.config.max_orders_per_batch,
                 activation_bounds=self.config.activation_bounds,
                 keep_position=True,  # Always keep position for potential reversal
-                coerce_tp_to_step=True,
+                coerce_tp_to_step=self.config.coerce_tp_to_step,
                 triple_barrier_config=TripleBarrierConfig(
                     take_profit=self.config.grid_tp_multiplier,
                     open_order_type=OrderType.LIMIT_MAKER,

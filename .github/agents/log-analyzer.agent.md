@@ -26,9 +26,10 @@ You analyze logs, events, and cooldown databases for a multi-coin grid trading b
 
 | Bot | Script | Log pattern | Events dir | Cooldown DB | Trade DB |
 |-----|--------|-------------|------------|-------------|----------|
-| Kraken EUR | `multi_coin_grid_v2.py` | `logs/logs_multi_coin_grid_v2_20*.log*` | `logs/events/` | `data/cooldowns_eur.db` | `data/multi_coin_grid_v2.sqlite` |
-| Kraken USD | `multi_coin_grid_v2_usd.py` | `logs/logs_multi_coin_grid_v2_usd_20*.log*` | `logs/events_usd/` | `data/cooldowns_usd.db` | `data/multi_coin_grid_v2_usd.sqlite` |
-| Bitget Spot | TBD | `logs/logs_spot_grid_bitget_20*.log*` | `logs/events/` | `data/cooldowns.db` | TBD |
+| Kraken EUR | `scripts/multi_coin_grid_v2.py` | `logs/logs_multi_coin_grid_v2_20*.log*` | `logs/events/` | `data/cooldowns_eur.db` | `data/multi_coin_grid_v2.sqlite` |
+| Kraken USD | `scripts/multi_coin_grid_v2_usd.py` | `logs/logs_multi_coin_grid_v2_usd_20*.log*` | `logs/events_usd/` | `data/cooldowns_usd.db` | `data/multi_coin_grid_v2_usd.sqlite` |
+| Bitget Spot | `scripts/spot_grid_bitget.py` | `logs/logs_spot_grid_bitget_20*.log*` | `logs/events/` | `data/cooldowns.db` | `data/spot_grid_bitget.sqlite` |
+| OKX Spot | `scripts/spot_grid_okx.py` | `logs/logs_spot_grid_okx_20*.log*` | `logs/events/` | — | `data/spot_grid_okx.sqlite` |
 
 ## Analysis Workflow
 
@@ -80,15 +81,17 @@ grep -i "Unhandled error\|background task" <logfile>
 
 ### Step 5: Check for common problems
 1. **Pair discovery**: `grep "Found.*pairs\|COIN DISCOVERY\|Discovering\|dynamic_pair_manager" <logfile> | head -20`
-2. **Stuck orders**: `grep "still pending\|CLOSING.*stuck\|zombie" <logfile>`
+2. **Stuck orders / zombie close**: `grep "still pending\|CLOSING.*stuck\|zombie_close\|FEE_AWARE_EXIT_BLOCKED" <logfile>`
 3. **Risk pauses**: `grep "RISK.*PAUSE\|kill.switch\|daily.*loss.*limit\|RiskGuard" <logfile>`
 4. **WebSocket drops**: `grep -i "websocket\|disconnect\|reconnect\|DNS.*timeout" <logfile>`
 5. **Rejected entries**: `grep "REJECT\|BLOCKED\|gate_denied\|INSUFFICIENT" <logfile>`
 6. **Fills/trades**: `grep -iE "FILL|OrderFilledEvent" <logfile> | wc -l`
-7. **Executor creates**: `grep "Creating.*executor\|GridExecutor.*start" <logfile>`
+7. **Executor creates**: `grep "Creating.*executor\|GridExecutor.*start\|entry_regime" <logfile>`
 8. **Stale data**: `grep "stale\|STALE\|max_price_age\|max_orderbook_age" <logfile>`
-9. **Market regime**: `grep "regime\|BEAR\|BULL\|breadth" <logfile> | tail -10`
+9. **Market regime**: `grep "regime\|BEAR\|BULL\|CHOP\|breadth" <logfile> | tail -10`
 10. **Balance issues**: `grep -i "insufficient\|balance\|INSUFFICIENT_BALANCE" <logfile> | head -10`
+11. **Orphan detection**: `grep -E "orphan\|auto_sell\|held_position_value\|FAILED.*restart" <logfile> | tail -10`
+12. **Type-8 FAILED losses**: `sqlite3 <db> "SELECT json_extract(config,'$.trading_pair') as pair, net_pnl_quote, json_extract(custom_info,'$.held_position_value') as held FROM Executors WHERE close_type=8 ORDER BY close_timestamp DESC LIMIT 10"`
 
 ### Step 6: Timeline reconstruction
 ```bash

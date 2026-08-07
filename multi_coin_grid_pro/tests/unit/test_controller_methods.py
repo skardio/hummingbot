@@ -1015,4 +1015,4 @@ class TestMomentumDetectOnlyController:
             call.args[0] for call in ctl.logger.return_value.warning.call_args_list
             if call.args
         ]
-        assert any("Momentum detect-only scoring skipped" in msg for msg in warning_logs)
+        assert any("Momentum" in msg and "skipped" in msg for msg in warning_logs)

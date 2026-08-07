@@ -43,6 +43,8 @@ _MANUAL_L2 = {
     "TAO", "ONDO", "AKT", "HYPE", "DASH", "ORCA", "RENDER", "AERO",
     "PENDLE", "BIO", "RAVE", "XDC", "MON", "ASSET", "CC", "PLAY",
     "AKT", "SUI", "AVAX",  # already above, no harm repeating in set
+    # OKX native exchange token — liquid mid-cap, comparable to BNB/CRO
+    "OKB",
 }
 
 _MANUAL_MEME = {

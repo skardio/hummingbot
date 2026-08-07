@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from utils.trend_calculator import CoinTrend, TrendCalculator
+from utils.trend_calculator import CandleData, CoinTrend, TrendCalculator
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -446,3 +446,199 @@ class TestCoinTrend:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# Tests for TrendCalculator._merge_ohlcv_into_candles
+# ---------------------------------------------------------------------------
+
+class TestMergeOhlcvIntoCandles:
+    """Unit tests for the pure-function merge helper.
+
+    All tests are synchronous — no exchange calls, no asyncio needed.
+    """
+
+    # Helpers
+    @staticmethod
+    def _candle(ts_sec: int, volume: float = 0.0, close: float = 1.0) -> CandleData:
+        return CandleData(
+            timestamp=float(ts_sec),
+            open=Decimal(str(close)),
+            high=Decimal(str(close)),
+            low=Decimal(str(close)),
+            close=Decimal(str(close)),
+            volume=Decimal(str(volume)),
+        )
+
+    @staticmethod
+    def _row(ts_sec: int, o=1.0, h=2.0, lo=0.5, c=1.5, v=500.0):
+        """Build a ccxt-style OHLCV row: [ts_ms, open, high, low, close, volume]."""
+        return [ts_sec * 1000, o, h, lo, c, v]
+
+    # -----------------------------------------------------------------------
+
+    def test_volume_updated_for_matching_timestamp(self):
+        """Existing candle with volume=0 is back-filled from REST volume."""
+        ts = 1_000 * 300  # arbitrary 5-min-aligned second
+        existing = [self._candle(ts, volume=0.0)]
+        ohlcv = [self._row(ts, v=999.0)]
+
+        result = TrendCalculator._merge_ohlcv_into_candles(
+            existing, ohlcv, current_candle_start=ts + 300
+        )
+
+        assert len(result) == 1
+        assert result[0].volume == Decimal("999")
+
+    def test_ohlc_updated_for_closed_candle(self):
+        """OHLC is overwritten by REST data for fully closed candles."""
+        ts = 1_000 * 300
+        existing = [self._candle(ts, volume=0.0, close=1.0)]
+        ohlcv = [self._row(ts, o=0.9, h=1.8, lo=0.8, c=1.7, v=400.0)]
+
+        result = TrendCalculator._merge_ohlcv_into_candles(
+            existing, ohlcv, current_candle_start=ts + 300
+        )
+
+        assert result[0].open == Decimal("0.9")
+        assert result[0].high == Decimal("1.8")
+        assert result[0].low == Decimal("0.8")
+        assert result[0].close == Decimal("1.7")
+
+    def test_ohlc_preserved_for_current_window_candle(self):
+        """Ticker-derived OHLC for the live window must not be overwritten."""
+        ts = 1_000 * 300  # current window
+        existing = [self._candle(ts, volume=0.0, close=2.0)]
+        ohlcv = [self._row(ts, o=0.9, h=1.8, lo=0.8, c=1.7, v=400.0)]
+
+        # current_candle_start == ts → this IS the current window
+        result = TrendCalculator._merge_ohlcv_into_candles(
+            existing, ohlcv, current_candle_start=ts
+        )
+
+        # Volume updated, OHLC preserved from ticker
+        assert result[0].volume == Decimal("400")
+        assert result[0].close == Decimal("2.0")
+        assert result[0].open == Decimal("2.0")
+
+    def test_new_candle_appended_for_unknown_timestamp(self):
+        """A REST row whose timestamp is not in existing is added as a new candle."""
+        ts_existing = 1_000 * 300
+        ts_new = ts_existing + 300
+        existing = [self._candle(ts_existing, volume=100.0)]
+        ohlcv = [self._row(ts_new, v=250.0)]
+
+        result = TrendCalculator._merge_ohlcv_into_candles(
+            existing, ohlcv, current_candle_start=ts_new + 300
+        )
+
+        assert len(result) == 2
+        assert result[1].volume == Decimal("250")
+
+    def test_no_duplicate_candles_for_same_timestamp(self):
+        """Two REST rows that map to the same 5-min key produce exactly one candle."""
+        ts = 1_000 * 300
+        existing = []
+        # Both rows have timestamps within the same 5-min window
+        ohlcv = [
+            self._row(ts, v=100.0),
+            self._row(ts + 60, v=200.0),  # same 5-min bucket (ts + 60 < ts + 300)
+        ]
+
+        result = TrendCalculator._merge_ohlcv_into_candles(
+            existing, ohlcv, current_candle_start=ts + 300
+        )
+
+        assert len(result) == 1
+        # Last write wins for the same bucket (volume=200 from second row)
+        assert result[0].volume == Decimal("200")
+
+    def test_cap_at_720_candles(self):
+        """Result is capped at 720 candles even if input + rest would exceed it."""
+        # 720 existing + 10 new via REST = 730, must be trimmed to 720
+        base_ts = 1_000 * 300
+        existing = [self._candle(base_ts + i * 300, volume=1.0) for i in range(720)]
+        new_ts_start = base_ts + 720 * 300
+        ohlcv = [self._row(new_ts_start + i * 300, v=5.0) for i in range(10)]
+
+        result = TrendCalculator._merge_ohlcv_into_candles(
+            existing, ohlcv, current_candle_start=new_ts_start + 10 * 300
+        )
+
+        assert len(result) == 720
+
+    def test_empty_existing_creates_candles_from_rest(self):
+        """Starting from an empty candle list, REST rows are all added."""
+        ts = 2_000 * 300
+        ohlcv = [self._row(ts + i * 300, v=float(i + 1)) for i in range(5)]
+
+        result = TrendCalculator._merge_ohlcv_into_candles(
+            [], ohlcv, current_candle_start=ts + 5 * 300
+        )
+
+        assert len(result) == 5
+        volumes = [float(c.volume) for c in result]
+        assert volumes == [1.0, 2.0, 3.0, 4.0, 5.0]
+
+    def test_empty_ohlcv_leaves_existing_unchanged(self):
+        """When REST returns no rows, the existing candle list is returned as-is."""
+        ts = 1_000 * 300
+        existing = [self._candle(ts, volume=77.0)]
+
+        result = TrendCalculator._merge_ohlcv_into_candles(
+            existing, [], current_candle_start=ts + 300
+        )
+
+        assert len(result) == 1
+        assert result[0].volume == Decimal("77")
+
+
+class TestCalculateAtrPct:
+    """Tests for TrendCalculator._calculate_atr_pct() minimum-candle guard."""
+
+    @staticmethod
+    def _candle(close: float, high: float = None, low: float = None) -> CandleData:
+        c = close
+        h = high if high is not None else c * 1.01
+        lo = low if low is not None else c * 0.99
+        return CandleData(
+            timestamp=0,
+            open=Decimal(str(c)),
+            high=Decimal(str(h)),
+            low=Decimal(str(lo)),
+            close=Decimal(str(c)),
+            volume=Decimal("1"),
+        )
+
+    def test_returns_zero_for_empty_list(self):
+        assert TrendCalculator._calculate_atr_pct([]) == 0.0
+
+    def test_returns_zero_for_fewer_than_period_plus_one_candles(self):
+        """14 candles for period=14 is insufficient (needs period+1=15)."""
+        candles = [self._candle(100.0 + i) for i in range(14)]
+        assert TrendCalculator._calculate_atr_pct(candles, period=14) == 0.0
+
+    def test_returns_zero_for_exactly_period_candles(self):
+        """Exactly period candles still insufficient."""
+        candles = [self._candle(100.0) for _ in range(14)]
+        assert TrendCalculator._calculate_atr_pct(candles, period=14) == 0.0
+
+    def test_returns_value_for_period_plus_one_candles(self):
+        """period+1 candles (15 for ATR-14) → returns a positive value."""
+        candles = [self._candle(100.0) for _ in range(15)]
+        result = TrendCalculator._calculate_atr_pct(candles, period=14)
+        assert result > 0.0
+
+    def test_returns_value_for_more_than_period_plus_one_candles(self):
+        """20 candles for period=14 → also returns a value."""
+        candles = [self._candle(100.0 + i * 0.1) for i in range(20)]
+        result = TrendCalculator._calculate_atr_pct(candles, period=14)
+        assert result > 0.0
+
+    def test_atr_pct_is_percentage_of_last_close(self):
+        """With uniform H/L range, ATR% = (H-L) / close * 100."""
+        # Each candle: close=100, high=101 (+1%), low=99 (-1%) → TR=2
+        candles = [self._candle(100.0, high=101.0, low=99.0) for _ in range(15)]
+        result = TrendCalculator._calculate_atr_pct(candles, period=14)
+        # ATR = 2.0, close = 100.0 → atr_pct = 2.0%
+        assert abs(result - 2.0) < 0.01

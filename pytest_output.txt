@@ -1,0 +1,2160 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.1, pluggy-1.6.0 -- /home/mo/.venvs/bot/bin/python
+cachedir: .pytest_cache
+rootdir: /home/mo/repos/hummingbot
+configfile: pyproject.toml
+plugins: anyio-4.11.0, asyncio-1.3.0, cov-7.0.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 26 items
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_hard_cap_fee_aware_close_allowed_returns_true FAILED [  3%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_hard_cap_not_in_fee_guarded_set FAILED [  7%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_no_progress_still_fee_guarded FAILED [ 11%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_stop_loss_never_fee_guarded FAILED [ 15%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_time_limit_still_fee_guarded FAILED [ 19%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS2FeeAwareBypass::test_bypass_at_threshold_overrides_guard FAILED [ 23%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS2FeeAwareBypass::test_bypass_before_threshold_does_not_override FAILED [ 26%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS2FeeAwareBypass::test_bypass_zero_never_overrides FAILED [ 30%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS10LogRateLimiting::test_block_after_60s_logs_again_with_count FAILED [ 34%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS10LogRateLimiting::test_different_close_types_have_independent_rate_limits FAILED [ 38%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS10LogRateLimiting::test_first_block_logs_immediately FAILED [ 42%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS10LogRateLimiting::test_second_block_within_60s_suppressed FAILED [ 46%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS5ConnectorOverrides::test_resolve_does_not_mutate_original FAILED [ 50%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS5ConnectorOverrides::test_resolve_no_overrides_returns_empty FAILED [ 53%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS5ConnectorOverrides::test_resolve_returns_matching_connector FAILED [ 57%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS5ConnectorOverrides::test_resolve_unknown_connector_returns_empty FAILED [ 61%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_connector_blacklist_does_not_pollute_other_connectors FAILED [ 65%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_connector_blacklist_included FAILED [ 69%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_effective_blacklist_is_union FAILED [ 73%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_empty_config_returns_empty_set FAILED [ 76%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_global_blacklist_included FAILED [ 80%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_unknown_connector_returns_only_global FAILED [ 84%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS7BlacklistProfileOverlap::test_connector_blacklist_overlap_also_warns FAILED [ 88%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS7BlacklistProfileOverlap::test_empty_coin_profiles_skips_check FAILED [ 92%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS7BlacklistProfileOverlap::test_no_overlap_no_warning FAILED [ 96%]
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS7BlacklistProfileOverlap::test_overlap_logs_warning FAILED [100%]
+
+=================================== FAILURES ===================================
+_ TestUS4HardCapNotFeeGuarded.test_hard_cap_fee_aware_close_allowed_returns_true _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS4HardCapNotFeeGuarded testMethod=test_hard_cap_fee_aware_close_allowed_returns_true>
+
+    def setUp(self):
+        super().setUp()
+        config = _make_config()
+>       self.executor = _make_executor(config)
+                        ^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:97:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:82: in _make_executor
+    executor = GridExecutor(strategy, config, update_interval=0.5)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e290f7d160>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+_______ TestUS4HardCapNotFeeGuarded.test_hard_cap_not_in_fee_guarded_set _______
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS4HardCapNotFeeGuarded testMethod=test_hard_cap_not_in_fee_guarded_set>
+
+    def setUp(self):
+        super().setUp()
+        config = _make_config()
+>       self.executor = _make_executor(config)
+                        ^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:97:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:82: in _make_executor
+    executor = GridExecutor(strategy, config, update_interval=0.5)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28f1a5400>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+________ TestUS4HardCapNotFeeGuarded.test_no_progress_still_fee_guarded ________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS4HardCapNotFeeGuarded testMethod=test_no_progress_still_fee_guarded>
+
+    def setUp(self):
+        super().setUp()
+        config = _make_config()
+>       self.executor = _make_executor(config)
+                        ^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:97:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:82: in _make_executor
+    executor = GridExecutor(strategy, config, update_interval=0.5)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28ed69b50>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+_________ TestUS4HardCapNotFeeGuarded.test_stop_loss_never_fee_guarded _________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS4HardCapNotFeeGuarded testMethod=test_stop_loss_never_fee_guarded>
+
+    def setUp(self):
+        super().setUp()
+        config = _make_config()
+>       self.executor = _make_executor(config)
+                        ^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:97:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:82: in _make_executor
+    executor = GridExecutor(strategy, config, update_interval=0.5)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28ed2ff80>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+________ TestUS4HardCapNotFeeGuarded.test_time_limit_still_fee_guarded _________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS4HardCapNotFeeGuarded testMethod=test_time_limit_still_fee_guarded>
+
+    def setUp(self):
+        super().setUp()
+        config = _make_config()
+>       self.executor = _make_executor(config)
+                        ^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:97:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:82: in _make_executor
+    executor = GridExecutor(strategy, config, update_interval=0.5)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28f1a5400>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+________ TestUS2FeeAwareBypass.test_bypass_at_threshold_overrides_guard ________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS2FeeAwareBypass testMethod=test_bypass_at_threshold_overrides_guard>
+
+    def test_bypass_at_threshold_overrides_guard(self):
+        """If age >= bypass_sec the guard is overridden and True is returned."""
+        bypass_sec = 3600
+>       executor = self._executor_with_age(bypass_sec=bypass_sec, age_sec=bypass_sec + 1)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:160:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:139: in _executor_with_age
+    executor = GridExecutor(strategy, config, update_interval=0.5)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28eec39b0>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+_____ TestUS2FeeAwareBypass.test_bypass_before_threshold_does_not_override _____
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS2FeeAwareBypass testMethod=test_bypass_before_threshold_does_not_override>
+
+    def test_bypass_before_threshold_does_not_override(self):
+        """If age < bypass_sec the bypass is NOT applied; guard runs normally."""
+>       executor = self._executor_with_age(bypass_sec=3600, age_sec=1800)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:148:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:139: in _executor_with_age
+    executor = GridExecutor(strategy, config, update_interval=0.5)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28ed3bf80>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+____________ TestUS2FeeAwareBypass.test_bypass_zero_never_overrides ____________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS2FeeAwareBypass testMethod=test_bypass_zero_never_overrides>
+
+    def test_bypass_zero_never_overrides(self):
+        """bypass_sec=0 disables the bypass (no age-based override)."""
+>       executor = self._executor_with_age(bypass_sec=0, age_sec=999_999)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:169:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:139: in _executor_with_age
+    executor = GridExecutor(strategy, config, update_interval=0.5)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28ed36de0>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+______ TestUS10LogRateLimiting.test_block_after_60s_logs_again_with_count ______
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS10LogRateLimiting testMethod=test_block_after_60s_logs_again_with_count>
+
+    def setUp(self):
+        super().setUp()
+        start_ts = 1_000_000.0
+        config = _make_config(fee_aware_timeout_bypass_sec=0)
+        strategy = _make_strategy(timestamp=start_ts)
+>       self.executor = GridExecutor(strategy, config, update_interval=0.5)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:188:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28ed3b170>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+_ TestUS10LogRateLimiting.test_different_close_types_have_independent_rate_limits _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS10LogRateLimiting testMethod=test_different_close_types_have_independent_rate_limits>
+
+    def setUp(self):
+        super().setUp()
+        start_ts = 1_000_000.0
+        config = _make_config(fee_aware_timeout_bypass_sec=0)
+        strategy = _make_strategy(timestamp=start_ts)
+>       self.executor = GridExecutor(strategy, config, update_interval=0.5)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:188:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28edc51f0>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+__________ TestUS10LogRateLimiting.test_first_block_logs_immediately ___________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS10LogRateLimiting testMethod=test_first_block_logs_immediately>
+
+    def setUp(self):
+        super().setUp()
+        start_ts = 1_000_000.0
+        config = _make_config(fee_aware_timeout_bypass_sec=0)
+        strategy = _make_strategy(timestamp=start_ts)
+>       self.executor = GridExecutor(strategy, config, update_interval=0.5)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:188:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28ed69160>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+_______ TestUS10LogRateLimiting.test_second_block_within_60s_suppressed ________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS10LogRateLimiting testMethod=test_second_block_within_60s_suppressed>
+
+    def setUp(self):
+        super().setUp()
+        start_ts = 1_000_000.0
+        config = _make_config(fee_aware_timeout_bypass_sec=0)
+        strategy = _make_strategy(timestamp=start_ts)
+>       self.executor = GridExecutor(strategy, config, update_interval=0.5)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:188:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:75: in __init__
+    self.grid_levels = self._generate_grid_levels()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <hummingbot.strategy_v2.executors.grid_executor.grid_executor.GridExecutor object at 0x74e28ed79970>
+
+    def _generate_grid_levels(self):
+        grid_levels = []
+        # Try to get current price, with fallback for paper trading when order book doesn't exist
+        price = None
+        try:
+            price = self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.MidPrice)
+        except (ValueError, KeyError) as e:
+            # Handle missing order book in paper trading
+            error_msg = str(e)
+            if "No order book exists" in error_msg or "order book" in error_msg.lower():
+                # Try to get price from base connector (for paper trading)
+                connector = self.connectors.get(self.config.connector_name)
+                if connector and hasattr(connector, '_target_market') and connector._target_market is not None:
+                    try:
+                        base_connector = connector._target_market()
+                        if base_connector:
+                            price = base_connector.get_price_by_type(self.config.trading_pair, PriceType.MidPrice)
+                            self.logger().info(
+                                f"Using base connector price for {self.config.trading_pair}: {price}"
+                            )
+                    except Exception as base_e:
+                        self.logger().warning(
+                            f"Could not get price from base connector for {self.config.trading_pair}: {base_e}"
+                        )
+
+                # If still no price, use midpoint of start_price and end_price as fallback
+                if price is None:
+                    price = self._validated_midpoint_price("generate_grid_levels (paper fallback)")
+                    self.logger().warning(
+                        f"No order book exists for {self.config.trading_pair} in paper trading. "
+                        f"Using fallback price (midpoint of grid range): {price}"
+                    )
+            else:
+                # Re-raise if it's a different error
+                raise
+
+        # Ensure price is valid (should never be None at this point, but safety check)
+>       if price is None or price <= Decimal("0"):
+                            ^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: '<=' not supported between instances of 'MagicMock' and 'decimal.Decimal'
+
+hummingbot/strategy_v2/executors/grid_executor/grid_executor.py:540: TypeError
+_______ TestUS5ConnectorOverrides.test_resolve_does_not_mutate_original ________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS5ConnectorOverrides testMethod=test_resolve_does_not_mutate_original>
+
+    def test_resolve_does_not_mutate_original(self):
+        """resolve_connector_config returns a copy, not the original dict."""
+>       cfg = self._make_config_obj(connector_overrides={
+            "kraken_spot": {"min_grid_level_spacing_pct": 0.75},
+        })
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:293:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS5ConnectorOverrides testMethod=test_resolve_does_not_mutate_original>
+kwargs = {'connector_overrides': {'kraken_spot': {'min_grid_level_spacing_pct': 0.75}}}
+MultiCoinGridConfig = <class 'hummingbot.multi_coin_grid_controllers.multi_coin_grid_config.MultiCoinGridConfig'>
+defaults = {'connector_name': 'kraken_spot', 'connector_overrides': {'kraken_spot': {'min_grid_level_spacing_pct': 0.75}}, 'controller_name': 'multi_coin_grid', 'controller_type': 'market_making', ...}
+
+    def _make_config_obj(self, **kwargs):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        defaults = dict(
+            id="cfg-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+        )
+        defaults.update(kwargs)
+>       return MultiCoinGridConfig(**defaults)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:266: ValidationError
+______ TestUS5ConnectorOverrides.test_resolve_no_overrides_returns_empty _______
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS5ConnectorOverrides testMethod=test_resolve_no_overrides_returns_empty>
+
+    def test_resolve_no_overrides_returns_empty(self):
+        """With no connector_overrides configured, resolve returns {}."""
+>       cfg = self._make_config_obj()
+              ^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:270:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS5ConnectorOverrides testMethod=test_resolve_no_overrides_returns_empty>
+kwargs = {}
+MultiCoinGridConfig = <class 'hummingbot.multi_coin_grid_controllers.multi_coin_grid_config.MultiCoinGridConfig'>
+defaults = {'connector_name': 'kraken_spot', 'controller_name': 'multi_coin_grid', 'controller_type': 'market_making', 'end_spread': Decimal('0.05'), ...}
+
+    def _make_config_obj(self, **kwargs):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        defaults = dict(
+            id="cfg-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+        )
+        defaults.update(kwargs)
+>       return MultiCoinGridConfig(**defaults)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:266: ValidationError
+______ TestUS5ConnectorOverrides.test_resolve_returns_matching_connector _______
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS5ConnectorOverrides testMethod=test_resolve_returns_matching_connector>
+
+    def test_resolve_returns_matching_connector(self):
+        """resolve_connector_config returns the correct connector's dict."""
+>       cfg = self._make_config_obj(connector_overrides={
+            "kraken_spot": {"min_grid_level_spacing_pct": 0.75},
+            "bitget_spot": {"min_grid_level_spacing_pct": 0.50},
+        })
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:276:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS5ConnectorOverrides testMethod=test_resolve_returns_matching_connector>
+kwargs = {'connector_overrides': {'bitget_spot': {'min_grid_level_spacing_pct': 0.5}, 'kraken_spot': {'min_grid_level_spacing_pct': 0.75}}}
+MultiCoinGridConfig = <class 'hummingbot.multi_coin_grid_controllers.multi_coin_grid_config.MultiCoinGridConfig'>
+defaults = {'connector_name': 'kraken_spot', 'connector_overrides': {'bitget_spot': {'min_grid_level_spacing_pct': 0.5}, 'kraken_...: {'min_grid_level_spacing_pct': 0.75}}, 'controller_name': 'multi_coin_grid', 'controller_type': 'market_making', ...}
+
+    def _make_config_obj(self, **kwargs):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        defaults = dict(
+            id="cfg-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+        )
+        defaults.update(kwargs)
+>       return MultiCoinGridConfig(**defaults)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:266: ValidationError
+____ TestUS5ConnectorOverrides.test_resolve_unknown_connector_returns_empty ____
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS5ConnectorOverrides testMethod=test_resolve_unknown_connector_returns_empty>
+
+    def test_resolve_unknown_connector_returns_empty(self):
+        """An unconfigured connector name returns {}."""
+>       cfg = self._make_config_obj(connector_overrides={
+            "kraken_spot": {"min_grid_level_spacing_pct": 0.75},
+        })
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:285:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS5ConnectorOverrides testMethod=test_resolve_unknown_connector_returns_empty>
+kwargs = {'connector_overrides': {'kraken_spot': {'min_grid_level_spacing_pct': 0.75}}}
+MultiCoinGridConfig = <class 'hummingbot.multi_coin_grid_controllers.multi_coin_grid_config.MultiCoinGridConfig'>
+defaults = {'connector_name': 'kraken_spot', 'connector_overrides': {'kraken_spot': {'min_grid_level_spacing_pct': 0.75}}, 'controller_name': 'multi_coin_grid', 'controller_type': 'market_making', ...}
+
+    def _make_config_obj(self, **kwargs):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        defaults = dict(
+            id="cfg-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+        )
+        defaults.update(kwargs)
+>       return MultiCoinGridConfig(**defaults)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:266: ValidationError
+_ TestUS6EffectiveBlacklist.test_connector_blacklist_does_not_pollute_other_connectors _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_connector_blacklist_does_not_pollute_other_connectors>
+
+    def test_connector_blacklist_does_not_pollute_other_connectors(self):
+        """XDC-USD blacklisted on kraken_spot must NOT appear in bitget_spot blacklist."""
+>       cfg = self._make_config_obj(
+            connector_overrides={
+                "kraken_spot": {"blacklist": ["XDC-USD"]},
+            },
+        )
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:362:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_connector_blacklist_does_not_pollute_other_connectors>
+kwargs = {'connector_overrides': {'kraken_spot': {'blacklist': ['XDC-USD']}}}
+MultiCoinGridConfig = <class 'hummingbot.multi_coin_grid_controllers.multi_coin_grid_config.MultiCoinGridConfig'>
+defaults = {'connector_name': 'kraken_spot', 'connector_overrides': {'kraken_spot': {'blacklist': ['XDC-USD']}}, 'controller_name': 'multi_coin_grid', 'controller_type': 'market_making', ...}
+
+    def _make_config_obj(self, **kwargs):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        defaults = dict(
+            id="cfg-bl-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+        )
+        defaults.update(kwargs)
+>       return MultiCoinGridConfig(**defaults)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:328: ValidationError
+_________ TestUS6EffectiveBlacklist.test_connector_blacklist_included __________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_connector_blacklist_included>
+
+    def test_connector_blacklist_included(self):
+>       cfg = self._make_config_obj(connector_overrides={
+            "kraken_spot": {"blacklist": ["XDC-USD", "HYPE-USD"]},
+        })
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:342:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_connector_blacklist_included>
+kwargs = {'connector_overrides': {'kraken_spot': {'blacklist': ['XDC-USD', 'HYPE-USD']}}}
+MultiCoinGridConfig = <class 'hummingbot.multi_coin_grid_controllers.multi_coin_grid_config.MultiCoinGridConfig'>
+defaults = {'connector_name': 'kraken_spot', 'connector_overrides': {'kraken_spot': {'blacklist': ['XDC-USD', 'HYPE-USD']}}, 'controller_name': 'multi_coin_grid', 'controller_type': 'market_making', ...}
+
+    def _make_config_obj(self, **kwargs):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        defaults = dict(
+            id="cfg-bl-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+        )
+        defaults.update(kwargs)
+>       return MultiCoinGridConfig(**defaults)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:328: ValidationError
+_________ TestUS6EffectiveBlacklist.test_effective_blacklist_is_union __________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_effective_blacklist_is_union>
+
+    def test_effective_blacklist_is_union(self):
+>       cfg = self._make_config_obj(
+            blacklist=["SCAM-USD"],
+            connector_overrides={
+                "kraken_spot": {"blacklist": ["XDC-USD"]},
+                "bitget_spot": {"blacklist": ["PENGU-USD"]},
+            },
+        )
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:350:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_effective_blacklist_is_union>
+kwargs = {'blacklist': ['SCAM-USD'], 'connector_overrides': {'bitget_spot': {'blacklist': ['PENGU-USD']}, 'kraken_spot': {'blacklist': ['XDC-USD']}}}
+MultiCoinGridConfig = <class 'hummingbot.multi_coin_grid_controllers.multi_coin_grid_config.MultiCoinGridConfig'>
+defaults = {'blacklist': ['SCAM-USD'], 'connector_name': 'kraken_spot', 'connector_overrides': {'bitget_spot': {'blacklist': ['PENGU-USD']}, 'kraken_spot': {'blacklist': ['XDC-USD']}}, 'controller_name': 'multi_coin_grid', ...}
+
+    def _make_config_obj(self, **kwargs):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        defaults = dict(
+            id="cfg-bl-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+        )
+        defaults.update(kwargs)
+>       return MultiCoinGridConfig(**defaults)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:328: ValidationError
+________ TestUS6EffectiveBlacklist.test_empty_config_returns_empty_set _________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_empty_config_returns_empty_set>
+
+    def test_empty_config_returns_empty_set(self):
+>       cfg = self._make_config_obj()
+              ^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:331:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_empty_config_returns_empty_set>
+kwargs = {}
+MultiCoinGridConfig = <class 'hummingbot.multi_coin_grid_controllers.multi_coin_grid_config.MultiCoinGridConfig'>
+defaults = {'connector_name': 'kraken_spot', 'controller_name': 'multi_coin_grid', 'controller_type': 'market_making', 'end_spread': Decimal('0.05'), ...}
+
+    def _make_config_obj(self, **kwargs):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        defaults = dict(
+            id="cfg-bl-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+        )
+        defaults.update(kwargs)
+>       return MultiCoinGridConfig(**defaults)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:328: ValidationError
+___________ TestUS6EffectiveBlacklist.test_global_blacklist_included ___________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_global_blacklist_included>
+
+    def test_global_blacklist_included(self):
+>       cfg = self._make_config_obj(blacklist=["SCAM-USD", "RUG-USD"])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:336:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_global_blacklist_included>
+kwargs = {'blacklist': ['SCAM-USD', 'RUG-USD']}
+MultiCoinGridConfig = <class 'hummingbot.multi_coin_grid_controllers.multi_coin_grid_config.MultiCoinGridConfig'>
+defaults = {'blacklist': ['SCAM-USD', 'RUG-USD'], 'connector_name': 'kraken_spot', 'controller_name': 'multi_coin_grid', 'controller_type': 'market_making', ...}
+
+    def _make_config_obj(self, **kwargs):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        defaults = dict(
+            id="cfg-bl-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+        )
+        defaults.update(kwargs)
+>       return MultiCoinGridConfig(**defaults)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:328: ValidationError
+_____ TestUS6EffectiveBlacklist.test_unknown_connector_returns_only_global _____
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_unknown_connector_returns_only_global>
+
+    def test_unknown_connector_returns_only_global(self):
+>       cfg = self._make_config_obj(blacklist=["SCAM-USD"])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:372:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS6EffectiveBlacklist testMethod=test_unknown_connector_returns_only_global>
+kwargs = {'blacklist': ['SCAM-USD']}
+MultiCoinGridConfig = <class 'hummingbot.multi_coin_grid_controllers.multi_coin_grid_config.MultiCoinGridConfig'>
+defaults = {'blacklist': ['SCAM-USD'], 'connector_name': 'kraken_spot', 'controller_name': 'multi_coin_grid', 'controller_type': 'market_making', ...}
+
+    def _make_config_obj(self, **kwargs):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        defaults = dict(
+            id="cfg-bl-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+        )
+        defaults.update(kwargs)
+>       return MultiCoinGridConfig(**defaults)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:328: ValidationError
+__ TestUS7BlacklistProfileOverlap.test_connector_blacklist_overlap_also_warns __
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS7BlacklistProfileOverlap testMethod=test_connector_blacklist_overlap_also_warns>
+
+    def test_connector_blacklist_overlap_also_warns(self):
+        """Warning is triggered even when the blacklist entry is connector-specific."""
+>       ctrl = self._make_controller(
+            coin_profiles={"HYPE": {}},
+            connector_overrides={"kraken_spot": {"blacklist": ["HYPE-USD"]}},
+        )
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:435:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS7BlacklistProfileOverlap testMethod=test_connector_blacklist_overlap_also_warns>
+blacklist = None, coin_profiles = {'HYPE': {}}
+connector_overrides = {'kraken_spot': {'blacklist': ['HYPE-USD']}}
+
+    def _make_controller(self, blacklist=None, coin_profiles=None, connector_overrides=None):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
+>       cfg = MultiCoinGridConfig(
+            id="ctrl-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+            blacklist=blacklist or [],
+            coin_profiles=coin_profiles or {},
+            connector_overrides=connector_overrides or {},
+        )
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:387: ValidationError
+_____ TestUS7BlacklistProfileOverlap.test_empty_coin_profiles_skips_check ______
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS7BlacklistProfileOverlap testMethod=test_empty_coin_profiles_skips_check>
+
+    def test_empty_coin_profiles_skips_check(self):
+        """With no coin_profiles the method exits early without logging."""
+>       ctrl = self._make_controller(blacklist=["XDC-USD"])
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:447:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS7BlacklistProfileOverlap testMethod=test_empty_coin_profiles_skips_check>
+blacklist = ['XDC-USD'], coin_profiles = None, connector_overrides = None
+
+    def _make_controller(self, blacklist=None, coin_profiles=None, connector_overrides=None):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
+>       cfg = MultiCoinGridConfig(
+            id="ctrl-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+            blacklist=blacklist or [],
+            coin_profiles=coin_profiles or {},
+            connector_overrides=connector_overrides or {},
+        )
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:387: ValidationError
+__________ TestUS7BlacklistProfileOverlap.test_no_overlap_no_warning ___________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS7BlacklistProfileOverlap testMethod=test_no_overlap_no_warning>
+
+    def test_no_overlap_no_warning(self):
+        """No warning when blacklist and coin_profiles are disjoint."""
+>       ctrl = self._make_controller(
+            blacklist=["SCAM-USD"],
+            coin_profiles={"XDC": {}},
+        )
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:412:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS7BlacklistProfileOverlap testMethod=test_no_overlap_no_warning>
+blacklist = ['SCAM-USD'], coin_profiles = {'XDC': {}}
+connector_overrides = None
+
+    def _make_controller(self, blacklist=None, coin_profiles=None, connector_overrides=None):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
+>       cfg = MultiCoinGridConfig(
+            id="ctrl-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+            blacklist=blacklist or [],
+            coin_profiles=coin_profiles or {},
+            connector_overrides=connector_overrides or {},
+        )
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:387: ValidationError
+___________ TestUS7BlacklistProfileOverlap.test_overlap_logs_warning ___________
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS7BlacklistProfileOverlap testMethod=test_overlap_logs_warning>
+
+    def test_overlap_logs_warning(self):
+        """Warning logged when a coin_profiles key matches a blacklisted pair."""
+>       ctrl = self._make_controller(
+            blacklist=["XDC-USD"],
+            coin_profiles={"XDC": {}},
+        )
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:423:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test.hummingbot.strategy_v2.executors.grid_executor.test_grid_executor_epic_risk.TestUS7BlacklistProfileOverlap testMethod=test_overlap_logs_warning>
+blacklist = ['XDC-USD'], coin_profiles = {'XDC': {}}, connector_overrides = None
+
+    def _make_controller(self, blacklist=None, coin_profiles=None, connector_overrides=None):
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_config import MultiCoinGridConfig
+        from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
+>       cfg = MultiCoinGridConfig(
+            id="ctrl-test",
+            controller_name="multi_coin_grid",
+            controller_type="market_making",
+            connector_name="kraken_spot",
+            trading_pair="XDC-USD",
+            quote_asset="USD",
+            total_amount_quote=Decimal("300"),
+            min_order_amount_quote=Decimal("15"),
+            num_grids=5,
+            start_spread=Decimal("0.01"),
+            end_spread=Decimal("0.05"),
+            blacklist=blacklist or [],
+            coin_profiles=coin_profiles or {},
+            connector_overrides=connector_overrides or {},
+        )
+E       pydantic_core._pydantic_core.ValidationError: 3 validation errors for MultiCoinGridConfig
+E       trading_pair
+E         Extra inputs are not permitted [type=extra_forbidden, input_value='XDC-USD', input_type=str]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       start_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.01'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+E       end_spread
+E         Extra inputs are not permitted [type=extra_forbidden, input_value=Decimal('0.05'), input_type=Decimal]
+E           For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py:387: ValidationError
+=============================== warnings summary ===============================
+hummingbot/connector/exchange/foxbit/foxbit_utils.py:132
+  /home/mo/repos/hummingbot/hummingbot/connector/exchange/foxbit/foxbit_utils.py:132: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    connector: str = Field(default="foxbit", client_data=None)
+
+hummingbot/connector/exchange/foxbit/foxbit_utils.py:131
+  /home/mo/repos/hummingbot/hummingbot/connector/exchange/foxbit/foxbit_utils.py:131: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class FoxbitConfigMap(BaseConnectorConfigMap):
+
+hummingbot/connector/exchange/foxbit/foxbit_utils.py:165
+  /home/mo/repos/hummingbot/hummingbot/connector/exchange/foxbit/foxbit_utils.py:165: PydanticDeprecatedSince20: The `construct` method is deprecated; use `model_construct` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    KEYS = FoxbitConfigMap.construct()
+
+hummingbot/strategy_v2/executors/data_types.py:40
+  /home/mo/repos/hummingbot/hummingbot/strategy_v2/executors/data_types.py:40: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class ConnectorPair(BaseModel):
+
+../../.venvs/bot/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:319
+../../.venvs/bot/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:319
+  /home/mo/.venvs/bot/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:319: PydanticDeprecatedSince20: `json_encoders` is deprecated. See https://docs.pydantic.dev/2.12/concepts/serialization/#custom-serializers for alternatives. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warnings.warn(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:30
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:30: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    blacklist: Optional[List[str]] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:43
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:43: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    log_level: Optional[str] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:53
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:53: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    paper_trading: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:64
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:64: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    instance_id: Optional[str] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:74
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:74: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    connector_name: str = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:82
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:82: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    quote_asset: str = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:92
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:92: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    balance_currency: Optional[str] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:102
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:102: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    whitelisted_pairs: Optional[List[str]] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:112
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:112: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_dynamic_pair_discovery: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:122
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:122: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    manual_trading_pairs: Optional[List[str]] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:134
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:134: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_coins_to_monitor: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:144
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:144: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_24h_volume_eur: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:155
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:155: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_simultaneous_coins: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:168
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:168: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_dynamic_pair_manager: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:178
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:178: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    pair_scan_interval_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:190
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:190: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_spread_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:202
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:202: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    switch_grace_period_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:242
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:242: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    staleness_guard_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:252
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:252: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_price_age_ms: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:264
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:264: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_orderbook_age_ms: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:279
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:279: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    auto_quarantine: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:294
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:294: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    exclude_expensive_coins: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:304
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:304: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    coin_rotation_threshold: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:314
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:314: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    pool_membership_cooldown_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:328
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:328: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    coin_discovery_refresh_interval_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:341
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:341: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_lookback_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:351
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:351: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_lookback_short_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:360
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:360: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_lookback_mid_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:369
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:369: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_lookback_long_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:378
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:378: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    switch_threshold_percent: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:387
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:387: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    exit_short_threshold: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:396
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:396: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    exit_mid_threshold: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:405
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:405: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    downtrend_gate_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:414
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:414: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    downtrend_gate_1h_min: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:423
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:423: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    downtrend_gate_4h_min: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:432
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:432: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    downtrend_gate_24h_min: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:442
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:442: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    emergency_exit_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:451
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:451: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    hard_stop_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:460
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:460: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_loss_exit_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:469
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:469: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_loss_exit_min_net_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:479
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:479: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_grid_profit_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:489
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:489: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_startup_wait_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:498
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:498: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_multi_timeframe: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:507
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:507: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_min_change_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:516
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:516: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    price_update_interval: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:526
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:526: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_coin_monitoring_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:535
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:535: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    session_blacklist_duration_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:545
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:545: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_switch_interval_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:555
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:555: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_hold_time_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:564
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:564: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_hold_time_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:580
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:580: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    soft_hold_time_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:589
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:589: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    hard_hold_time_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:598
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:598: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    soft_exit_min_trend_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:607
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:607: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    soft_exit_max_loss_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:616
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:616: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    soft_exit_extend_seconds: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:629
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:629: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_fill_timeout_sec: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:638
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:638: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_progress_timeout_sec: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:648
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:648: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_progress_min_loss_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:657
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:657: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    no_progress_atr_multiplier: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:666
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:666: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    fee_aware_timeout_bypass_sec: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:675
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:675: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    close_grace_sec: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:688
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:688: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    blacklist_after_timeout_sec: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:701
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:701: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    aggressive_close_method: str = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:710
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:710: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    aggressive_close_slippage_guard_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:719
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:719: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_close_retries: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:728
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:728: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    smart_switch_k: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:737
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:737: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    switch_cost_multiplier: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:747
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:747: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    grid_range_pct_down: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:756
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:756: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    grid_range_pct_up: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:765
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:765: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    num_grids: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:774
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:774: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_grid_level_spacing_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:784
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:784: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_smart_entry_filter: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:793
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:793: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    smart_entry_filter: dict = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:803
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:803: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    momentum_sleeve: dict = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:832
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:832: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    dynamic_slots: dict = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:845
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:845: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    core_universe: Optional[List[str]] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:855
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:855: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    coin_profiles: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:899
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:899: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    telegram: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:909
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:909: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_dynamic_grid_sizer: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:918
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:918: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    dynamic_grid_sizer: dict = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:975
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:975: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_atr_grid_ranges: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:984
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:984: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    atr_multiplier_down: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:993
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:993: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    atr_multiplier_up: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1002
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1002: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_asymmetric_grids: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1011
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1011: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    smart_refill_threshold_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1021
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1021: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    total_amount_quote: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1030
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1030: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_order_amount_quote: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1041
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1041: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    stop_loss_pct: Optional[Decimal] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1050
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1050: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    take_profit_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1060
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1060: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trailing_stop_activation_pct: Optional[Decimal] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1068
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1068: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trailing_stop_delta_pct: Optional[Decimal] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1096
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1096: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_professional_risk_mgmt: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1108
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1108: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    atr_stop_multiplier: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1117
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1117: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_stop_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1126
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1126: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_stop_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1136
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1136: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_dynamic_take_profit: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1145
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1145: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_take_profit_pct: Optional[Decimal] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1154
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1154: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_take_profit_pct: Optional[Decimal] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1163
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1163: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    time_based_stop_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1172
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1172: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    time_stop_requires_stall: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1181
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1181: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    price_stall_threshold_atr: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1190
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1190: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_minutes_since_last_fill: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1199
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1199: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_rolling_pnl_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1208
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1208: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    min_win_rate_threshold: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1217
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1217: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    pause_cooldown_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1226
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1226: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    resume_min_pnl_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1235
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1235: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_pause_extensions: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1244
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1244: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_open_orders: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1253
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1253: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    order_frequency: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1263
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1263: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_entry_spread_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1273
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1273: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_daily_loss_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1281
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1281: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_weekly_loss_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1289
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1289: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_monthly_loss_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1298
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1298: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_daily_loss_eur: Optional[float] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1309
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1309: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_exposure_per_coin_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1318
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1318: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    max_total_exposure_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1328
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1328: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_reference_balance_quote: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1336
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1336: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_bucket_limits: Optional[Dict[str, float]] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1344
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1344: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_max_daily_loss_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1352
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1352: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_max_balance_per_trade_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1360
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1360: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_max_total_open_risk_pct: Decimal = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1368
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1368: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_exit_cooldown_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1376
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1376: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    r_unit_quote: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1384
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1384: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    daily_kill_switch_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1392
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1392: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_symbol_switch_cooldown_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1400
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1400: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    risk_consecutive_loss_cooldown_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1410
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1410: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    capital_reserve_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1423
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1423: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    auto_sell_orphaned_positions: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1433
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1433: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_min_entry_strength: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1441
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1441: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_min_exit_strength: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1449
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1449: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    trend_confirmation_timeframes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1459
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1459: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warmup_override_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1469
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1469: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warmup_4h_strong_min: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1479
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1479: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warmup_1h_min_if_4h_strong: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1489
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1489: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warmup_max_minutes: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1506
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1506: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    circuit_breaker_volatility_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1515
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1515: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    circuit_breaker_time_window: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1525
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1525: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    api_error_max_retries: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1534
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1534: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    api_error_backoff_time: int = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1547
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1547: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    market_regime: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1560
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1560: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    time_based_rules: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1573
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1573: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    performance_tracking: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1586
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1586: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    liquidity_aware_sizing: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1599
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1599: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    orderbook_liquidity: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1617
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1617: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    orderbook_prefetch: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1637
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1637: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    debug_trace_enabled: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1647
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1647: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    debug_trace_format: str = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1657
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1657: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    debug_trace_log_accepted: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1667
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1667: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    debug_trace_log_rejected: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1678
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1678: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    adaptive_regime_detection: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1688
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1688: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    adaptive_filters: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1699
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1699: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    grid_suitability: Optional[dict] = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1710
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1710: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    use_multi_timeframe_buy: bool = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1720
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1720: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    mtf_1h_min_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1730
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1730: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    mtf_4h_min_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1740
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1740: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    mtf_24h_min_pct: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1750
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1750: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    mtf_declining_1h_max: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1760
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1760: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    mtf_declining_4h_max: float = Field(
+
+hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1771
+  /home/mo/repos/hummingbot/hummingbot/multi_coin_grid_controllers/multi_coin_grid_config.py:1771: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'client_data'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    observability: Optional[dict] = Field(
+
+test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_hard_cap_fee_aware_close_allowed_returns_true
+  /home/mo/repos/hummingbot/test/isolated_asyncio_wrapper_test_case.py:76: DeprecationWarning: There is no current event loop
+    cls.main_event_loop = asyncio.get_event_loop()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_hard_cap_fee_aware_close_allowed_returns_true
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_hard_cap_not_in_fee_guarded_set
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_no_progress_still_fee_guarded
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_stop_loss_never_fee_guarded
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS4HardCapNotFeeGuarded::test_time_limit_still_fee_guarded
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS2FeeAwareBypass::test_bypass_at_threshold_overrides_guard
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS2FeeAwareBypass::test_bypass_before_threshold_does_not_override
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS2FeeAwareBypass::test_bypass_zero_never_overrides
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS10LogRateLimiting::test_block_after_60s_logs_again_with_count
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS10LogRateLimiting::test_different_close_types_have_independent_rate_limits
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS10LogRateLimiting::test_first_block_logs_immediately
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS10LogRateLimiting::test_second_block_within_60s_suppressed
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS5ConnectorOverrides::test_resolve_does_not_mutate_original
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS5ConnectorOverrides::test_resolve_no_overrides_returns_empty
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS5ConnectorOverrides::test_resolve_returns_matching_connector
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS5ConnectorOverrides::test_resolve_unknown_connector_returns_empty
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_connector_blacklist_does_not_pollute_other_connectors
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_connector_blacklist_included
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_effective_blacklist_is_union
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_empty_config_returns_empty_set
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_global_blacklist_included
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS6EffectiveBlacklist::test_unknown_connector_returns_only_global
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS7BlacklistProfileOverlap::test_connector_blacklist_overlap_also_warns
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS7BlacklistProfileOverlap::test_empty_coin_profiles_skips_check
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS7BlacklistProfileOverlap::test_no_overlap_no_warning
+FAILED test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_epic_risk.py::TestUS7BlacklistProfileOverlap::test_overlap_logs_warning
+======================= 26 failed, 166 warnings in 4.67s =======================

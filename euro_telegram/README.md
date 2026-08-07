@@ -1,0 +1,333 @@
+# Euro Telegram Generator
+
+Een klein Python-programma dat historische Euro-resultaten ophaalt, lokaal opslaat, nummerfrequenties analyseert en wekelijks 10 nieuwe combinaties via Telegram stuurt.
+
+Belangrijk: dit programma doet geen voorspelling en claimt geen hogere winkans. Euro blijft volledig willekeurig. De gewichten zijn alleen gebaseerd op historische frequenties en simpele patroonfilters.
+
+## Wat Het Doet
+
+- Scraped Euro jaararchieven van `https://www.lotto.net/eurojackpot/results/{jaar}`.
+- Leest per trekking de datum, 5 hoofdnummers en 2 Euro-nummers.
+- Slaat resultaten op in SQLite.
+- Analyseert warme en koude hoofdnummers en Euro-nummers.
+- Genereert 10 combinaties: 5 met voorkeur voor vaker gevallen nummers en 5 met voorkeur voor minder vaak gevallen nummers.
+- Vermijdt historische exacte combinaties, dubbele output en simpele patronen.
+- Stuurt de combinaties via de Telegram Bot API.
+- Kan handmatig draaien of continu als wekelijkse scheduler.
+
+## Projectstructuur
+
+```text
+euro_telegram/
+  .env.example
+  requirements.txt
+  README.md
+  data/
+  logs/
+  euro/
+    analyzer.py
+    config.py
+    database.py
+    generator.py
+    main.py
+    scraper.py
+    scheduler.py
+    telegram_client.py
+```
+
+## Benodigde Python-versie
+
+Gebruik Python 3.10 of nieuwer.
+
+Controleer:
+
+```bash
+python --version
+```
+
+## Installatie
+
+Ga naar de projectmap:
+
+```bash
+cd euro_telegram
+```
+
+Maak een virtual environment:
+
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+macOS/Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Installeer dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Installeer daarna het pakket lokaal in je actieve virtual environment:
+
+```bash
+pip install -e .
+```
+
+Daarna kun je vanuit elke map deze commands gebruiken:
+
+```bash
+python -m euro --help
+euro --help
+```
+
+Maak je eigen `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Op Windows kun je `.env.example` ook handmatig kopieren naar `.env`.
+
+## Telegram Bot Token Krijgen
+
+1. Open Telegram.
+2. Zoek `@BotFather`.
+3. Stuur `/newbot`.
+4. Kies een naam en username voor je bot.
+5. BotFather geeft een token zoals `123456789:ABC...`.
+6. Zet dit in `.env` als `TELEGRAM_BOT_TOKEN`.
+
+## Telegram Chat ID Instellen
+
+1. Open een chat met je nieuwe bot.
+2. Stuur bijvoorbeeld `Hallo`.
+3. Open in je browser:
+
+```text
+https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates
+```
+
+4. Zoek in de JSON naar `chat` en daarna `id`.
+5. Zet die waarde in `.env` als `TELEGRAM_CHAT_ID`.
+
+Test daarna:
+
+```bash
+python -m euro telegram-check
+python -m euro telegram-test
+```
+
+## Configuratie
+
+Voorbeeld `.env`:
+
+```env
+TELEGRAM_BOT_TOKEN=123456789:replace_with_your_bot_token
+TELEGRAM_CHAT_ID=123456789
+RUN_DAY=friday
+RUN_TIME=10:00
+DB_PATH=data/euro.sqlite
+LOG_FILE=logs/euro.log
+```
+
+`RUN_DAY` mag zijn: `monday`, `tuesday`, `wednesday`, `thursday`, `friday`, `saturday`, `sunday`.
+
+`RUN_TIME` gebruikt 24-uurs notatie, bijvoorbeeld `10:00` of `19:30`.
+
+## Data Ophalen Of Verversen
+
+De data wordt lokaal opgeslagen in SQLite. Dat is slimmer dan losse CSV-bestanden, omdat we trekkingen makkelijk kunnen updaten zonder dubbele rijen en snel kunnen controleren of een combinatie historisch al bestond.
+
+Standaard werkt refresh slim:
+
+- Eerste keer, lege database: haalt alle jaren vanaf 2012 t/m het huidige jaar op.
+- Daarna: kijkt naar de nieuwste opgeslagen trekking en ververst alleen het laatste bekende jaar plus het huidige jaar.
+- Er wordt standaard 1 jaar teruggekeken, zodat gecorrigeerde of late resultaten ook worden bijgewerkt.
+
+Normale update:
+
+```bash
+python -m euro refresh
+```
+
+Alles geforceerd opnieuw ophalen:
+
+```bash
+python -m euro refresh --full
+```
+
+Specifieke jaren:
+
+```bash
+python -m euro refresh --start-year 2024 --end-year 2026
+```
+
+Meer of minder terugkijken bij bestaande data:
+
+```bash
+python -m euro refresh --lookback-years 2
+```
+
+De SQLite-database komt standaard hier:
+
+```text
+data/euro.sqlite
+```
+
+## Analyse Bekijken
+
+Toon vaak en minder vaak gevallen nummers:
+
+```bash
+python -m euro analyze
+```
+
+Met meer of minder nummers:
+
+```bash
+python -m euro analyze --top 15
+```
+
+## Combinaties Handmatig Genereren
+
+Alleen printen:
+
+```bash
+python -m euro generate
+```
+
+Aantal aanpassen:
+
+```bash
+python -m euro generate --count 10
+```
+
+## Handmatig Naar Telegram Sturen
+
+Refresh eerst slim de data en stuur daarna 10 combinaties. Als de database nog leeg is, haalt dit automatisch eerst alle historische data op:
+
+```bash
+python -m euro once
+```
+
+Sturen zonder refresh:
+
+```bash
+python -m euro send --no-refresh
+```
+
+## Telegram Command Bot
+
+Wil je vanuit Telegram zelf nieuwe nummers opvragen, start dan de commandbot:
+
+```bash
+python -m euro bot
+```
+
+Laat dit proces draaien op je VPS. Stuur daarna in Telegram:
+
+```text
+/generate
+```
+
+De bot antwoordt dan met 10 nieuwe combinaties in dit formaat:
+
+```text
+Jouw idee - vaker gevallen nummers:
+1. 1, 10, 14, 32, 43 | 11, 12
+2. 4, 17, 23, 38, 46 | 3, 9
+...
+
+Huidige idee - minder vaak gevallen nummers:
+6. 2, 11, 24, 35, 50 | 2, 3
+...
+10. 8, 19, 25, 37, 49 | 2, 12
+```
+
+Standaard doet `/generate` eerst een slimme data-update en genereert daarna. Wil je alleen lokale data gebruiken:
+
+```bash
+python -m euro bot --no-refresh
+```
+
+De bot reageert alleen op `TELEGRAM_CHAT_ID` uit je `.env`. Oude Telegram-updates worden bij de eerste start standaard genegeerd, zodat je geen oude commands opnieuw uitvoert.
+
+## Automatisch Wekelijks Draaien
+
+### Optie 1: ingebouwde scheduler
+
+Zet `RUN_DAY` en `RUN_TIME` in `.env` en start:
+
+```bash
+python -m euro schedule
+```
+
+Laat dit proces draaien op je VPS, mini-pc of server. Elke wekelijkse run doet eerst een slimme update: eerste run volledig, daarna alleen bijhouden.
+
+### Optie 2: cron op Linux/VPS
+
+Voor vrijdag 10:00:
+
+```cron
+0 10 * * 5 cd /pad/naar/euro_telegram && /pad/naar/euro_telegram/.venv/bin/python -m euro once
+```
+
+Bij cron hoef je de ingebouwde scheduler niet te gebruiken. Ook hier geldt: eerste cron-run bouwt de database op, latere runs werken hem bij.
+
+## Gewogen Generator
+
+De generator:
+
+- Maakt standaard 5 combinaties volgens jouw idee: nummers die historisch vaker vielen krijgen iets meer gewicht.
+- Maakt standaard 5 combinaties volgens de bestaande methode: nummers die historisch minder vaak vielen krijgen iets meer gewicht.
+- Houdt de weging subtiel, zodat de output niet steeds dezelfde populaire nummers herhaalt.
+- Houdt een mix van lage en hoge hoofdnummers aan.
+- Vermijdt exacte historische combinaties.
+- Vermijdt dubbele combinaties binnen dezelfde batch.
+- Vermijdt simpele rekenpatronen zoals `1-2-3-4-5` en `10-20-30-40-50`.
+- Vermijdt 5 opeenvolgende hoofdnummers.
+
+Nogmaals: dit verhoogt de winkans niet aantoonbaar. Het maakt alleen minder saaie combinaties op basis van historische data.
+
+## Logging En Debugging
+
+Logs staan standaard in:
+
+```text
+logs/euro.log
+```
+
+Meer logging:
+
+```bash
+python -m euro --verbose refresh
+```
+
+Veelvoorkomende problemen:
+
+- `No historical draws found`: run eerst `python -m euro refresh`.
+- Telegram `Unauthorized`: controleer `TELEGRAM_BOT_TOKEN`.
+- Telegram `chat not found`: stuur eerst een bericht naar je bot en controleer `TELEGRAM_CHAT_ID`.
+- Website tijdelijk onbereikbaar: de scraper probeert meerdere keren en logt fouten. Run later opnieuw.
+- Scheduler stuurt niets: controleer `RUN_DAY`, `RUN_TIME`, tijdzone van je machine en of het proces nog draait.
+
+## Voorbeeld Telegrambericht
+
+```text
+Euro combinaties voor deze week:
+
+1. 4, 17, 23, 38, 46 | 3, 9
+2. 6, 15, 26, 34, 45 | 1, 11
+...
+10. 8, 19, 25, 37, 49 | 2, 12
+
+Let op: deze combinaties zijn gebaseerd op historische analyse, maar Euro blijft volledig willekeurig. Er is geen garantie op winst.
+```

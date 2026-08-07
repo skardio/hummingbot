@@ -211,17 +211,76 @@ class DynamicPairManager:
 
     async def _fetch_all_tickers(self, pairs: List[str]) -> Dict[str, dict]:
         """
-        Fetch ticker data for all pairs via REST API
+        Fetch ticker data for all pairs via REST API.
 
-        Uses batch calls to minimize API requests
+        Routes to the exchange-specific implementation based on connector.name
+        so that OKX instances never call the Kraken endpoint.
         """
+        exchange = getattr(self.connector, "name", "").replace("_paper_trade", "").lower()
+        if "okx" in exchange:
+            return await self._fetch_okx_tickers()
+        return await self._fetch_kraken_tickers(pairs)
+
+    async def _fetch_okx_tickers(self) -> Dict[str, dict]:
+        """
+        Fetch all SPOT tickers from OKX public REST API.
+
+        Field semantics (verified against live OKX API):
+          vol24h     = 24h base-asset volume (e.g. OKB units)
+          volCcy24h  = 24h quote-asset volume (USDC); this is what we want
+          spread     = (askPx - bidPx) / bidPx  → stored as fraction (0.001 = 0.1%)
+        """
+        import aiohttp
+
+        result: Dict[str, dict] = {}
+        try:
+            url = "https://www.okx.com/api/v5/market/tickers"
+            params = {"instType": "SPOT"}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, params=params, timeout=aiohttp.ClientTimeout(total=15)
+                ) as response:
+                    if response.status != 200:
+                        logger.warning(f"OKX tickers API returned status {response.status}")
+                        return result
+                    data = await response.json()
+
+            for ticker in data.get("data", []):
+                inst_id = ticker.get("instId", "")
+                if not inst_id.endswith(f"-{self.quote_asset}"):
+                    continue
+                try:
+                    bid = float(ticker.get("bidPx") or 0)
+                    ask = float(ticker.get("askPx") or 0)
+                    last = float(ticker.get("last") or 0)
+                    # volCcy24h is the 24h quote-currency volume (USDC / EUR / …)
+                    vol_quote = float(ticker.get("volCcy24h") or 0)
+                    open24h = float(ticker.get("open24h") or 0)
+                    price_change_24h = ((last - open24h) / open24h * 100) if open24h > 0 else 0.0
+                    # spread stored as fraction so callers can do * 100 → pct (consistent with Kraken path)
+                    spread = (ask - bid) / bid if bid > 0 else 0.0
+                    result[inst_id] = {
+                        "volume_24h": vol_quote,
+                        "price_change_24h": price_change_24h,
+                        "last_price": last,
+                        "bid": bid,
+                        "ask": ask,
+                        "spread_frac": spread,
+                    }
+                except (ValueError, TypeError) as exc:
+                    logger.debug(f"OKX ticker parse error for {inst_id}: {exc}")
+                    continue
+
+            logger.info(f"📊 Fetched OKX ticker data for {len(result)} {self.quote_asset} pairs")
+        except Exception as exc:
+            logger.error(f"Error fetching OKX tickers: {exc}")
+        return result
+
+    async def _fetch_kraken_tickers(self, pairs: List[str]) -> Dict[str, dict]:
+        """Existing Kraken ticker fetch (unchanged)."""
         result = {}
 
         try:
-            # Kraken's Ticker endpoint can fetch ALL tickers in one call
-            # We don't need to specify pairs - it returns everything
-
-            # Try to get all tickers at once
             import aiohttp
 
             async with aiohttp.ClientSession() as session:

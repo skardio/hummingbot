@@ -472,7 +472,20 @@ grid_suitability:
 # ==============================================================================
 
 momentum_sleeve:
-  mode: detect_only
+  mode: paper                           # detect_only | paper | live
+  enabled: true
+  # --- paper/live trading params ---
+  max_positions: 1
+  max_quote_per_position: 25
+  min_score: 75
+  stop_loss_pct: 0.012
+  take_profit_pct: 0.020
+  trailing_activation_pct: 0.012
+  trailing_distance_pct: 0.008
+  max_hold_minutes: 90
+  cooldown_minutes: 60
+  summary_interval_minutes: 60
+  # --- scoring gate params (used by MomentumCandidateScorer) ---
   min_score_to_enter: 55
   momentum_1h_min_pct: 0.5
   momentum_4h_min_pct: 1.0

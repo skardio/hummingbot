@@ -175,3 +175,172 @@ def test_grid_executor_net_pnl_pct_uses_entry_notional_not_round_trip_volume():
 
     assert executor.filled_amount_quote == Decimal("107.619531816")
     assert (executor.get_net_pnl_pct() * Decimal("100")).quantize(Decimal("0.0001")) == Decimal("-3.0405")
+
+
+# ---------------------------------------------------------------------------
+# Residual-dust PnL correction — step-size quantization (INJ / Bitget case)
+# ---------------------------------------------------------------------------
+
+def _make_inj_fill_order(trade_type: str, amount_base: str, amount_quote: str,
+                         fees_quote: str = "0") -> dict:
+    """Minimal filled-order dict matching InFlightOrder.to_json() structure."""
+    return {
+        "trade_type": trade_type,
+        "executed_amount_base": amount_base,
+        "executed_amount_quote": amount_quote,
+        "cumulative_fee_paid_quote": fees_quote,
+    }
+
+
+def _make_executor_for_residual_test(
+    filled_orders: list,
+    min_order_size: str = "0.1",
+    close_type: CloseType = CloseType.TAKE_PROFIT,
+) -> GridExecutor:
+    """Bare GridExecutor wired up for update_realized_pnl_metrics() calls."""
+    executor = GridExecutor.__new__(GridExecutor)
+    executor._filled_orders = filled_orders
+    executor._held_position_orders = []
+    executor.close_type = close_type
+    executor.trading_rules = MagicMock()
+    executor.trading_rules.min_order_size = Decimal(min_order_size)
+    executor.logger = MagicMock(return_value=MagicMock())
+    # Attrs updated by the method itself — pre-zero so assertions are clean
+    executor.realized_buy_size_quote = Decimal("0")
+    executor.realized_sell_size_quote = Decimal("0")
+    executor.realized_imbalance_quote = Decimal("0")
+    executor.realized_buy_fees_quote = Decimal("0")
+    executor.realized_sell_fees_quote = Decimal("0")
+    executor.realized_fees_quote = Decimal("0")
+    executor.realized_pnl_quote = Decimal("0")
+    executor.realized_pnl_pct = Decimal("0")
+    return executor
+
+
+class TestResidualDustPnlCorrection:
+    """
+    INJ / Bitget scenario: bot bought 3.1968 INJ but step-size 0.1 allowed
+    selling only 3.1 INJ.  The 0.0968 INJ residual (< min_order_size 0.1) must
+    NOT cause TAKE_PROFIT to report a negative PnL.
+    """
+
+    # Scenario numbers:
+    # S1 – INJ residual below step-size → correction applied, PnL >= 0
+    # S2 – residual above dust threshold → no correction (bot can retry sell)
+    # S3 – no residual (perfectly matched) → no correction
+    # S4 – POSITION_HOLD → no correction (residual is intentional)
+    # S5 – PnL stays >= 0 even with non-trivial fees
+
+    def test_s1_inj_residual_below_step_size_pnl_is_non_negative(self):
+        """
+        3 buy fills totalling 3.1968 INJ @ avg $30.  1 sell of 3.1 INJ @ $30.15.
+        Residual 0.0968 INJ < min_order_size 0.1 → correction deducts residual
+        cost from realized_buy_size_quote, making PnL >= 0.
+        """
+        fills = [
+            # Three buys: 1.0 + 1.0 + 1.1968 INJ
+            _make_inj_fill_order("BUY", "1.0", "30.000", "0.030"),
+            _make_inj_fill_order("BUY", "1.0", "30.000", "0.030"),
+            _make_inj_fill_order("BUY", "1.1968", "35.904", "0.0359"),
+            # Close sell: 3.1 INJ @ $30.15 (step-size truncated from 3.1968)
+            _make_inj_fill_order("SELL", "3.1", "93.465", "0.093"),
+        ]
+        executor = _make_executor_for_residual_test(fills)
+
+        executor.update_realized_pnl_metrics()
+
+        # Residual = 3.1968 - 3.1 = 0.0968 < 0.1 → correction applied
+        # buy_quote before correction = 30 + 30 + 35.904 = 95.904
+        # avg_entry = 95.904 / 3.1968 ≈ 30.00
+        # residual_cost = 0.0968 * 30.00 = 2.904
+        # effective_buy_quote = 95.904 - 2.904 = 93.000
+        # pnl = 93.465 - 93.000 - (0.030+0.030+0.0359) - 0.093 ≈ +0.276
+        assert executor.realized_pnl_quote >= Decimal("0"), (
+            f"TAKE_PROFIT must not be negative after step-size residual correction, "
+            f"got {executor.realized_pnl_quote}"
+        )
+
+    def test_s1_corrected_buy_quote_reflects_only_sold_portion(self):
+        fills = [
+            _make_inj_fill_order("BUY", "3.1968", "95.904", "0.096"),
+            _make_inj_fill_order("SELL", "3.1", "93.465", "0.093"),
+        ]
+        executor = _make_executor_for_residual_test(fills)
+        executor.update_realized_pnl_metrics()
+
+        # effective_buy = 95.904 - (0.0968/3.1968)*95.904 = 95.904 - 2.904 = 93.000
+        assert executor.realized_buy_size_quote == Decimal("93.000").quantize(
+            executor.realized_buy_size_quote
+        ) or abs(executor.realized_buy_size_quote - Decimal("93.000")) < Decimal("0.001"), (
+            f"buy_quote after correction should be ~93.000, got {executor.realized_buy_size_quote}"
+        )
+
+    def test_s2_residual_above_dust_threshold_no_correction(self):
+        """
+        Residual 0.5 INJ > min_order_size 0.1 → bot can place another sell →
+        no correction should be applied (imbalance should trigger another close).
+        """
+        fills = [
+            _make_inj_fill_order("BUY", "3.5", "105.00", "0.105"),
+            _make_inj_fill_order("SELL", "3.0", "90.45", "0.090"),
+        ]
+        executor = _make_executor_for_residual_test(fills)
+        executor.update_realized_pnl_metrics()
+
+        # No correction: buy_quote should still be 105.00
+        assert executor.realized_buy_size_quote == Decimal("105.00"), (
+            f"No correction when residual 0.5 > dust_threshold 0.1, "
+            f"got {executor.realized_buy_size_quote}"
+        )
+
+    def test_s3_no_residual_no_correction(self):
+        """Perfectly matched buys and sells → no correction, normal PnL."""
+        fills = [
+            _make_inj_fill_order("BUY", "3.1", "93.00", "0.093"),
+            _make_inj_fill_order("SELL", "3.1", "93.93", "0.094"),
+        ]
+        executor = _make_executor_for_residual_test(fills)
+        executor.update_realized_pnl_metrics()
+
+        assert executor.realized_buy_size_quote == Decimal("93.00")
+        assert executor.realized_pnl_quote == Decimal("93.93") - Decimal("93.00") - Decimal("0.093") - Decimal("0.094")
+
+    def test_s4_position_hold_no_correction(self):
+        """
+        POSITION_HOLD: residual is intentional inventory, not dust.
+        Correction must NOT be applied.
+        """
+        fills = [
+            _make_inj_fill_order("BUY", "3.1968", "95.904", "0.096"),
+            _make_inj_fill_order("SELL", "3.1", "93.465", "0.093"),
+        ]
+        executor = _make_executor_for_residual_test(
+            fills, close_type=CloseType.POSITION_HOLD
+        )
+        executor.update_realized_pnl_metrics()
+
+        assert executor.realized_buy_size_quote == Decimal("95.904"), (
+            "POSITION_HOLD must not apply residual correction"
+        )
+
+    def test_s5_take_profit_pnl_non_negative_with_fees(self):
+        """
+        Ensures TAKE_PROFIT stays >= 0 after correction even when fees are
+        non-trivial (0.1% buy + 0.1% sell Bitget standard).
+        """
+        buy_quote = Decimal("95.904")
+        sell_quote = Decimal("93.465")
+        buy_fees = buy_quote * Decimal("0.001")
+        sell_fees = sell_quote * Decimal("0.001")
+
+        fills = [
+            _make_inj_fill_order("BUY", "3.1968", str(buy_quote), str(buy_fees)),
+            _make_inj_fill_order("SELL", "3.1", str(sell_quote), str(sell_fees)),
+        ]
+        executor = _make_executor_for_residual_test(fills)
+        executor.update_realized_pnl_metrics()
+
+        assert executor.realized_pnl_quote >= Decimal("0"), (
+            f"PnL must be >= 0 for TAKE_PROFIT with standard fees, "
+            f"got {executor.realized_pnl_quote}"
+        )

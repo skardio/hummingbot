@@ -17,6 +17,7 @@ log_level: INFO
 connector_name: kraken
 quote_asset: USD                    # 🔄 CHANGED: EUR → USD
 paper_trading: false                # 💰 LIVE TRADING MODE
+auto_sell_orphaned_positions: true  # 🔧 2026-05-31: sell stranded coins on restart (capped at executor-tracked base)
 
 # ==============================================================================
 # DYNAMIC PAIR DISCOVERY (USD pairs)
@@ -78,19 +79,28 @@ blacklist:
   - XCN-USD
   - VIRTUAL-USD   # Stuck executor - causes infinite retry loop
   - AAVE-USD      # No orderbook data
+  # HYPE-USD removed from blacklist 2026-05-25: grid loser due to trending, now momentum candidate
   - NEAR-USD      # No orderbook data
   - AXS-USD
   # Poor performers (2026-04-02 session review)
   - VVV-USD              # illiquid, gap-prone, -10.9% open bag
   - PTB-USD              # -2.56% margin, too illiquid for grid
   # Poor performers (2026-04-13 session: -$0.82 from SUI alone = 109% total loss)
-  - SUI-USD              # Trends too hard for grids, -$0.44 single trade loss
+  # SUI-USD removed from blacklist 2026-05-25: trends too hard for GRID but ideal momentum candidate
   # Catastrophic loss (2026-04-16: -$68.14 ALGO, bought but never sold = EARLY_STOP with 0 sells)
   - ALGO-USD             # Entire position stuck, close_type=8 with realized_sell=0
+  # Zero-WR + type-8 orphan dominated losses (2026-05-31 analysis: 526 trades, -$493 netto)
+  - PEPE-USD             # 9 trades, 0% WR, -$107 (3× FAILED orphan, sell=0)
+  - UNI-USD              # 3 trades, 0% WR, -$77 (zombie_close deadlock → restart orphan)
+  - ICP-USD              # 10 trades, 0% WR, -$44 (1× FAILED orphan, systematic loser)
+  - 0G-USD               # 3 trades, -$67 (1× FAILED orphan, illiquid pair)
+  - TON-USD              # 7 trades, 43% WR but -$74 all from 2× FAILED orphan; net negative
+  - SOL-USD              # 29 trades, 3.4% WR, -$44 (systematic underperformer, 4× type-8)
   # Large-cap coins: not grid-trading targets + cause persistent batch update WARNINGs (no_price_in_batch)
   - ETH-USD              # Too expensive for grid, fails Kraken batch price API
   - LTC-USD              # Low volatility for grid, fails Kraken batch price API
   - ZEC-USD              # Low volatility for grid, fails Kraken batch price API
+  - ELX-USD              # Structural SmartEntry fail: spread 1-4% (limit 0.5%) + ATR 11% (limit 7%)
 
 # ==============================================================================
 # ADAPTIVE REGIME DETECTION & FILTERS
@@ -177,7 +187,7 @@ adaptive_filters:
     grid_spacing_mult: 1.5
     max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid for mean-reversion)
     entry_confidence_min: 0.80    # T3-F3: 0.90→0.80
-    bear_allow_meanrev: true     # 🔧 HF-01 2026-04-04: false→true (99% BEAR regime blokkeerde 1284 entries)
+    bear_allow_meanrev: false    # 🔧 2026-05-20: true→false (bear_auto_light_enabled=true is de actieve BEAR-gate; score-gebaseerd ipv binaire override)
 
 # ==============================================================================
 # GRID SUITABILITY SCORER (Per-Coin Mean-Reversion Fitness)
@@ -866,7 +876,7 @@ grid_range_pct_down: 4.0
 grid_range_pct_up: 12.0
 
 num_grids: 3                      # 🔧 FIX: 5→3 ($300/2=$150, 3 grids=$50/level — snelle fill)
-min_grid_level_spacing_pct: 0.60  # 🔧 FIX 2026-05-02b: 1.5→0.60 (1.5 was 3× worst_case fee; best_case fee=0.45%, floor=0.45+0.15 margin=0.60%)
+min_grid_level_spacing_pct: 0.80  # 🔧 US12 2026-05-22: 0.60→0.80 (worst_case RT fee 0.42%; 0.80 geeft 0.38% marge, veilig bij taker fill)
 
 use_dynamic_grid_sizer: true
 
@@ -924,8 +934,10 @@ coin_discovery_refresh_interval_seconds: 3600
 # ==============================================================================
 
 max_simultaneous_coins: 3             # Aligned met dynamic_slots.max_slots: 3 (CHOP=2, BULL=3)
+                                      # 🔧 US9: Verlaging naar 2 zodra edge bewezen is (→$150/coin)
 
 total_amount_quote: 300             # Origineel: $300 USD budget
+                                    # 🔧 US9: Verlaging naar 200 zodra edge bewezen is (→$100/coin bij 2 slots)
 min_order_amount_quote: 15          # $15 minimum order
 
 risk_reference_balance_quote: 300   # Origineel: $300 referentiebalans
@@ -951,10 +963,10 @@ switch_grace_period_seconds: 600      # 🔧 TUNED 2026-04-03: 180→600 (10 min
 use_professional_risk_mgmt: true
 
 # T0-Q8: Stop-loss enabled (was null, unbounded losses until -12% emergency)
-stop_loss_pct: 0.03                  # 🔧 TUNED 2026-04-14: 5%→3% (EARLY_STOP was -$1.33 vs TP +$0.59, losses te groot)
+stop_loss_pct: 0.015                 # 🔧 TUNED 2026-05-22: 3%→1.5% (XDC-USD run: -2.9% dodged 3% stop, still lost -$1.72)
 atr_stop_multiplier: 1.5            # 🔧 TUNED 2026-04-14: 2.0→1.5 (tighter ATR stop, sneller sluiten)
-min_stop_pct: 0.015                  # 🔧 TUNED 2026-04-14: 2%→1.5% (tighter floor for small grids)
-max_stop_pct: 0.03                   # 🔧 TUNED 2026-04-14: 5%→3% (cap aligned with stop_loss_pct)
+min_stop_pct: 0.010                  # 🔧 TUNED 2026-05-22: 1.5%→1.0% (tighter floor, aligned with new stop_loss_pct)
+max_stop_pct: 0.020                   # 🔧 TUNED 2026-05-22: 3%→2.0% (cap aligned with new stop_loss_pct)
 
 take_profit_pct: 0.05
 
@@ -978,9 +990,9 @@ trailing_stop_delta_pct: 0.010        # 1.0% pullback buffer; fee-aware guard st
 
 # Dynamic TP: scale take-profit with ATR (volatile coins get wider TP, quiet coins get tighter)
 dynamic_tp_enabled: true
-dynamic_tp_atr_multiplier: 0.35     # TP = ATR% × multiplier (e.g., 4% ATR × 0.35 = 1.4%)
-dynamic_tp_min_pct: 0.020           # 🔧 TUNED 2026-04-03: 0.012→0.020 (floor 2.0%, net ~1.58% after 0.42% RT fees)
-dynamic_tp_max_pct: 0.04            # 🔧 TUNED 2026-04-03: 0.03→0.04 (cap 4.0%, capture bigger moves in volatile coins)
+dynamic_tp_atr_multiplier: 0.60     # 🔧 2026-05-31: 0.35→0.60 (0.35 gaf altijd 2% floor; bij ATR 4% nu 2.4%, bij 6% = 3.6%)
+dynamic_tp_min_pct: 0.025           # 🔧 2026-05-31: 0.020→0.025 (Kraken fees 0.55% RT → 2.5% floor geeft 1.95% netto)
+dynamic_tp_max_pct: 0.05            # 🔧 2026-05-31: 0.04→0.05 (match take_profit_pct ceiling)
 
 time_based_stop_minutes: 360
 time_stop_requires_stall: true
@@ -1041,9 +1053,13 @@ soft_exit_extend_seconds: 900      # 🔧 TUNED 2026-04-14: 1800→900 (15 min e
 
 no_fill_timeout_sec: 1800            # 🔧 TUNED 2026-04-14: 3600→1800 (30 min - geen fills = dode liquiditeit, cut sneller)
 no_progress_timeout_sec: 2700    # 🔧 TUNED 2026-04-14: 3600→2700 (45 min - aligned met soft_hold sweet spot)
+fee_aware_timeout_bypass_sec: 3600   # 🔧 NEW 2026-05-22: after 60 min the fee-aware guard is lifted (US2)
+                                     #    Rationale: no_progress fires at 45 min, fee-guard may block it;
+                                     #    after 60 min capital efficiency > fee optimisation (max_hold=90 min)
 no_progress_min_loss_pct: 0.5    # 🔧 TUNED 2026-04-03: 1.0→0.5 (cut bags at -0.5%, halves NO_PROGRESS losses)
 no_progress_atr_multiplier: 1.5
 close_grace_sec: 600               # ST-05b: 120→600 (10 min graceful LIMIT orders before aggressive market exit)
+coerce_tp_to_step: true            # Zorg dat TP >= 1 grid-stap (nodig voor coarse step-size exchanges zoals Kraken INJ)
 
 min_startup_wait_seconds: 60
 
@@ -1103,7 +1119,7 @@ fee_aware_filter:
   enabled: true
   taker_fee_pct: 0.35            # 🔧 FIX 2026-05-01: 0.26→0.35 (observed taker fee at <$10k/30d volume tier)
   maker_fee_pct: 0.20            # 🔧 FIX 2026-05-01: 0.16→0.20 (observed maker fee at <$10k/30d volume tier)
-  fee_model: best_case           # 🔧 FIX 2026-05-02b: average→best_case (grid orders = limit orders → altijd maker-fees; maker+maker=0.40% vs average=0.55%)
+  fee_model: best_case           # Grid orders use LIMIT_MAKER (post-only) → gegarandeerd maker; maker+maker=0.40% RT
   min_net_profit_pct: 0.3        # Min expected profit after fees
   # V2-04: Expected-Fill Hourly Profit Model
   hourly_profit_check_enabled: false  # false = shadow mode (logs only), true = blocks entry
@@ -1134,15 +1150,66 @@ economic_edge_gate:
   include_slippage_buffer_pct: 0.05  # Slippage buffer to subtract
 
 # ==============================================================================
+# US1: PER-CONNECTOR FEE + EDGE OVERRIDES
+# Allows fine-tuning fee model and min edge per exchange without changing globals.
+# Values here merge on top of the global fee_aware_filter / economic_edge_gate.
+# ==============================================================================
+
+connector_overrides:
+  kraken_spot:
+    fee_aware_filter:
+      taker_fee_pct: 0.35        # Kraken USD taker fee at <$10k/30d volume
+      maker_fee_pct: 0.20        # Kraken USD maker fee
+      fee_model: best_case       # LIMIT_MAKER (post-only) on Kraken → gegarandeerd maker fills
+    economic_edge_gate:
+      min_edge_pct: 0.10         # 🔧 US1: raise to 0.25 if fees increase or spread widens
+      include_spread_cost: false
+      include_slippage_buffer_pct: 0.05
+    min_grid_level_spacing_pct: 0.80  # 🔧 US12 2026-05-22: 0.60→0.80 (fee-realistisch; zie US12)
+
+# ==============================================================================
 # ENHANCED CLOSE COOLDOWNS
 # ==============================================================================
 
 close_cooldowns:
   failed_sec: 21600              # 6h cooldown after FAILED
   early_stop_sec: 10800          # 3h cooldown after EARLY_STOP
+  stop_loss_sec: 21600           # 🔧 US15 2026-05-22: 6h cooldown after STOP_LOSS (markt sloeg hard terug)
   no_progress_sec: 3600          # 1h cooldown after timeout
+  take_profit_sec: 7200          # 2h cooldown after TAKE_PROFIT (prevents re-entry trap)
   loss_streak_multiplier: 1.5    # Escalate cooldown per consecutive loss
-  max_streak_before_blacklist: 3  # Long blacklist after N losses
+  max_streak_before_blacklist: 2  # 🔧 US11 2026-05-22: 3→2 (2 opeenvolgende verliezen = voldoende bewijs)
+
+# ==============================================================================
+# US13: ATR-FEE GATE
+# Blocks entry when ATR is too low to cover roundtrip fees.
+# Kraken taker=0.35% maker=0.20% → average RT fee=0.55% → required ATR=1.10% (2.0×)
+# ==============================================================================
+atr_fee_gate:
+  enabled: true
+  min_atr_fee_multiplier: 2.0   # ATR must be >= 2× roundtrip fee
+  # fee_model/taker_fee_pct/maker_fee_pct read from fee_aware_filter (connector_overrides)
+
+# ==============================================================================
+# ATR COIN SELECTION
+# prefilter_ratio=0.75 → soft threshold = 1.10% × 0.75 = 0.825%
+# ==============================================================================
+atr_coin_selection:
+  enabled: true
+  prefilter_ratio: 0.50         # soft threshold = required_atr × ratio (1.10% × 0.50 = 0.55%)
+  use_as_ranking_signal: true
+
+# ==============================================================================
+# US16: RE-ENTRY PRICE GUARD
+# Blocks re-entry when current price has dropped significantly since last exit.
+# ==============================================================================
+reentry_price_guard:
+  enabled: true
+  max_drop_below_last_exit_pct: 0.50  # Block if price dropped > 0.50% vs last exit mid-price
+  apply_after_close_types:
+    - TAKE_PROFIT
+    - STOP_LOSS
+    - EARLY_STOP
 
 # ==============================================================================
 # REGIME-BASED TIMEOUTS
@@ -1161,7 +1228,20 @@ regime_timeouts:
 # ==============================================================================
 
 momentum_sleeve:
-  mode: detect_only
+  mode: paper                           # detect_only | paper | live
+  enabled: true
+  # --- paper/live trading params eersttest met source ~/.venvs/bot/bin/activate && python analyze_momentum_paper.py --since 1000 ---
+  max_positions: 1
+  max_quote_per_position: 25
+  min_score: 75
+  stop_loss_pct: 0.012
+  take_profit_pct: 0.020
+  trailing_activation_pct: 0.012
+  trailing_distance_pct: 0.008
+  max_hold_minutes: 90
+  cooldown_minutes: 60
+  summary_interval_minutes: 60
+  # --- scoring gate params (used by MomentumCandidateScorer) ---
   min_score_to_enter: 55
   momentum_1h_min_pct: 0.5
   momentum_4h_min_pct: 1.0

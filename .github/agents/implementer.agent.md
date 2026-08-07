@@ -32,6 +32,17 @@ The controller exists in **two locations** that must stay in sync:
 
 Every change to one **must** be applied to the other. Verify with `diff` after edits.
 
+## Observability conventions
+- New executor fields go into `config.custom_info` dict in `_create_grid_action()`.
+- Prefix with `entry_` to auto-preserve them in runtime `custom_info` (see `get_custom_info()` in `grid_executor.py` — all `entry_*` keys are copied automatically).
+- These fields are saved to the `custom_info` DB column when the executor closes.
+- Examples already there: `entry_regime`, `entry_trend_pct`, `entry_grid_score`.
+
+## DB persistence
+- `closed_executors_buffer = 0` in all strategy scripts — executors are written to DB within one tick of closing.
+- Never increase this buffer: crash safety requires immediate writes.
+- The base class `StrategyV2Base` default is 100 — always override to 0 in strategy subclasses.
+
 ## Code standards
 - Python 3.11+, type hints everywhere.
 - Use dataclasses or pydantic for configs (prefer immutable where possible).

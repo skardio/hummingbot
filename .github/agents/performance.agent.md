@@ -19,12 +19,13 @@ You query SQLite trading databases and generate performance reports for a multi-
 
 ## Databases
 
-| Bot | Database | Quote |
-|-----|----------|-------|
-| Kraken EUR | `data/multi_coin_grid_v2.sqlite` | EUR |
-| Kraken USD | `data/multi_coin_grid_v2_usd.sqlite` | USD |
-| Bitget Spot | `data/spot_grid_bitget.sqlite` | USDT |
-| Bitget Futures | `data/futures_grid_bitget.sqlite` | USDT |
+| Bot | Database | Quote | controller_id |
+|-----|----------|-------|---------------|
+| Kraken EUR | `data/multi_coin_grid_v2.sqlite` | EUR | `multi_coin_grid` |
+| Kraken USD | `data/multi_coin_grid_v2_usd.sqlite` | USD | `multi_coin_grid_usd` |
+| Bitget Spot | `data/spot_grid_bitget.sqlite` | USDT | `spot_grid_bitget` |
+| OKX Spot | `data/spot_grid_okx.sqlite` | USD | `spot_grid_okx` |
+| Bitget Futures | `data/futures_grid_bitget.sqlite` | USDT | `futures_grid_bitget` |
 
 ## Important: Decimal Encoding
 
@@ -53,15 +54,30 @@ GROUP BY base_asset ORDER BY net_pnl DESC;
 ### Executor Performance
 ```sql
 SELECT json_extract(config, '$.trading_pair') as pair,
-       status,
+       close_type,
        ROUND(net_pnl_quote, 4) as pnl,
        ROUND(filled_amount_quote, 2) as volume,
+       json_extract(custom_info, '$.entry_regime') as entry_regime,
+       json_extract(custom_info, '$.held_position_value') as held,
        datetime(timestamp, 'unixepoch', 'localtime') as started,
        ROUND((close_timestamp - timestamp) / 60.0, 1) as hold_min
 FROM Executors
 WHERE timestamp > strftime('%s','now','-7 days')
 ORDER BY timestamp DESC LIMIT 30;
 ```
+
+**close_type reference:**
+| Value | Meaning |
+|-------|---------|
+| 1 | TIME_LIMIT — max hold time |
+| 2 | STOP_LOSS |
+| 3 | TAKE_PROFIT (normal win) |
+| 4 | TRAILING_STOP |
+| 5 | EARLY_STOP — regime flip, manual, etc. |
+| 8 | **FAILED** — bot restarted mid-trade; coins may be orphaned |
+| 11 | CLOSE_ORDER_FAILED |
+| 12 | NO_PROGRESS_TIMEOUT — stuck after buy |
+| 13 | HARD_CAP_TIME_LIMIT |
 
 ### Fee Analysis
 ```sql
@@ -86,6 +102,32 @@ SELECT json_extract(config, '$.trading_pair') as pair,
 FROM Executors
 WHERE status = 'COMPLETED' AND timestamp > strftime('%s','now','-30 days')
 GROUP BY pair ORDER BY total_pnl DESC;
+```
+
+### Close Type Breakdown (losses by failure mode)
+```sql
+SELECT close_type,
+       COUNT(*) as n,
+       ROUND(SUM(net_pnl_quote), 2) as total_pnl,
+       ROUND(AVG(net_pnl_quote), 2) as avg_pnl
+FROM Executors
+WHERE timestamp > strftime('%s','now','-30 days')
+GROUP BY close_type ORDER BY total_pnl;
+-- close_type 8 = FAILED (zombie_close restart losses) — biggest risk to investigate
+```
+
+### Entry Regime Analysis
+```sql
+SELECT json_extract(custom_info, '$.entry_regime') as regime,
+       COUNT(*) as n,
+       ROUND(SUM(net_pnl_quote), 2) as total_pnl,
+       ROUND(AVG(net_pnl_quote), 4) as avg_pnl,
+       ROUND(100.0 * SUM(CASE WHEN net_pnl_quote > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) as win_rate_pct
+FROM Executors
+WHERE close_timestamp IS NOT NULL
+  AND json_extract(custom_info, '$.entry_regime') IS NOT NULL
+GROUP BY regime;
+-- Only available for executors created after May 30 2026 (when entry_regime was added)
 ```
 
 ## Output Format

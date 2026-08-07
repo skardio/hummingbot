@@ -63,6 +63,8 @@ You review changes to a crypto trading bot.
 - [ ] Partial fills handled correctly (state updates, remaining qty, exposure recompute)
 - [ ] market_list safety: code only operates on pairs in configured `market_list` (never touches manual orders)
 - [ ] Stale order/executor detection: orphaned positions, stale limit orders, and dangling executor refs are handled
+- [ ] `closed_executors_buffer = 0` in all new strategy scripts (crash-safe DB persistence)
+- [ ] `entry_*` fields added to `config.custom_info` in `_create_grid_action()` (not added elsewhere — `get_custom_info()` auto-preserves them)
 
 ### Concurrency & state
 - [ ] No race conditions on positions/orders state

@@ -15,6 +15,7 @@ Usage:
     archive_bot_logs("kraken_eur")   # in Kraken EUR __init__
     archive_bot_logs("kraken_usd")   # in Kraken USD __init__
     archive_bot_logs("bitget")       # in Bitget __init__
+    archive_bot_logs("okx")         # in OKX __init__
 """
 
 import logging
@@ -49,6 +50,10 @@ _BOT_PATTERNS: dict[str, list[str]] = {
     "bitget": [
         "logs_spot_grid_bitget_[0-9]*.log*",
         "bitget_multi_coin_grid_report_*.log",
+    ],
+    "okx": [
+        "logs_spot_grid_okx_[0-9]*.log*",
+        "okx_multi_coin_grid_report_*.log",
     ],
 }
 

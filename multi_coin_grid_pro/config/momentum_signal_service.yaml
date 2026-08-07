@@ -1,0 +1,196 @@
+momentum_signal_service:
+  enabled: true
+  mode: signal_only          # Enige geldige waarde — assertion bij startup
+
+  scan_interval_seconds: 60  # Hoe vaak alle exchanges worden gescand
+  top_n: 10                  # Max kandidaten in output per scan
+
+  # ─── Exchanges ────────────────────────────────────────────────────────────
+  exchanges:
+    - exchange: kraken
+      enabled: true
+      region: global
+      api_url: https://api.kraken.com
+      quote_assets: [USD]
+      allowed_quote_assets: [USD]
+      disallowed_quote_assets: [USDT, USDC, EUR, BTC, ETH]
+      # Optioneel: actieve grid-posities uitsluiten (read-only SQLite)
+      grid_db_path: data/multi_coin_grid_v2_usd.sqlite
+
+    - exchange: okx
+      enabled: true
+      region: europe
+      api_url: https://www.okx.com
+      quote_assets: [EUR]
+      allowed_quote_assets: [EUR]
+      disallowed_quote_assets: [USDT, USD, EUR, BTC, ETH]
+      grid_db_path: data/spot_grid_okx.sqlite
+
+    - exchange: bitget
+      enabled: true
+      region: global
+      api_url: https://api.bitget.com
+      quote_assets: [USDT]
+      allowed_quote_assets: [USDT]
+      disallowed_quote_assets: [USDC, USD, EUR, BTC, ETH]
+      grid_db_path: data/spot_grid_bitget.sqlite
+
+    - exchange: bitvavo
+      enabled: true
+      region: europe
+      api_url: https://api.bitvavo.com
+      quote_assets: [EUR]
+      allowed_quote_assets: [EUR]
+      disallowed_quote_assets: [BTC, ETH, USDT, USDC, USD]
+
+  # ─── Scanner-blacklist (eigen lijst, losstaat van de grid-bot) ────────────
+  # Pairs die de scanner NOOIT mag signaleren, ongeacht momentum.
+  # Voeg hier pairs toe die je bewust wil uitsluiten van signalering.
+  scanner_blacklist: []
+
+  # ─── Safety (harde grenzen, geasserteerd bij startup) ─────────────────────
+  safety:
+    read_only: true
+    allow_order_creation: false
+    allow_executor_actions: false
+    allow_budget_reservation: false
+    allow_grid_state_writes: false
+
+  # ─── Hard filters (verwerpen vóór scoring) ────────────────────────────────
+  candidate_filters:
+    min_price_change_5m_pct: 1.1    # vroeger 1.5 — eerder signaleren
+    min_price_change_15m_pct: 2.5
+    max_price_change_15m_pct: 35.0
+    min_volume_ratio: 2.3           # was: 2.0 — iets strengere volumecheck
+    max_spread_pct: 0.30            # was: 0.35 — strakker
+    min_orderbook_depth_quote: 5000.0
+    max_orderbook_staleness_seconds: 5.0
+    exclude_blacklisted: true
+    exclude_active_grid_positions: true
+    exclude_cooldown_pairs: true
+    # US-207: entry-quality filters
+    min_price_change_1m_pct: 0.40   # was: 0.20 — vers momentum vereist (Δ1m/Δ5m≥30% → TP 22% vs 0% bij oud momentum)
+    min_price_change_3m_pct: 0.60   # was: 0.70
+    max_price_change_5m_pct: 3.50   # SPIKE_NO_CONTINUATION (was: 4.50)
+    max_too_late_price_change_15m_pct: 6.00  # TOO_LATE_EXTENDED_MOVE (was: 9.00)
+    max_estimated_slippage_pct: 0.40  # ORDERBOOK_TOO_THIN (slippage bij €100 marktorder)
+    # spread_pct is in percentage points: 0.15 = 0.15%, NOT 15%.
+    max_spread_pct_entry: 0.15      # was: 0.25 — n=19 met spread≥0.20% had 26% TP / 26% stop
+    require_acceleration: false     # NO_SHORT_TERM_ACCELERATION (acceleration_score = 0)
+    # Extreme volume spikes zijn thin-market artefacten (PUMP-USD 19868x, NIGHT-USDT 6645x = 0% TP, 50% stop)
+    max_volume_ratio: 1000.0        # VOLUME_SPIKE_TOO_EXTREME; 0 = uitgeschakeld
+
+  # ─── Scoring (na hard filter) ─────────────────────────────────────────────
+  scoring:
+    # min_score is in 0.0-1.0 schaal.
+    # De wrapper normaliseert legacy 0-100 scorer: score_01 = raw / 100.0
+    # 0.70 hier = score 70 in de legacy MomentumCandidateScorer
+    min_score: 0.30  # was: 0.70 — REST service max≈0.375 (trend_1h/4h nooit gevuld; volume_ratio wel)
+
+  # ─── Universe filter (pre-filter: welke assets zijn überhaupt eligible) ───
+  universe:
+    exclude_forex_pairs: true        # GBP-USD, EUR-USD etc. uitsluiten
+    exclude_stablecoins: true        # USDT, USDC, DAI, RLUSD etc. uitsluiten
+    exclude_tokenized_metals: true   # XAUT, PAXG etc. uitsluiten
+    exclude_major_assets: true       # Gebruik excluded_base_assets lijst
+    excluded_base_assets:
+      - BTC
+      - ETH
+      - WBTC
+      - STETH
+      - XAUT
+      - PAXG
+      - RLUSD
+      - USDT
+      - USDC
+      - DAI
+      - EUR
+      - USD
+      - GBP
+
+  # ─── Output / diagnostics ─────────────────────────────────────────────────
+  output:
+    log_data_coverage: true           # Per-exchange data coverage tabel na elke scan
+    log_top_rejected_candidates: true # Top-N verworpen candidates met metrics
+    top_rejected_n: 20                # Hoeveel top-rejected entries tonen
+
+  # ─── Market data enrichment (candles + orderbook) ─────────────────────────
+  market_data:
+    mode: sample                          # "sample" (top N) or "full" (alle pairs)
+    max_enriched_pairs_per_exchange: 100  # Aantal pairs per exchange bij sample-mode
+    rate_limits:
+      max_requests_per_minute_per_exchange: 60
+      min_seconds_between_orderbook_calls: 0.5
+
+  # ─── Pre-enrichment selection (ranks candidates BEFORE candle/OB fetch) ───
+  preselection:
+    enabled: true
+    min_quote_volume_24h: 100000        # Minimale 24h omzet in quote valuta
+    max_spread_pct: 0.30                # Hogere spread → niet interessant
+    min_abs_24h_change_pct: 0.5         # Vrijwel stilstaande coins uitsluiten
+
+    # Nieuwe gewichten (som = 1.0)
+    quote_volume_24h_weight: 0.40       # Liquiditeit is primair criterium
+    spread_quality_weight: 0.30         # Lage spread = betere entry
+    range_position_24h_weight: 0.20     # Nabij 24h high = kracht
+    change_24h_context_weight: 0.10     # 24h change als context, niet als doel
+
+    # Piecewise penalty curve voor 24h change
+    change_24h_context:
+      ideal_min_pct: -2.0               # ideale zone start
+      ideal_max_pct: 8.0                # ideale zone einde
+      soft_penalty_below_pct: -8.0      # onder dit: zware penalty
+      heavy_penalty_below_pct: -15.0    # onder dit: zeer zware penalty
+      soft_penalty_above_pct: 15.0      # boven dit: zware penalty (FOMO risico)
+      extreme_penalty_above_pct: 25.0   # boven dit: zeer zwaar afgestraft
+      hard_reject_enabled: false        # nooit hard rejecten op 24h change
+
+    # Bucket-verdeling van de top 100
+    buckets:
+      top_score: 70                     # beste coins op composite score
+      top_quote_volume: 20              # meest liquide coins niet al in top_score
+      rotating_round_robin: 10          # roterende coverage om blind spots te voorkomen
+
+  # ─── Notificaties ─────────────────────────────────────────────────────────
+  notifications:
+    telegram:
+      enabled: true
+      bot_token: null    # null = lees uit env TELEGRAM_BOT_TOKEN
+      chat_id: null      # null = lees uit env TELEGRAM_CHAT_ID
+      cooldown_seconds: 1200       # dedup window: 20 min (US-104)
+      dedup_min_price_drop_pct: 1.5  # stuur opnieuw als prijs >= 1.5% gedaald
+      heartbeat_interval_seconds: 3600  # 0 = uitschakelen
+
+  # ─── Signaal classificatie (US-201: WATCH / BUY_NOW / TOO_LATE) ──────────
+  classification:
+    watch_min_score: 0.55
+    buy_now_min_score: 0.80  # verhoogd: 0.72 → 0.77 (2026-06-05) → 0.80 (B+C strategie)
+    too_late_delta_15m_pct: 6.0    # was: 9.0 — blokkeert coins die al > 6% in 15m zijn
+    too_late_delta_5m_pct: 3.5     # was: 4.5 — blokkeert single-candle spikes
+    too_late_delta_15m_soft: 5.0   # was: 6.0 — soft threshold (+ accel < 0.4)
+    # Conservative paper-test mode (signal_only service blijft read-only)
+    paper_test_enabled: true
+    # Gebruik 0.80 alleen voor paper/analyse; live-paden bestaan niet in deze service.
+    paper_watch_min_score_override: 0.80
+    # Q4 bullish regime blokkeren voor BUY_NOW (proxy op market_regime_at_signal).
+    paper_block_buy_now_when_market_regime_ge_pct: 0.35
+    # Optionele exchange preference in ranking (geen hard filter).
+    paper_prefer_exchange_enabled: true
+    paper_preferred_exchange: bitget
+    paper_preferred_exchange_rank_bonus: 0.03
+    # Alleen analysevariant; default uit in productie/paper baseline.
+    analysis_max_score_filter_enabled: false
+    analysis_max_score: 1.0
+    # Herbeoordelen zodra dit aantal evaluated BUY_NOW outcomes is bereikt.
+    evaluation_target_buy_now_count: 200
+    too_late_acceleration_threshold: 0.4
+    buy_now_delta_15m_max_pct: 5.5 # 5.5% ≤ Δ15m < 6.0% → downgrade BUY_NOW naar WATCH
+
+  # ─── Entry zone + stop/TP berekening (US-204, US-205) ────────────────────
+  entry:
+    entry_below_bid_pct: 0.3           # entry_min = bid × 0.997
+    entry_above_ask_pct: 0.2           # entry_max = ask × 1.002
+    max_chase_above_entry_max_pct: 0.8 # max_chase = entry_max × 1.008
+    stop_below_entry_min_pct: 1.5      # stop = entry_min × 0.985
+    tp1_above_entry_max_pct: 1.2       # TP1 = entry_max × 1.012
+    tp2_above_entry_max_pct: 2.5       # TP2 = entry_max × 1.025
