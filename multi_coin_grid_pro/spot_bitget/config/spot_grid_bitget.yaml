@@ -259,6 +259,7 @@ blacklist:
   - MON-USDT            # 0 TP, 3 NO_PROG, -$0.53 all-time; 0% winrate
   - TRUMP-USDT           # 2026-07-11 30-dagen analyse: -1.32 USDT netto, 50% winrate, grote individuele verliezen (-1.48); leave-one-out bijna break-even zonder deze pair
   - UNI-USDT             # 2026-07-11 30-dagen analyse: -1.37 USDT netto, 38% winrate, 5/8 trades NO_PROGRESS_TIMEOUT; leave-one-out bijna break-even zonder deze pair
+  - US-USDT              # 2026-08-09 SL -8.56 USDT in 21 min; volledige grid gevuld door crash; micro-cap crash-profiel
 
 # ==============================================================================
 # DYNAMIC COIN DISCOVERY - Now works for Bitget!

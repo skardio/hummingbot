@@ -228,6 +228,34 @@ def print_ledger(led):
     print(f"  Cumulatief EV: {cum:+.3f}%  over {len(rows)} trades")
 
 
+def _ledger_to_rows(led) -> list:
+    """Lees ledger en converteer naar hetzelfde dict-formaat als live DB rows."""
+    rows = led.execute("""
+        SELECT signal_ts, exchange, trading_pair,
+               outcome, ev_pct, best_exit_pct, worst_dd_pct, min_to_hit
+        FROM paper_trades ORDER BY signal_ts
+    """).fetchall()
+    result = []
+    for r in rows:
+        sig_ts, exc, pair, outcome, e, best, dd, min_hit = r
+        try:
+            ts = datetime.strptime(sig_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC).timestamp()
+        except (ValueError, TypeError):
+            continue
+        result.append({
+            "timestamp": ts,
+            "dag": sig_ts[:10],
+            "exchange": exc,
+            "trading_pair": pair,
+            "first_hit": outcome,
+            "best_exit_pct": best,
+            "worst_drawdown_pct": dd,
+            # min_to_hit is in minuten; block_stats verwacht seconden
+            "stop_hit_at_seconds": min_hit * 60 if min_hit else None,
+        })
+    return result
+
+
 def main():
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
@@ -253,10 +281,9 @@ def main():
         WHERE o.evaluated_at IS NOT NULL AND s.signal_label='BUY_NOW'
     """
     all_rows = [dict(r) for r in con.execute(base_query + " ORDER BY s.timestamp")]
-    # V5_WHERE is the single source of truth for the frozen filter
-    v5_rows = [dict(r) for r in con.execute(
-        base_query + f"AND {V5_WHERE} ORDER BY s.timestamp"
-    )]
+
+    # v5_rows komen uit de ledger (bewaart alles, niet beperkt tot 7-daagse retentie)
+    v5_rows = _ledger_to_rows(led)
 
     first_ts = min(r["timestamp"] for r in v5_rows) if v5_rows else None
     last_ts = max(r["timestamp"] for r in v5_rows) if v5_rows else None

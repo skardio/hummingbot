@@ -1,0 +1,23 @@
+usage: momentum_signal_service.py [-h] [--config CONFIG] [--db-path DB_PATH]
+                                  [--snapshot-path SNAPSHOT_PATH]
+                                  [--log-level {DEBUG,INFO,WARNING,ERROR}]
+                                  [--debug-pair EXCHANGE:PAIR]
+momentum_signal_service.py: error: unrecognized arguments: echo PID:
+2026-08-11 14:34:10,177 INFO     __main__  [NOTIFY] Telegram-notificaties ingeschakeld.
+2026-08-11 14:34:10,177 INFO     __main__  ========================================================================
+  SIGNAL ONLY — GEEN ORDERS WORDEN GEPLAATST
+  This service is READ-ONLY. No orders will be placed.
+========================================================================
+2026-08-11 14:34:10,183 INFO     __main__  [CONFIG_VERSION] id=4 params={'min_price_change_1m_pct': 0.4, 'min_price_change_3m_pct': 0.6, 'min_price_change_5m_pct': 1.1, 'min_price_change_15m_pct': 2.5, 'max_price_change_5m_pct': 3.5, 'min_volume_ratio': 2.3, 'max_spread_pct': 0.3, 'max_spread_pct_entry': 0.15, 'max_too_late_price_change_15m_pct': 6.0, 'max_volume_ratio': 1000.0, 'min_score': 0.3, 'watch_min_score': 0.55, 'buy_now_min_score': 0.8, 'too_late_delta_15m_pct': 6.0, 'too_late_delta_15m_soft': 5.0, 'paper_test_enabled': True, 'paper_watch_min_score_override': 0.8, 'paper_block_buy_now_when_market_regime_ge_pct': 0.35, 'paper_prefer_exchange_enabled': True, 'paper_preferred_exchange': 'bitget', 'paper_preferred_exchange_rank_bonus': 0.03, 'analysis_max_score_filter_enabled': False, 'analysis_max_score': 1.0}
+2026-08-11 14:34:10,183 INFO     __main__  [SCAN e35e1abfae40] Start — exchanges: ['kraken', 'okx', 'bitget', 'bitvavo']
+2026-08-11 14:34:10,626 INFO     __main__  [SCAN e35e1abfae40] Tickers: 2483 candidates
+2026-08-11 14:34:10,643 INFO     multi_coin_grid_pro.signals.momentum_preselection  [MISSING_TICKER_24H_CHANGE] bitvavo: 1/78 eligible pairs missing 24h change data
+2026-08-11 14:34:10,644 INFO     __main__  [PRESELECT] kraken: 622 universe → 61 eligible → 61 selected
+2026-08-11 14:34:10,645 INFO     __main__  [PRESELECT] okx: 264 universe → 15 eligible → 15 selected
+2026-08-11 14:34:10,645 INFO     __main__  [PRESELECT] bitget: 1168 universe → 264 eligible → 100 selected
+2026-08-11 14:34:10,645 INFO     __main__  [PRESELECT] bitvavo: 429 universe → 78 eligible → 78 selected
+2026-08-11 14:34:10,646 INFO     multi_coin_grid_pro.signals.momentum_market_data  [ENRICH] kraken: 63 pairs (mode=sample)
+2026-08-11 14:34:10,646 INFO     multi_coin_grid_pro.signals.momentum_market_data  [ENRICH] okx: 17 pairs (mode=sample)
+2026-08-11 14:34:10,646 INFO     multi_coin_grid_pro.signals.momentum_market_data  [ENRICH] bitget: 100 pairs (mode=sample)
+2026-08-11 14:34:10,647 INFO     multi_coin_grid_pro.signals.momentum_market_data  [ENRICH] bitvavo: 80 pairs (mode=sample)
+2026-08-11 14:34:27,130 INFO     __main__  Service gestopt via CancelledError.

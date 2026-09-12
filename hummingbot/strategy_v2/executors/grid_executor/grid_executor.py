@@ -1007,10 +1007,10 @@ class GridExecutor(ExecutorBase):
                 len(self.levels_by_state.get(GridLevelStates.OPEN_ORDER_FILLED, []))
                 + len(self.levels_by_state.get(GridLevelStates.CLOSE_ORDER_PLACED, []))
             )
-            # Cumulative BUY orders placed over the trade lifetime (from filled_orders log)
-            all_filled = self.custom_info.get('filled_orders', []) if hasattr(self, 'custom_info') else []
+            # Cumulative BUY orders filled over the trade lifetime
             cumulative_buy_orders = sum(
-                1 for fo in all_filled if isinstance(fo, dict) and fo.get('trade_type') == 'BUY'
+                1 for fo in getattr(self, '_filled_orders', [])
+                if isinstance(fo, dict) and fo.get('trade_type') == 'BUY'
             )
             if live_buy_levels >= accum_warn_min_fills or cumulative_buy_orders >= accum_warn_min_fills:
                 self.update_position_metrics()
@@ -1901,26 +1901,54 @@ class GridExecutor(ExecutorBase):
         :return: None
         """
         effective_reason = reason or self._early_stop_reason
-        self.cancel_open_orders()
-        self._status = RunnableStatus.SHUTTING_DOWN
-        if keep_position:
-            self.close_type = CloseType.POSITION_HOLD
-        elif effective_reason in {
-            EarlyStopReason.STOP_LOSS,
-            EarlyStopReason.HARD_STOP_EXIT,
-            EarlyStopReason.EMERGENCY_EXIT,
-        }:
-            self.close_type = CloseType.STOP_LOSS
-        else:
-            self.close_type = CloseType.EARLY_STOP
 
-        # US-006: Store detailed early stop reason
+        # US-006: Store detailed early stop reason (before any early return below)
         if reason is not None:
             self._early_stop_reason = reason
             self.logger().info(f"🛑 US-006: Early stop reason: {reason.name} ({reason.value})")
         elif self._early_stop_reason is None:
             # Set default reason if none provided
             self._early_stop_reason = EarlyStopReason.UNKNOWN
+
+        mapped_close_type = (
+            CloseType.STOP_LOSS
+            if effective_reason in {
+                EarlyStopReason.STOP_LOSS,
+                EarlyStopReason.HARD_STOP_EXIT,
+                EarlyStopReason.EMERGENCY_EXIT,
+            }
+            else CloseType.EARLY_STOP
+        )
+
+        # RACE-CONDITION FIX (BCH-USDT incident 2026-09-08): a timeout-triggered
+        # two-phase unwind (NO_PROGRESS_TIMEOUT / HARD_CAP_TIME_LIMIT) may already
+        # be actively closing this position via start_forced_close(). early_stop()
+        # used to place its OWN close order regardless, and both mechanisms wrote
+        # to the shared self._close_order / self._close_order_id state — whichever
+        # order was placed second silently overwrote the tracked reference of the
+        # first, orphaning a successful exchange fill from realized PnL (the first
+        # order's fill event could no longer be matched to any TrackedOrder).
+        # Defer to the existing unwind's own idempotent priority mechanism instead
+        # of placing a second, competing close order.
+        unwind_phase = getattr(self, "_unwind_phase", "NONE")
+        unwind_close_reason = getattr(self, "_unwind_close_reason", None)
+        if not keep_position and unwind_phase in ("GRACEFUL", "AGGRESSIVE"):
+            self.logger().warning(
+                f"⚠️  early_stop({effective_reason.name if effective_reason else 'UNKNOWN'}) deferred: "
+                f"two-phase unwind already active (phase={unwind_phase}, "
+                f"reason={unwind_close_reason.name if unwind_close_reason else 'UNKNOWN'}) "
+                f"for {self.config.trading_pair} — routing through the existing unwind instead of "
+                f"placing a competing close order."
+            )
+            self.start_forced_close(mapped_close_type)
+            return
+
+        self.cancel_open_orders()
+        self._status = RunnableStatus.SHUTTING_DOWN
+        if keep_position:
+            self.close_type = CloseType.POSITION_HOLD
+        else:
+            self.close_type = mapped_close_type
 
         # If keep_position=False, close any open position immediately
         if not keep_position:

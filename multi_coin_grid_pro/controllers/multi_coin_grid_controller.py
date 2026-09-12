@@ -8,7 +8,6 @@ Hummingbot's Strategy V2 architecture.
 import asyncio
 import json
 import logging
-import math
 import time
 import uuid
 from datetime import datetime
@@ -5230,7 +5229,7 @@ class MultiCoinGridController(ControllerBase):
 
         # Check if we should create/switch grid
         # Note: best_coin is already filtered to exclude coins in cooldown
-        if self._check_entry_trend_filter(best_coin) and self._should_create_new_grid(best_coin):
+        if self._should_create_new_grid(best_coin):
             # AI-F1: Log accepted entry decision
             self._log_entry_decision(
                 symbol=best_coin, accepted=True,
@@ -5863,11 +5862,6 @@ class MultiCoinGridController(ControllerBase):
                 # 2b. Multi-timeframe buy protection
                 if not self._check_multi_timeframe_buy(candidate_coin):
                     self.logger().debug("      ❌ Multi-timeframe protection rejected")
-                    continue
-
-                # 2c. Minimum entry trend score
-                if not self._check_entry_trend_filter(candidate_coin):
-                    self.logger().debug("      ❌ Entry trend filter rejected")
                     continue
 
                 # 3. Check if should create new grid
@@ -7267,54 +7261,6 @@ class MultiCoinGridController(ControllerBase):
                     except Exception as _phantom_e:
                         self.logger().debug(f"Close handler error: {_phantom_e}")
 
-                    # Keep the global risk manager in sync independently from
-                    # optional audit/metrics handlers above.  Those handlers are
-                    # deliberately best-effort and must not prevent a close from
-                    # being registered.
-                    try:
-                        from hummingbot.strategy_v2.models.executors import CloseType
-                        from multi_coin_grid_pro.core.exit_types import ExitType
-
-                        timeout_close_types = {
-                            CloseType.NO_FILL_TIMEOUT,
-                            CloseType.NO_PROGRESS_TIMEOUT,
-                            CloseType.TIME_LIMIT,
-                        }
-                        if hasattr(CloseType, "HARD_CAP_TIME_LIMIT"):
-                            timeout_close_types.add(CloseType.HARD_CAP_TIME_LIMIT)
-                        if hasattr(CloseType, "SWITCH"):
-                            timeout_close_types.add(CloseType.SWITCH)
-
-                        if executor.close_type == CloseType.STOP_LOSS:
-                            exit_type = ExitType.STOP_LOSS
-                        elif executor.close_type == CloseType.TAKE_PROFIT:
-                            exit_type = ExitType.TAKE_PROFIT
-                        elif executor.close_type in timeout_close_types and realised_pnl < 0:
-                            exit_type = ExitType.TREND_EXIT
-                        elif realised_pnl < 0:
-                            r_unit = float(getattr(self.config, "r_unit_quote", 5.0))
-                            exit_type = (
-                                ExitType.STOP_LOSS
-                                if abs(float(realised_pnl)) >= r_unit
-                                else ExitType.SMALL_LOSS
-                            )
-                        elif realised_pnl >= 0:
-                            exit_type = ExitType.TAKE_PROFIT
-                        else:
-                            exit_type = ExitType.UNKNOWN
-
-                        self.risk_manager.register_close_trade(
-                            symbol=trading_pair,
-                            realised_pnl_quote=realised_pnl,
-                            now=now,
-                            exit_type=exit_type,
-                        )
-                    except Exception as risk_error:
-                        self.logger().warning(
-                            f"⚠️ Risk manager close registration failed for "
-                            f"{trading_pair}: {risk_error}"
-                        )
-
                     self._realised_executors_tracked[executor.id] = realised_pnl
 
                     # Phase 1 fee-diagnostic: update per-symbol loss streak + log roundtrip summary
@@ -7887,20 +7833,6 @@ class MultiCoinGridController(ControllerBase):
                     # This prevents the DynamicPairManager from reducing a 24-coin pool to 9
                     self.monitored_coins = list(current_monitored | active_pairs | set(self.active_coins.keys()))
 
-            # Propagate volume/spread from DPM scan into pair_volumes/pair_spreads
-            # so the bucket-tracker can build MarketMetrics for any scanned coin.
-            # PairMetrics.spread_pct is in %; pair_spreads stores fractions (÷100).
-            if self.dynamic_pair_manager.all_pairs:
-                for sym, pm in self.dynamic_pair_manager.all_pairs.items():
-                    if pm.volume_24h > 0:
-                        self.pair_volumes[sym] = pm.volume_24h
-                    if pm.bid > 0 and pm.ask > 0:
-                        self.pair_spreads[sym] = (pm.ask - pm.bid) / pm.bid
-                self.logger().debug(
-                    f"[US-007] pair_volumes updated: {len(self.pair_volumes)} pairs, "
-                    f"pair_spreads: {len(self.pair_spreads)} pairs"
-                )
-
             self.logger().info(f"✅ US-007: Scanned {scanned_count} pairs")
 
         except Exception as e:
@@ -7934,47 +7866,6 @@ class MultiCoinGridController(ControllerBase):
             )
         except Exception as e:
             self.logger().error(f"❌ Error updating exposure tracking: {e}")
-
-    def _check_entry_trend_filter(self, trading_pair: str) -> bool:
-        """Return whether a pair meets the configured minimum trend score.
-
-        Missing or invalid market data is treated as unavailable and therefore
-        fails open; this filter must not halt trading because a data feed is
-        temporarily incomplete.
-        """
-        config = getattr(self.config, "entry_trend_filter", None) or {}
-        if not config.get("enabled", False):
-            return True
-
-        try:
-            minimum_score = float(config.get("min_entry_trend_score", 0.0))
-        except (TypeError, ValueError):
-            minimum_score = 0.0
-        if minimum_score <= 0:
-            return True
-
-        try:
-            trend = self.trend_calculator.get_trend(trading_pair) if self.trend_calculator else None
-            score = getattr(trend, "trend_score", None) if trend is not None else None
-            score_value = float(score) if score is not None else None
-        except (TypeError, ValueError, AttributeError):
-            score_value = None
-
-        if score_value is None or not math.isfinite(score_value):
-            self.logger().info(
-                f"ENTRY_FILTER_BYPASS symbol={trading_pair} "
-                f"reason=ENTRY_TREND_SCORE_UNAVAILABLE score={score_value}"
-            )
-            return True
-
-        if score_value < minimum_score:
-            self.logger().info(
-                f"ENTRY_BLOCKED symbol={trading_pair} "
-                f"reason=ENTRY_TREND_SCORE_BELOW_MIN "
-                f"score={score_value:.4f} min_score={minimum_score:.4f}"
-            )
-            return False
-        return True
 
     def _should_create_new_grid(self, best_coin: str) -> bool:
         """
