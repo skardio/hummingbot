@@ -1,0 +1,229 @@
+# =====================================================================
+# EVIDENCE POLICY — executable thresholds for the Evidence Engine
+# =====================================================================
+#
+# This file is the SINGLE source of truth for every threshold, tolerance
+# and denylist used by tools/evidence/. No evidence threshold and no
+# fingerprint denylist entry may be hardcoded in Python.
+#
+# Documentation (non-executable): docs/EVIDENCE_SCHEMA.md
+#
+# policy_version MUST be bumped on every change to any value below.
+# Reports generated under different policy_versions are NOT comparable;
+# the engine refuses to compare them.
+# =====================================================================
+
+policy_version: "1.3.0"
+effective_from: "2026-10-04"
+rationale_doc: "docs/EVIDENCE_SCHEMA.md"
+
+# ---------------------------------------------------------------------
+# CLASSIFICATION — how a closed executor is assigned to a class.
+# Layers 1-3 are exact. Layer 4 is an explicit heuristic and may never
+# carry a verdict on its own (see require_verdict_stability).
+# ---------------------------------------------------------------------
+classification:
+  # Layer 4 only. A positive base residual whose quote value is below
+  # dust_abs_quote AND whose relative size is below dust_rel_pct is
+  # treated as unsellable dust.
+  dust_abs_quote: 0.50
+  dust_rel_pct: 0.01
+
+  # The full gate chain is re-evaluated for every combination below.
+  # If the verdict is not identical across all of them the result is
+  # INSUFFICIENT_EVIDENCE (DUST_SENSITIVE).
+  dust_sensitivity_sweep:
+    abs_quote: [0.05, 0.10, 0.50, 1.00, 5.00]
+    rel_pct: [0.001, 0.005, 0.01, 0.02, 0.05]
+  require_verdict_stability: true
+
+  # Share of view B (matched trades) that may come from the heuristic
+  # layer before a warning is raised.
+  max_heuristic_share_of_B: 0.20
+
+  # Absolute tolerance (base units) under which a residual counts as
+  # exactly zero. Guards against Decimal noise only, not step-size dust.
+  zero_residual_epsilon_base: "1E-18"
+
+  # Minimum difference (quote) between summed buy notional and the
+  # stored realized_buy_size_quote for the executor's own dust
+  # correction to be considered detected.
+  dust_signature_epsilon_quote: "1E-9"
+
+# ---------------------------------------------------------------------
+# GATE G0 — data integrity. Fails closed: no metrics are reported.
+# ---------------------------------------------------------------------
+data_integrity:
+  # |net_pnl - ((sell - buy) - fees)| must stay below
+  # max(reconciliation_residual_rel * |net_pnl|, reconciliation_residual_abs)
+  reconciliation_residual_rel: 0.005
+  reconciliation_residual_abs: 0.50
+
+  # pnl(A) must equal pnl(B) + pnl(C)
+  abc_identity_tolerance_abs: 0.01
+
+  allow_negative_fees: false
+  # Effective PER-SIDE fee rate: fees / (buy + sell) notional. Fees are charged
+  # on both legs, so dividing by deployed capital would roughly double the
+  # apparent rate. Verified: Kraken 0.317%, Bitget 0.107%.
+  fee_rate_plausible_range: [0.0000, 0.0060]
+
+  # Below this share of executor volume confirmed in TradeFill (matched on
+  # order_id), execution-quality metrics are suppressed rather than reported.
+  # Measured: Kraken USD 96.4%, Bitget 99.8%.
+  min_tradefill_attribution_for_exec_quality: 0.20
+
+# ---------------------------------------------------------------------
+# GATE G1 — cohort purity.
+# ---------------------------------------------------------------------
+cohort:
+  min_dominant_fingerprint_share: 0.90
+  require_same_venue: true
+  require_same_quote: true
+  require_same_controller_id: true
+  forbid_period_overlap: true
+
+  # Warnings, not blocks.
+  min_pair_overlap_with_baseline: 0.50
+  max_baseline_age_days: 90
+
+  # fingerprint_health = distinct fingerprints / n executors
+  fingerprint_health_warn: 0.30
+  fingerprint_health_stale: 0.70
+
+# ---------------------------------------------------------------------
+# GATE G3 — sample adequacy.
+# ---------------------------------------------------------------------
+sample:
+  min_matched_trades: 100
+  min_trading_days: 20
+  min_distinct_pairs: 5
+  max_pair_pnl_share: 0.40
+  max_single_trade_pnl_share: 0.25
+
+# ---------------------------------------------------------------------
+# GATE G5 — operational noise.
+# ---------------------------------------------------------------------
+operational:
+  max_operational_share_of_total: 0.25
+  max_unmatched_buy_rate: 0.10
+
+# ---------------------------------------------------------------------
+# Statistical method. Seed is fixed for bit-identical reproduction.
+# ---------------------------------------------------------------------
+statistics:
+  method: "block_bootstrap_day"
+  n_resamples: 10000
+  confidence_level: 0.95
+  random_seed: 20261004
+  require_ci_excludes_zero: true
+
+# ---------------------------------------------------------------------
+# GATE G6 / G7 — decision rules.
+# A high win rate may never carry a PASS: win_rate is forbidden as a
+# primary metric.
+# ---------------------------------------------------------------------
+decision:
+  primary_metric_allowlist:
+    - expectancy_per_trade_matched_net
+    - return_on_deployed_matched_net
+  forbidden_primary_metrics:
+    - win_rate
+    - profit_factor
+    - gross_pnl
+  max_drawdown_ratio_vs_baseline: 1.25
+  require_positive_expectancy_after_fees: true
+  require_operational_rate_not_worse: true
+
+# ---------------------------------------------------------------------
+# Regime segmentation preconditions. Currently unmet by all databases.
+# ---------------------------------------------------------------------
+regime:
+  min_n_per_regime: 30
+  min_entry_regime_coverage: 0.70
+
+# ---------------------------------------------------------------------
+# FINGERPRINT — denylist approach.
+#
+# The fingerprint hashes the FULL executor config JSON minus the fields
+# listed here. Any new strategy parameter is therefore included by
+# default: cohorts split instead of silently merging. That is the safe
+# direction of failure.
+#
+# Entries ending in '*' are prefix matches.
+# ---------------------------------------------------------------------
+fingerprint:
+  hash_algorithm: "sha256"
+  short_hash_length: 10
+  # Significant digits kept when canonicalising numeric values.
+  # Removes float artefacts such as 0.07500000000000001 vs 0.075.
+  numeric_significant_digits: 12
+
+  denylist:
+    identity:
+      - id
+      - timestamp
+      - level_id
+    market_derived:
+      - start_price
+      - end_price
+      - limit_price
+      - custom_info.atr_pct
+    per_trade_observation:
+      - custom_info.entry_*
+    sizing_derived:
+      - total_amount_quote
+    cohort_dimension:
+      - trading_pair
+      - custom_info.bot_instance_id
+
+    # ---------------------------------------------------------------
+    # Runtime outputs (added in policy 1.2.0).
+    #
+    # Each field below was traced to code that COMPUTES it per executor.
+    # They are results of the strategy, not settings of it, so a change in
+    # their value must not split an experiment cohort. The settings that
+    # drive them (atr_stop_multiplier, min_stop_pct, max_stop_pct,
+    # dynamic_tp_*, max_open_orders as configured, fee model) remain in the
+    # fingerprint.
+    #
+    # Evidence: docs/EVIDENCE_SCHEMA.md section 9.4.
+    # ---------------------------------------------------------------
+    runtime_output:
+      # clamp(trend.volatility * atr_stop_multiplier, min_stop_pct, max_stop_pct)
+      # controller.py:10721-10745 -> TripleBarrierConfig(stop_loss=...) :11011
+      # 17 distinct values on Bitget, 4 on Kraken; band width explains the gap.
+      - triple_barrier_config.stop_loss
+      # Trend-dependent, clamped by dynamic_tp_min_pct / dynamic_tp_max_pct
+      # controller.py:10787-10825 -> :11012
+      - triple_barrier_config.take_profit
+      # Set equal to the dynamic take profit, controller.py:11037-11039
+      - activation_bounds
+      # max(1, min(config.max_open_orders, num_grids)); num_grids itself varies
+      # with grid range, capital and min order size. controller.py:11034
+      - max_open_orders
+      # roundtrip_fee_pct + min_net_profit_pct, a fee-aware computation
+      # controller.py:10658 -> :11030
+      - min_spread_between_orders
+      # Regime base plus ATR/volatility resolver get_recommended_timeout()
+      # controller.py:10905-10948 -> :11047
+      - custom_info.no_fill_timeout_sec
+      # Derived as regime_progress_sec * 2, controller.py:11051
+      - custom_info.no_progress_max_extension_sec
+      # Added in policy 1.3.0. Same _get_regime_timeouts() call as
+      # no_fill_timeout_sec above (controller.py:10921 -> :11048), and the
+      # source of the already-denylisted no_progress_max_extension_sec.
+      # Takes exactly the regime buckets from the YAML regime_timeouts block:
+      # BULL 7200 / CHOP 5400 / BEAR 3600, plus the scalar fallback 2700.
+      # It changes when the market regime flips, with no config change at all,
+      # so leaving it in would split a frozen cohort for a non-strategic
+      # reason. Measured: the September Kraken cohort split into 19 + 9
+      # executors purely because of one CHOP -> BULL -> CHOP excursion.
+      - custom_info.no_progress_timeout_sec
+
+# ---------------------------------------------------------------------
+# Reporting.
+# ---------------------------------------------------------------------
+reporting:
+  report_dir: "reports/"
+  schema_version: "1.0.0"

@@ -15,6 +15,17 @@ _HIT_TP1 = "TP1"
 _HIT_TP2 = "TP2"
 _HIT_STOP = "STOP"
 _HIT_TIMEOUT = "TIMEOUT"
+_HIT_WIDE_TP = "WIDE_TP"
+
+# --- Shadow-test (v5 prospectief, BUY_NOW-only, puur observationeel) -------
+# WIDE_TP is GEEN strategiewijziging: CURRENT (hit_tp1/hit_tp2/hit_stop/first_hit)
+# hierboven blijft volledig ongewijzigd en is de enige die live gebruikt wordt.
+# WIDE_TP hergebruikt exact dezelfde entry_ref (entry_max) en dezelfde
+# invalidation_price als CURRENT; alleen de TP-drempel ligt breder.
+# Drempels zijn bruto prijsniveaus t.o.v. entry_max — nooit netto EV-percentages.
+_WIDE_TP_PCT = 1.5          # entry_max * 1.015
+_OBS_UP_PCTS = {"p07": 0.7, "p10": 1.0}    # entry_max * (1 + pct/100)
+_OBS_DOWN_PCTS = {"m10": 1.0, "m15": 1.5}  # entry_max * (1 - pct/100)
 
 
 class OutcomeTracker:
@@ -29,6 +40,13 @@ class OutcomeTracker:
 
     first_hit = welk niveau het eerst geraakt werd (TP1/TP2/STOP/TIMEOUT/NONE).
     *_hit_at_seconds = seconden na entry waarop dat niveau geraakt werd.
+
+    Shadow-test (BUY_NOW only, puur observationeel, geen strategiewijziging):
+    hit_wide_tp/wide_tp_hit_at_seconds/wide_first_hit volgen een virtuele
+    TP-drempel van entry_max*1.015 met dezelfde invalidation_price als CURRENT.
+    p07/p10/m10/m15_hit_at_seconds en mfe/mae_at_seconds zijn extra bruto
+    prijs-tijdstippen voor latere event-volgorde-reconstructie; ze beïnvloeden
+    CURRENT of WIDE_TP niet.
 
     DB schema (table is created if it doesn't exist):
 
@@ -111,7 +129,11 @@ class OutcomeTracker:
                 "min_price_1m, min_price_3m, min_price_5m, "
                 "min_price_10m, min_price_30m, "
                 "hit_tp1, hit_tp2, hit_stop, "
-                "first_hit, tp1_hit_at_seconds, tp2_hit_at_seconds, stop_hit_at_seconds "
+                "first_hit, tp1_hit_at_seconds, tp2_hit_at_seconds, stop_hit_at_seconds, "
+                "best_exit_pct, worst_drawdown_pct, "
+                "hit_wide_tp, wide_tp_hit_at_seconds, "
+                "p07_hit_at_seconds, p10_hit_at_seconds, m10_hit_at_seconds, m15_hit_at_seconds, "
+                "mfe_at_seconds, mae_at_seconds "
                 "FROM signal_outcomes WHERE signal_id = ?",
                 (sig_id,),
             ).fetchone()
@@ -128,7 +150,11 @@ class OutcomeTracker:
                     "min_price_1m, min_price_3m, min_price_5m, "
                     "min_price_10m, min_price_30m, "
                     "hit_tp1, hit_tp2, hit_stop, "
-                    "first_hit, tp1_hit_at_seconds, tp2_hit_at_seconds, stop_hit_at_seconds "
+                    "first_hit, tp1_hit_at_seconds, tp2_hit_at_seconds, stop_hit_at_seconds, "
+                    "best_exit_pct, worst_drawdown_pct, "
+                    "hit_wide_tp, wide_tp_hit_at_seconds, "
+                    "p07_hit_at_seconds, p10_hit_at_seconds, m10_hit_at_seconds, m15_hit_at_seconds, "
+                    "mfe_at_seconds, mae_at_seconds "
                     "FROM signal_outcomes WHERE signal_id = ?",
                     (sig_id,),
                 ).fetchone()
@@ -137,7 +163,11 @@ class OutcomeTracker:
              mx1, mx3, mx5, mx10, mx30,
              mn1, mn3, mn5, mn10, mn30,
              ht1, ht2, hst,
-             cur_first_hit, cur_tp1_secs, cur_tp2_secs, cur_stop_secs) = oc
+             cur_first_hit, cur_tp1_secs, cur_tp2_secs, cur_stop_secs,
+             cur_best_exit_pct, cur_worst_dd_pct,
+             cur_hit_wide_tp, cur_wide_tp_secs,
+             cur_p07_secs, cur_p10_secs, cur_m10_secs, cur_m15_secs,
+             cur_mfe_secs, cur_mae_secs) = oc
 
             upd: dict = {}
 
@@ -166,6 +196,26 @@ class OutcomeTracker:
                     if cur_stop_secs is None:
                         upd["stop_hit_at_seconds"] = age_sec
 
+            # --- Shadow-test (BUY_NOW only): WIDE_TP variant + observationele drempels.
+            # Puur logging op bruto prijsniveau; beïnvloedt hit_tp1/hit_tp2/hit_stop/
+            # first_hit (CURRENT) hierboven op geen enkele manier.
+            if label == "BUY_NOW" and entry_max is not None:
+                wide_tp_price = entry_max * (1.0 + _WIDE_TP_PCT / 100.0)
+                if not cur_hit_wide_tp and price >= wide_tp_price:
+                    upd["hit_wide_tp"] = 1
+                    if cur_wide_tp_secs is None:
+                        upd["wide_tp_hit_at_seconds"] = age_sec
+
+                obs_up_secs = {"p07": cur_p07_secs, "p10": cur_p10_secs}
+                for key, pct in _OBS_UP_PCTS.items():
+                    if obs_up_secs[key] is None and price >= entry_max * (1.0 + pct / 100.0):
+                        upd[f"{key}_hit_at_seconds"] = age_sec
+
+                obs_down_secs = {"m10": cur_m10_secs, "m15": cur_m15_secs}
+                for key, pct in _OBS_DOWN_PCTS.items():
+                    if obs_down_secs[key] is None and price <= entry_max * (1.0 - pct / 100.0):
+                        upd[f"{key}_hit_at_seconds"] = age_sec
+
             # best/worst from all current max/min values
             all_maxes = []
             all_mins = []
@@ -180,6 +230,15 @@ class OutcomeTracker:
                 upd["best_exit_pct"] = round((max(all_maxes) - entry_ref) / entry_ref * 100, 4)
             if all_mins:
                 upd["worst_drawdown_pct"] = round((min(all_mins) - entry_ref) / entry_ref * 100, 4)
+
+            # MFE/MAE timestamp: seconden waarop een NIEUW extreem werd geobserveerd
+            # (puur observationeel, gebruikt dezelfde running max/min als hierboven).
+            new_best = upd.get("best_exit_pct", cur_best_exit_pct)
+            if new_best is not None and (cur_best_exit_pct is None or new_best > cur_best_exit_pct):
+                upd["mfe_at_seconds"] = age_sec
+            new_worst = upd.get("worst_drawdown_pct", cur_worst_dd_pct)
+            if new_worst is not None and (cur_worst_dd_pct is None or new_worst < cur_worst_dd_pct):
+                upd["mae_at_seconds"] = age_sec
 
             # Determine first_hit on final evaluation (30 min elapsed)
             if age_min >= 30 and cur_first_hit is None:
@@ -233,6 +292,36 @@ class OutcomeTracker:
                 min_p30m = upd.get("min_price_30m") or mn30
                 if min_p30m is not None and entry_max is not None:
                     upd["entry_zone_reached"] = 1 if min_p30m <= entry_max else 0
+
+                # --- Shadow-test: wide_first_hit (BUY_NOW only) ---
+                # Hergebruikt exact dezelfde final_stop_secs/final_hst als CURRENT
+                # (zelfde invalidation_price) — alleen de TP-kant is anders.
+                if label == "BUY_NOW":
+                    final_hwide = upd.get("hit_wide_tp", cur_hit_wide_tp)
+                    final_wide_secs = upd.get("wide_tp_hit_at_seconds", cur_wide_tp_secs)
+
+                    wide_candidates = []
+                    if final_hwide and final_wide_secs is not None:
+                        wide_candidates.append((final_wide_secs, _HIT_WIDE_TP))
+                    if final_hst and final_stop_secs is not None:
+                        wide_candidates.append((final_stop_secs, _HIT_STOP))
+
+                    if wide_candidates:
+                        upd["wide_first_hit"] = min(wide_candidates, key=lambda x: x[0])[1]
+                    elif final_hwide or final_hst:
+                        upd["wide_first_hit"] = _HIT_WIDE_TP if final_hwide else _HIT_STOP
+                    else:
+                        upd["wide_first_hit"] = _HIT_TIMEOUT
+
+                    if upd["wide_first_hit"] in (_HIT_WIDE_TP, _HIT_STOP):
+                        wide_secs = (
+                            upd.get("wide_tp_hit_at_seconds")
+                            or upd.get("stop_hit_at_seconds")
+                            or cur_wide_tp_secs
+                            or cur_stop_secs
+                        )
+                        if wide_secs is not None:
+                            upd["wide_time_to_first_hit_minutes"] = round(wide_secs / 60.0, 2)
 
                 upd["evaluated_at"] = now
 

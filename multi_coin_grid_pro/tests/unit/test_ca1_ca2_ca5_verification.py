@@ -278,10 +278,14 @@ class TestCA5RegisterCloseTrade(unittest.TestCase):
 
     def test_timeout_with_negative_pnl_maps_to_trend_exit(self):
         from multi_coin_grid_pro.core.exit_types import ExitType
-        for ct in (CloseType.NO_FILL_TIMEOUT, CloseType.NO_PROGRESS_TIMEOUT, CloseType.TIME_LIMIT):
+        for index, ct in enumerate((CloseType.NO_FILL_TIMEOUT, CloseType.NO_PROGRESS_TIMEOUT,
+                                    CloseType.TIME_LIMIT)):
             self.controller.risk_manager.reset_mock()
             self.controller._realised_executors_tracked = {}
-            executor = _make_executor("e1", Decimal("-2.0"), close_type=ct)
+            # FIX-002: distinct ids per iteration. These represent three
+            # separate executor closes, and the durable ledger deliberately
+            # refuses to process the same executor id twice.
+            executor = _make_executor(f"e-timeout-{index}", Decimal("-2.0"), close_type=ct)
             self._run(executor)
             kwargs = self.controller.risk_manager.register_close_trade.call_args[1]
             self.assertEqual(

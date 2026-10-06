@@ -336,6 +336,39 @@ class MultiCoinGridStrategyV2(StrategyV2Base):
         """
         return []
 
+    def store_actions_proposal(self) -> List:
+        """Hand closed executors to their controller before they are dropped.
+
+        FIX-002. ``closed_executors_buffer = 0`` means the orchestrator removes
+        a closed executor from ``active_executors`` inside the very tick that
+        publishes the snapshot, so the controller's async loop effectively never
+        observes it in TERMINATED state. The kill switch, the drawdown tracker
+        and the phantom-loss correction were all dead as a result.
+
+        This is the one deterministic moment where the executor is both final
+        and still reachable. Delivery is idempotent: the controller's durable
+        ledger decides whether it is actually processed.
+        """
+        actions = super().store_actions_proposal()
+        if not actions:
+            return actions
+
+        executors_by_id = {
+            getattr(info, "id", None): info for info in self.get_all_executors()
+        }
+        for action in actions:
+            try:
+                controller = self.controllers.get(getattr(action, "controller_id", None))
+                info = executors_by_id.get(getattr(action, "executor_id", None))
+                if controller is not None and info is not None:
+                    handover = getattr(controller, "enqueue_realised_executor", None)
+                    if callable(handover):
+                        handover(info)
+            except Exception as e:
+                # Never let bookkeeping block executor persistence.
+                self.logger().warning(f"FIX-002 handover failed for {action}: {e}")
+        return actions
+
     def format_status(self) -> str:
         """
         Format strategy status for display - UNIFIED VERSION

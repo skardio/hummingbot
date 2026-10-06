@@ -582,3 +582,243 @@ class TestTooLateTracking:
         assert row is not None
         assert row[0] == "TIMEOUT"
         tracker.close()
+
+
+# ---------------------------------------------------------------------------
+# Shadow-test (v5 prospectief): CURRENT vs WIDE_TP + observationele drempels
+# ---------------------------------------------------------------------------
+
+class TestShadowTestOrdering:
+    """CURRENT (bestaand) en WIDE_TP (schaduw) moeten volledig onafhankelijk
+    van elkaar worden bepaald, met dezelfde invalidation_price als anker."""
+
+    def test_current_unaffected_by_wide_tp_addition(self):
+        """CURRENT-kolommen (hit_tp1/hit_stop/first_hit) blijven exact zoals
+        vóór de shadow-test-uitbreiding — geen regressie."""
+        db = _make_db()
+        tracker = OutcomeTracker(db_path=db)
+        now = time.time()
+        signal_id = _insert_buy_now(
+            db, timestamp=now - 31 * 60, entry_max=1.002, tp1=1.014, tp2=1.027, stop=0.985,
+        )
+        tracker.update(_prices(("kraken", "WLD-USD", 1.020)), now=now)
+        conn = sqlite3.connect(db)
+        row = conn.execute(
+            "SELECT hit_tp1, hit_stop, first_hit FROM signal_outcomes WHERE signal_id=?",
+            (signal_id,),
+        ).fetchone()
+        conn.close()
+        assert row == (1, 0, "TP1")
+        tracker.close()
+
+    def test_current_tp_but_wide_tp_never_reached_stays_timeout(self):
+        """Prijs bereikt CURRENT TP1 (+1.2%) maar niet WIDE_TP (+1.5%):
+        CURRENT=TP1, WIDE_TP=TIMEOUT (nooit gestopt, nooit wide-TP geraakt)."""
+        db = _make_db()
+        tracker = OutcomeTracker(db_path=db)
+        now = time.time()
+        # entry_max=1.0 → TP1=1.012 (+1.2%), WIDE_TP=1.015 (+1.5%), stop=0.985 (op entry_min)
+        signal_id = _insert_buy_now(
+            db, timestamp=now - 31 * 60, entry_max=1.0, entry_min=0.997,
+            tp1=1.012, tp2=1.025, stop=0.982,
+        )
+        # Prijs stijgt tot 1.013 (tussen TP1 en WIDE_TP) en blijft daar.
+        tracker.update(_prices(("kraken", "WLD-USD", 1.013)), now=now)
+        conn = sqlite3.connect(db)
+        row = conn.execute(
+            "SELECT first_hit, wide_first_hit, hit_wide_tp FROM signal_outcomes WHERE signal_id=?",
+            (signal_id,),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        first_hit, wide_first_hit, hit_wide_tp = row
+        assert first_hit == "TP1"
+        assert hit_wide_tp == 0
+        assert wide_first_hit == "TIMEOUT"
+        tracker.close()
+
+    def test_same_trade_current_tp_but_wide_tp_stop(self):
+        """Kernscenario: entry -> +1.3% (raakt CURRENT TP1, niet WIDE_TP) ->
+        -2.1% (raakt STOP, gedeeld met WIDE_TP). CURRENT=TP1, WIDE_TP=STOP."""
+        db = _make_db()
+        tracker = OutcomeTracker(db_path=db)
+        t0 = time.time() - 31 * 60
+        signal_id = _insert_buy_now(
+            db, timestamp=t0, entry_max=1.0, entry_min=0.997,
+            tp1=1.012, tp2=1.025, stop=0.979,   # stop op ongeveer -2.1% t.o.v. entry_max
+        )
+        # Tick 1 (t0+60s): prijs +1.3% -> raakt CURRENT TP1 (1.012), niet WIDE_TP (1.015)
+        tracker.update(_prices(("kraken", "WLD-USD", 1.013)), now=t0 + 60)
+        # Tick 2 (t0+120s): prijs zakt naar -2.1% -> raakt STOP (0.979), gedeeld door beide varianten
+        tracker.update(_prices(("kraken", "WLD-USD", 0.978)), now=t0 + 120)
+        # Tick 3 (t0+31min): finale evaluatie
+        tracker.update(_prices(("kraken", "WLD-USD", 0.978)), now=t0 + 31 * 60)
+
+        conn = sqlite3.connect(db)
+        row = conn.execute(
+            "SELECT first_hit, wide_first_hit, hit_tp1, hit_wide_tp, hit_stop "
+            "FROM signal_outcomes WHERE signal_id=?",
+            (signal_id,),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        first_hit, wide_first_hit, hit_tp1, hit_wide_tp, hit_stop = row
+        assert first_hit == "TP1", "CURRENT moet TP1 zijn (1.3% >= 1.2% drempel, v\u00f3\u00f3r de stop-tick)"
+        assert hit_tp1 == 1
+        assert hit_wide_tp == 0, "prijs heeft nooit de 1.5% WIDE_TP-drempel geraakt"
+        assert hit_stop == 1, "dezelfde stop-gebeurtenis geldt voor beide varianten"
+        assert wide_first_hit == "STOP", (
+            "WIDE_TP moet STOP zijn: TP werd nooit geraakt, dus de gedeelde "
+            "stop-gebeurtenis (zelfde invalidation_price als CURRENT) wint"
+        )
+        tracker.close()
+
+    def test_wide_tp_hit_when_price_exceeds_1_5_pct(self):
+        """Prijs bereikt +1.5% zonder ooit de stop te raken -> WIDE_TP=WIDE_TP."""
+        db = _make_db()
+        tracker = OutcomeTracker(db_path=db)
+        now = time.time()
+        signal_id = _insert_buy_now(
+            db, timestamp=now - 31 * 60, entry_max=1.0, entry_min=0.997,
+            tp1=1.012, tp2=1.025, stop=0.982,
+        )
+        tracker.update(_prices(("kraken", "WLD-USD", 1.016)), now=now)
+        conn = sqlite3.connect(db)
+        row = conn.execute(
+            "SELECT hit_wide_tp, wide_first_hit FROM signal_outcomes WHERE signal_id=?",
+            (signal_id,),
+        ).fetchone()
+        conn.close()
+        assert row == (1, "WIDE_TP")
+        tracker.close()
+
+    def test_wide_tp_uses_real_invalidation_price_not_fixed_pct(self):
+        """WIDE_TP's STOP-kant moet de daadwerkelijke invalidation_price per
+        signaal gebruiken, niet een vaste -2.0%/-1.5% aanname. Twee signalen
+        met verschillende invalidation_price moeten onafhankelijk reageren
+        op exact hun eigen stop-niveau."""
+        db = _make_db()
+        tracker = OutcomeTracker(db_path=db)
+        now = time.time()
+        # Signaal A: stop ligt op 0.985 (relatief hoog -> raakt sneller stop)
+        sig_a = _insert_buy_now(
+            db, timestamp=now - 31 * 60, pair="AAA-USD", entry_max=1.0,
+            tp1=1.012, tp2=1.025, stop=0.985,
+        )
+        # Signaal B: stop ligt op 0.960 (veel dieper -> raakt bij dezelfde prijs geen stop)
+        sig_b = _insert_buy_now(
+            db, timestamp=now - 31 * 60, pair="BBB-USD", entry_max=1.0,
+            tp1=1.012, tp2=1.025, stop=0.960,
+        )
+        # Beide op dezelfde prijs 0.970: A moet STOP raken (0.970 < 0.985), B niet (0.970 > 0.960)
+        tracker.update(_prices(("kraken", "AAA-USD", 0.970), ("kraken", "BBB-USD", 0.970)), now=now)
+        conn = sqlite3.connect(db)
+        row_a = conn.execute(
+            "SELECT hit_stop, wide_first_hit FROM signal_outcomes WHERE signal_id=?", (sig_a,)
+        ).fetchone()
+        row_b = conn.execute(
+            "SELECT hit_stop, wide_first_hit FROM signal_outcomes WHERE signal_id=?", (sig_b,)
+        ).fetchone()
+        conn.close()
+        assert row_a == (1, "STOP"), "signaal A's eigen invalidation_price (0.985) is geraakt"
+        assert row_b == (0, "TIMEOUT"), "signaal B's eigen, veel diepere invalidation_price (0.960) is niet geraakt"
+        tracker.close()
+
+    def test_watch_and_too_late_have_no_wide_tp_fields(self):
+        """WIDE_TP-logica is BUY_NOW-only: WATCH/TOO_LATE blijven ongemoeid."""
+        db = _make_db()
+        tracker = OutcomeTracker(db_path=db)
+        now = time.time()
+        watch_id = _insert_watch(db, timestamp=now - 10, price=1.0)
+        too_late_id = _insert_too_late(db, timestamp=now - 10, price=1.0, tp1=1.014, stop=0.985)
+        tracker.update(_prices(("kraken", "WLD-USD", 1.02)), now=now)
+        conn = sqlite3.connect(db)
+        row_watch = conn.execute(
+            "SELECT hit_wide_tp, wide_first_hit FROM signal_outcomes WHERE signal_id=?", (watch_id,)
+        ).fetchone()
+        row_too_late = conn.execute(
+            "SELECT hit_wide_tp, wide_first_hit FROM signal_outcomes WHERE signal_id=?", (too_late_id,)
+        ).fetchone()
+        conn.close()
+        assert row_watch == (0, None)
+        assert row_too_late == (0, None)
+        tracker.close()
+
+
+class TestObservationalThresholds:
+    """p07/p10/m10/m15_hit_at_seconds en mfe/mae_at_seconds zijn puur logging
+    en mogen CURRENT/WIDE_TP nooit be\u00efnvloeden."""
+
+    def test_p07_and_p10_timestamps_recorded(self):
+        db = _make_db()
+        tracker = OutcomeTracker(db_path=db)
+        now = time.time()
+        signal_id = _insert_buy_now(
+            db, timestamp=now - 10, entry_max=1.0, tp1=1.012, tp2=1.025, stop=0.982,
+        )
+        # +1.0% beweging: moet p07 (0.7%) en p10 (1.0%) allebei triggeren
+        tracker.update(_prices(("kraken", "WLD-USD", 1.010)), now=now)
+        conn = sqlite3.connect(db)
+        row = conn.execute(
+            "SELECT p07_hit_at_seconds, p10_hit_at_seconds FROM signal_outcomes WHERE signal_id=?",
+            (signal_id,),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] is not None
+        assert row[1] is not None
+        tracker.close()
+
+    def test_m10_and_m15_timestamps_recorded(self):
+        db = _make_db()
+        tracker = OutcomeTracker(db_path=db)
+        now = time.time()
+        signal_id = _insert_buy_now(
+            db, timestamp=now - 10, entry_max=1.0, tp1=1.012, tp2=1.025, stop=0.980,
+        )
+        # -1.6% beweging: moet m10 (-1.0%) en m15 (-1.5%) allebei triggeren, maar STOP (0.980, -2.0%) niet
+        tracker.update(_prices(("kraken", "WLD-USD", 0.984)), now=now)
+        conn = sqlite3.connect(db)
+        row = conn.execute(
+            "SELECT m10_hit_at_seconds, m15_hit_at_seconds, hit_stop FROM signal_outcomes WHERE signal_id=?",
+            (signal_id,),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] is not None
+        assert row[1] is not None
+        assert row[2] == 0
+        tracker.close()
+
+    def test_mfe_and_mae_timestamps_track_new_extremes(self):
+        """mfe/mae_at_seconds worden alleen bijgewerkt als er een NIEUW extreem is.
+
+        Let op: max/min-windows worden pas bijgewerkt zodra age_min >= 1 (de
+        kleinste window-grens) — vandaar ticks ruim voorbij de 1-minutengrens.
+        """
+        db = _make_db()
+        tracker = OutcomeTracker(db_path=db)
+        t0 = time.time() - 10
+        signal_id = _insert_buy_now(
+            db, timestamp=t0, entry_max=1.0, tp1=1.020, tp2=1.030, stop=0.970,
+        )
+        # Tick 1 (age_min ~1.08, voorbij de 1m-grens): prijs +0.5% -> eerste MFE
+        tracker.update(_prices(("kraken", "WLD-USD", 1.005)), now=t0 + 65)
+        conn = sqlite3.connect(db)
+        mfe_1 = conn.execute(
+            "SELECT mfe_at_seconds, best_exit_pct FROM signal_outcomes WHERE signal_id=?", (signal_id,)
+        ).fetchone()
+        conn.close()
+        assert mfe_1[0] is not None
+        assert abs(mfe_1[1] - 0.5) < 0.01
+
+        # Tick 2 (age_min ~2.2): prijs zakt naar +0.2% -> GEEN nieuw MFE-record (best blijft 0.5%)
+        tracker.update(_prices(("kraken", "WLD-USD", 1.002)), now=t0 + 130)
+        conn = sqlite3.connect(db)
+        mfe_2 = conn.execute(
+            "SELECT mfe_at_seconds FROM signal_outcomes WHERE signal_id=?", (signal_id,)
+        ).fetchone()
+        conn.close()
+        # mfe_at_seconds mag niet zijn overschreven met de latere, lagere prijs-tick
+        assert mfe_2[0] == mfe_1[0]
+        tracker.close()

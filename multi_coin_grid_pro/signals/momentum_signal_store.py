@@ -101,6 +101,18 @@ CREATE TABLE IF NOT EXISTS signal_outcomes (
     stop_hit_at_seconds  REAL,
     time_to_first_hit_minutes REAL,   -- minuten van signaal tot first_hit (NULL bij TIMEOUT)
     entry_zone_reached   INTEGER,     -- 1 als prijs entry_max raakte, 0 als niet, NULL bij WATCH
+    -- Shadow-test (v5 prospectief, BUY_NOW only): WIDE_TP-variant + observationele
+    -- drempels. Puur logging, geen invloed op CURRENT (bovenstaande kolommen).
+    hit_wide_tp              INTEGER DEFAULT 0,
+    wide_tp_hit_at_seconds   REAL,
+    wide_first_hit           TEXT,     -- WIDE_TP | STOP | TIMEOUT (zelfde invalidation_price als CURRENT)
+    wide_time_to_first_hit_minutes REAL,
+    p07_hit_at_seconds       REAL,     -- eerste tick met price >= entry_max*1.007
+    p10_hit_at_seconds       REAL,     -- eerste tick met price >= entry_max*1.010
+    m10_hit_at_seconds       REAL,     -- eerste tick met price <= entry_max*0.990
+    m15_hit_at_seconds       REAL,     -- eerste tick met price <= entry_max*0.985
+    mfe_at_seconds           REAL,     -- seconden waarop best_exit_pct zijn (laatst geobserveerde) maximum bereikte
+    mae_at_seconds           REAL,     -- seconden waarop worst_drawdown_pct zijn (laatst geobserveerde) minimum bereikte
     FOREIGN KEY (signal_id) REFERENCES signals(id)
 )
 """
@@ -171,6 +183,16 @@ class SignalStore:
             "ALTER TABLE signals ADD COLUMN eth_15m_change_pct REAL",
             "ALTER TABLE signal_outcomes ADD COLUMN time_to_first_hit_minutes REAL",
             "ALTER TABLE signal_outcomes ADD COLUMN entry_zone_reached INTEGER",
+            "ALTER TABLE signal_outcomes ADD COLUMN hit_wide_tp INTEGER DEFAULT 0",
+            "ALTER TABLE signal_outcomes ADD COLUMN wide_tp_hit_at_seconds REAL",
+            "ALTER TABLE signal_outcomes ADD COLUMN wide_first_hit TEXT",
+            "ALTER TABLE signal_outcomes ADD COLUMN wide_time_to_first_hit_minutes REAL",
+            "ALTER TABLE signal_outcomes ADD COLUMN p07_hit_at_seconds REAL",
+            "ALTER TABLE signal_outcomes ADD COLUMN p10_hit_at_seconds REAL",
+            "ALTER TABLE signal_outcomes ADD COLUMN m10_hit_at_seconds REAL",
+            "ALTER TABLE signal_outcomes ADD COLUMN m15_hit_at_seconds REAL",
+            "ALTER TABLE signal_outcomes ADD COLUMN mfe_at_seconds REAL",
+            "ALTER TABLE signal_outcomes ADD COLUMN mae_at_seconds REAL",
         ]
         for stmt in _migrations:
             try:

@@ -2,22 +2,160 @@
 """Buy-fill accumulation robustness analysis, built on top of analyze_trading_performance.py.
 
 Reuses load_trades()/tradefill_pnl() from analyze_trading_performance.py (same DB,
-same TradeFill-corrected PnL). No logs, no MCP, no network calls.
+same TradeFill-corrected PnL). No MCP, no network calls.
+
+Two independent modes:
+  1. DB mode (default): analyzes closed Executors from the sqlite DB, same as before.
+  2. --log-file mode: parses [FILL_RISK_LOG] shadow-mode lines (FASE 1A, added
+     2026-09-12 to grid_executor.py) emitted on every BUY fill across ANY of the
+     4 spot bots (Bitget/OKX/Kraken USD/Kraken EUR - the logging is generic/shared
+     code, so log lines are tagged with exchange/quote_currency/bot_instance_id).
+     This mode does NOT touch the DB and is meant for later offline comparison of
+     candidate soft-risk stop-tightening factors (shadow_stop_mild/medium/strong)
+     once enough real fill-level data has been collected.
+  3. --snapshot-db mode (FASE 1B, added 2026-09-13): reads directly from the
+     shared FillRiskSnapshot SQLite store (data/fill_risk_snapshots.db) written
+     by grid_executor.py on every BUY fill across all 4 spot bots - no logs
+     needed at all for this comparison.
 
 Usage:
     python tools/analyze_fill_risk.py [--db PATH] [--start YYYY-MM-DD] [--end YYYY-MM-DD]
+    python tools/analyze_fill_risk.py --log-file logs/spot_grid_bitget.log
+    python tools/analyze_fill_risk.py --snapshot-db data/fill_risk_snapshots.db
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import re
 import sqlite3
 import statistics
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 import analyze_trading_performance as base  # noqa: E402
+
+FILL_RISK_LOG_PATTERN = re.compile(
+    r"\[FILL_RISK_LOG\]\s+"
+    r"executor_id=(?P<executor_id>\S+)\s+"
+    r"exchange=(?P<exchange>\S+)\s+"
+    r"quote_currency=(?P<quote_currency>\S+)\s+"
+    r"bot_instance_id=(?P<bot_instance_id>\S+)\s+"
+    r"pair=(?P<pair>\S+)\s+"
+    r"fill_number=(?P<fill_number>\d+)\s+"
+    r"timestamp=(?P<timestamp>[\d.]+)\s+"
+    r"fill_price=(?P<fill_price>[\d.]+)\s+"
+    r"fill_amount_base=(?P<fill_amount_base>[\d.]+)\s+"
+    r"fill_amount_quote=(?P<fill_amount_quote>[\d.]+)\s+"
+    r"avg_entry_price=(?P<avg_entry_price>[\d.]+)\s+"
+    r"position_size_quote=(?P<position_size_quote>[\d.]+)\s+"
+    r"unrealized_pnl_quote=(?P<unrealized_pnl_quote>-?[\d.]+)\s+"
+    r"unrealized_drawdown_pct=(?P<unrealized_drawdown_pct>-?[\d.]+)\s+"
+    r"current_price=(?P<current_price>[\d.]+)\s+"
+    r"entry_atr_pct=(?P<entry_atr_pct>[\d.]+)\s+"
+    r"entry_trend_score=(?P<entry_trend_score>\S+)\s+"
+    r"effective_stop_pct=(?P<effective_stop_pct>[\d.]+)\s+"
+    r"risk_state=(?P<risk_state>\S+)\s+"
+    r"shadow_stop_mild=(?P<shadow_stop_mild>[\d.]+)\s+"
+    r"shadow_stop_medium=(?P<shadow_stop_medium>[\d.]+)\s+"
+    r"shadow_stop_strong=(?P<shadow_stop_strong>[\d.]+)\s+"
+    r"soft_risk_state_enabled=(?P<soft_risk_state_enabled>\S+)"
+)
+
+
+def parse_fill_risk_log(log_path: Path) -> list[dict]:
+    """Parse all [FILL_RISK_LOG] lines from a bot log file into structured records."""
+    records = []
+    with open(log_path, "r", errors="replace") as f:
+        for line in f:
+            m = FILL_RISK_LOG_PATTERN.search(line)
+            if not m:
+                continue
+            d = m.groupdict()
+            records.append({
+                "executor_id": d["executor_id"],
+                "exchange": d["exchange"],
+                "quote_currency": d["quote_currency"],
+                "bot_instance_id": d["bot_instance_id"],
+                "pair": d["pair"],
+                "fill_number": int(d["fill_number"]),
+                "timestamp": float(d["timestamp"]),
+                "fill_price": float(d["fill_price"]),
+                "position_size_quote": float(d["position_size_quote"]),
+                "unrealized_pnl_quote": float(d["unrealized_pnl_quote"]),
+                "unrealized_drawdown_pct": float(d["unrealized_drawdown_pct"]),
+                "entry_atr_pct": float(d["entry_atr_pct"]),
+                "entry_trend_score": None if d["entry_trend_score"] == "None" else d["entry_trend_score"],
+                "effective_stop_pct": float(d["effective_stop_pct"]),
+                "risk_state": d["risk_state"],
+                "shadow_stop_mild": float(d["shadow_stop_mild"]),
+                "shadow_stop_medium": float(d["shadow_stop_medium"]),
+                "shadow_stop_strong": float(d["shadow_stop_strong"]),
+                "soft_risk_state_enabled": d["soft_risk_state_enabled"] == "True",
+            })
+    return records
+
+
+def load_snapshots_from_db(db_path: Path) -> list[dict]:
+    """Read all rows from the shared FillRiskSnapshot store directly (no logs).
+
+    Returns the same dict shape as parse_fill_risk_log() for the fields that
+    exist in both (shadow_stop_mild/medium/strong are log-only and intentionally
+    not persisted to keep the table minimal - not needed by section_shadow_log_summary).
+    """
+    from multi_coin_grid_pro.persistence.fill_risk_snapshot_store import FillRiskSnapshotStore
+    store = FillRiskSnapshotStore(str(db_path))
+    try:
+        snaps = store.query_recent(days=100_000)  # effectively "all"
+    finally:
+        store.close()
+    return [{
+        "executor_id": s.executor_id,
+        "exchange": s.exchange,
+        "quote_currency": s.quote_currency,
+        "bot_instance_id": s.bot_instance_id,
+        "pair": s.trading_pair,
+        "fill_number": s.fill_number,
+        "timestamp": s.timestamp,
+        "fill_price": s.fill_price,
+        "position_size_quote": s.position_size_quote,
+        "unrealized_pnl_quote": s.unrealized_pnl_quote,
+        "unrealized_drawdown_pct": s.unrealized_drawdown_pct,
+        "entry_atr_pct": s.entry_atr_pct,
+        "entry_trend_score": s.entry_trend_score,
+        "effective_stop_pct": s.effective_stop_pct,
+        "risk_state": s.risk_state,
+        "soft_risk_state_enabled": None,  # not persisted per-row; check config instead
+    } for s in snaps]
+
+
+def section_shadow_log_summary(records: list[dict]) -> None:
+    """Summarize parsed FILL_RISK_LOG records: per exchange/bot coverage and
+    per-risk_state distribution. Does NOT compute PF/winrate - shadow log
+    records are per-fill snapshots, not closed-trade outcomes; join with the
+    DB (Executors.id == executor_id) once enough data exists to evaluate
+    candidate stop-tightening factors against real trade outcomes."""
+    base.print_header("SHADOW-LOG COVERAGE (FILL_RISK_LOG records)")
+    if not records:
+        print("  Geen [FILL_RISK_LOG] records gevonden in dit logbestand.")
+        return
+    by_bot = defaultdict(int)
+    by_state = defaultdict(int)
+    executors_seen = set()
+    for r in records:
+        by_bot[f"{r['exchange']}/{r['quote_currency']} ({r['bot_instance_id']})"] += 1
+        by_state[r["risk_state"]] += 1
+        executors_seen.add(r["executor_id"])
+    print(f"  Totaal records: {len(records)}  |  Unieke executors: {len(executors_seen)}")
+    print("\n  Per bot:")
+    for bot, n in sorted(by_bot.items(), key=lambda kv: -kv[1]):
+        print(f"    {bot:<40} {n:>6} records")
+    print("\n  Per risk_state:")
+    for state, n in sorted(by_state.items(), key=lambda kv: -kv[1]):
+        print(f"    {state:<20} {n:>6} records")
 
 
 def pct(part: float, whole: float) -> float:
@@ -86,7 +224,32 @@ def main():
     parser.add_argument("--db", default="data/spot_grid_bitget.sqlite")
     parser.add_argument("--start", default="2026-08-08")
     parser.add_argument("--end", default=None)
+    parser.add_argument(
+        "--log-file", default=None,
+        help="Parse [FILL_RISK_LOG] shadow-mode lines from this log file instead of the DB."
+    )
+    parser.add_argument(
+        "--snapshot-db", default=None,
+        help="Read fill-risk telemetry directly from the shared FillRiskSnapshot "
+             "SQLite store (data/fill_risk_snapshots.db) - no logs needed."
+    )
     args = parser.parse_args()
+
+    if args.snapshot_db:
+        snap_path = Path(args.snapshot_db)
+        if not snap_path.exists():
+            raise SystemExit(f"Snapshot DB not found: {snap_path}")
+        records = load_snapshots_from_db(snap_path)
+        section_shadow_log_summary(records)
+        return
+
+    if args.log_file:
+        log_path = Path(args.log_file)
+        if not log_path.exists():
+            raise SystemExit(f"Log file not found: {log_path}")
+        records = parse_fill_risk_log(log_path)
+        section_shadow_log_summary(records)
+        return
 
     db_path = Path(args.db)
     if not db_path.exists():

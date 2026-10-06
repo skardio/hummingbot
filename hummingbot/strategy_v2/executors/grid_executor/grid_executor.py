@@ -39,6 +39,33 @@ try:
 except ImportError:
     HAS_ORDER_VALIDATOR = False
 
+# FASE 1B: Fill-risk telemetry persistence (optional, fail-safe, logging-only feature)
+try:
+    from multi_coin_grid_pro.persistence.fill_risk_snapshot_store import (
+        FillRiskSnapshot,
+        FillRiskSnapshotStore,
+        PostFillRiskSnapshot,
+    )
+    HAS_FILL_RISK_STORE = True
+except ImportError:
+    HAS_FILL_RISK_STORE = False
+
+_fill_risk_store_singleton = None  # lazily created, one per process, shared db file across all 4 spot bots
+
+
+def _get_fill_risk_store():
+    """Lazily create the shared FillRiskSnapshotStore. Returns None (never
+    raises) if the persistence module is unavailable or init failed."""
+    global _fill_risk_store_singleton
+    if not HAS_FILL_RISK_STORE:
+        return None
+    if _fill_risk_store_singleton is None:
+        try:
+            _fill_risk_store_singleton = FillRiskSnapshotStore()
+        except Exception:
+            _fill_risk_store_singleton = False
+    return _fill_risk_store_singleton or None
+
 
 class GridExecutor(ExecutorBase):
     _logger = None
@@ -209,6 +236,26 @@ class GridExecutor(ExecutorBase):
         self._accumulation_warn_last_log: float = 0.0
         # ==============================================================================
 
+        # ==============================================================================
+        # FASE 1A: Soft-risk shadow-mode fill tracking (logging only, no exit behavior)
+        # buy_fill_count counts each FILLED BUY order exactly once (BuyOrderCompletedEvent,
+        # deduplicated by order_id). Never incremented for SELL/cancelled/failed orders.
+        # ==============================================================================
+        self._buy_fill_count: int = 0
+        self._counted_buy_order_ids: set = set()
+        # ==============================================================================
+
+        # ==============================================================================
+        # FASE 1C: Post-fill-5 periodic shadow risk sampling (logging/DB only).
+        # Active only once _buy_fill_count exceeds soft_risk_baseline_fills. Throttled
+        # (see _maybe_sample_post_fill_risk) to avoid excessive I/O; one final sample
+        # is always taken at close via the stop() override below.
+        # ==============================================================================
+        self._post_fill_last_drawdown_pct: Optional[float] = None
+        self._post_fill_last_sample_ts: float = 0.0
+        self._post_fill_final_snapshot_written: bool = False
+        # ==============================================================================
+
     @property
     def is_perpetual(self) -> bool:
         """
@@ -217,6 +264,11 @@ class GridExecutor(ExecutorBase):
         :return: True if the exchange connector is perpetual, False otherwise.
         """
         return self.is_perpetual_connector(self.config.connector_name)
+
+    @property
+    def buy_fill_count(self) -> int:
+        """FASE 1A: Count of distinct FILLED BUY orders (deduplicated by order_id)."""
+        return self._buy_fill_count
 
     # ==========================================================================
     # US-003: Validated Order Placement
@@ -1608,6 +1660,19 @@ class GridExecutor(ExecutorBase):
         """
         self.update_grid_levels()
         self.update_metrics()
+        # FASE 1C: runs every tick regardless of status (RUNNING/SHUTTING_DOWN/
+        # CLOSING) so post-fill monitoring (from post_fill_sampling_start_fill
+        # onward) continues through the unwind process.
+        self._maybe_sample_post_fill_risk()
+        # LIFECYCLE SAFETY NET: several close paths set self._status = TERMINATED
+        # directly without ever calling stop() (dust-close, NL-restriction, etc.),
+        # which would otherwise skip the guaranteed final post-fill snapshot.
+        # control_task() keeps ticking on those paths (only stop() sets the
+        # self.terminated asyncio.Event that ends the control loop), so this is
+        # the one central point that reliably catches EVERY close type. Dedup via
+        # _post_fill_final_snapshot_written makes this safe to call alongside stop().
+        if self.status == RunnableStatus.TERMINATED:
+            self._maybe_sample_post_fill_risk(force_final=True)
         if self.status == RunnableStatus.RUNNING:
             # Story A1: Check timeout triggers FIRST (before triple barrier)
             if self._check_timeout_triggers():
@@ -4170,6 +4235,275 @@ class GridExecutor(ExecutorBase):
         """
         self.update_tracked_orders_with_order_id(event.order_id)
 
+        # FASE 1A: Soft-risk shadow-mode fill tracking (logging only).
+        # Only FILLED BUY orders count; SELL/cancelled/failed orders never increment
+        # this counter. Dedup guard prevents double-counting the same order_id.
+        # FASE 1B FIX: register_events() subscribes every executor to the FULL
+        # connector-wide event stream (not per-order), so this handler also
+        # receives BuyOrderCompletedEvents belonging to OTHER executors on the
+        # same connector. Only count/log/persist if event.order_id is actually
+        # one of THIS executor's own tracked orders (same ownership check as
+        # update_tracked_orders_with_order_id() above).
+        if (isinstance(event, BuyOrderCompletedEvent)
+                and event.order_id not in self._counted_buy_order_ids
+                and self._order_belongs_to_this_executor(event.order_id)):
+            self._counted_buy_order_ids.add(event.order_id)
+            self._buy_fill_count += 1
+            self._log_fill_risk_shadow(event)
+
+    def _order_belongs_to_this_executor(self, order_id: str) -> bool:
+        """Returns True if order_id matches one of this executor's own tracked
+        orders (grid level open/close orders or the executor-level close order).
+        Same membership check as update_tracked_orders_with_order_id()."""
+        for level in self.grid_levels:
+            if level.active_open_order and level.active_open_order.order_id == order_id:
+                return True
+            if level.active_close_order and level.active_close_order.order_id == order_id:
+                return True
+        if self._close_order and self._close_order.order_id == order_id:
+            return True
+        return False
+
+    def _log_fill_risk_shadow(self, event: BuyOrderCompletedEvent) -> None:
+        """
+        FASE 1A: Structured shadow-mode logging emitted on every new BUY fill.
+
+        Purely observational: computes what a soft-risk state / tightened stop
+        WOULD look like from fill 5 onward, but never influences the actual
+        exit logic. Controlled by custom_info['soft_risk_shadow_logging_enabled']
+        (default True) - when disabled, this is a full no-op (no log, no
+        extra computation beyond the already-unconditional counter above).
+
+        NOTE (entry-only ATR/trend): `entry_atr_pct`/`entry_trend_score` are the
+        values captured ONCE by the controller when this executor was created
+        (custom_info['atr_pct']/['entry_trend_score']) - they are NOT recomputed
+        live at each fill. Fields are named explicitly with an `entry_` prefix so
+        later analysis doesn't mistake them for fill-time-live values. The
+        cheapest place to add a LIVE fill-time ATR/trend companion line is the
+        controller's `_check_professional_exit_signals()` loop, which already
+        recomputes live atr_pct/trend every tick for the STOP_LOSS/TIME_STOP/
+        PROFIT_LOCK check - it would only need to detect `executor.buy_fill_count`
+        increases per executor_id and log a correlated line, no new dependency.
+
+        Sign convention for unrealized_drawdown_pct: same sign as position_pnl_pct
+        (negative = in a loss), floored at 0.0 when the position is NOT
+        underwater (i.e. this is "drawdown", not signed PnL% - a profitable
+        position reports 0.0, never a positive number here).
+        """
+        custom_info = self.config.custom_info or {}
+        if not custom_info.get("soft_risk_shadow_logging_enabled", True):
+            return
+        try:
+            self.update_position_metrics()
+            baseline_fills = int(custom_info.get("soft_risk_baseline_fills", 4))
+            fill_count = self._buy_fill_count
+            fills_over = max(0, fill_count - baseline_fills)
+            risk_state = "SOFT_RISK_SHADOW" if fills_over > 0 else "NONE"
+
+            effective_stop_pct = float(self.config.triple_barrier_config.stop_loss or 0) \
+                if self.config.triple_barrier_config else 0.0
+            # Candidate tightening factors for later offline calibration - NOT applied.
+            shadow_mild = effective_stop_pct * max(0.5, 1 - 0.10 * fills_over) if fills_over else effective_stop_pct
+            shadow_medium = effective_stop_pct * max(0.4, 1 - 0.20 * fills_over) if fills_over else effective_stop_pct
+            shadow_strong = effective_stop_pct * max(0.3, 1 - 0.35 * fills_over) if fills_over else effective_stop_pct
+
+            base_amount = event.base_asset_amount or Decimal("0")
+            quote_amount = event.quote_asset_amount or Decimal("0")
+            fill_price = (quote_amount / base_amount) if base_amount else Decimal("0")
+            unrealized_dd_pct = float(self.position_pnl_pct * 100) if self.position_pnl_pct < 0 else 0.0
+
+            self.logger().info(
+                f"[FILL_RISK_LOG] executor_id={self.config.id} "
+                f"exchange={self.config.connector_name} "
+                f"quote_currency={self.config.trading_pair.split('-')[-1]} "
+                f"bot_instance_id={custom_info.get('bot_instance_id', self.config.connector_name)} "
+                f"pair={self.config.trading_pair} fill_number={fill_count} "
+                f"timestamp={self._strategy.current_timestamp} "
+                f"fill_price={float(fill_price):.8f} "
+                f"fill_amount_base={float(base_amount):.8f} "
+                f"fill_amount_quote={float(quote_amount):.4f} "
+                f"avg_entry_price={float(self.position_break_even_price):.8f} "
+                f"position_size_quote={float(self.position_size_quote):.4f} "
+                f"unrealized_pnl_quote={float(self.position_pnl_quote):.4f} "
+                f"unrealized_drawdown_pct={unrealized_dd_pct:.3f} "
+                f"current_price={float(self.mid_price):.8f} "
+                f"entry_atr_pct={float(custom_info.get('atr_pct', 0.0) or 0.0):.4f} "
+                f"entry_trend_score={custom_info.get('entry_trend_score')} "
+                f"effective_stop_pct={effective_stop_pct:.4f} "
+                f"risk_state={risk_state} "
+                f"shadow_stop_mild={shadow_mild:.4f} "
+                f"shadow_stop_medium={shadow_medium:.4f} "
+                f"shadow_stop_strong={shadow_strong:.4f} "
+                f"soft_risk_state_enabled={bool(custom_info.get('soft_risk_state_enabled', False))}"
+            )
+
+            # Persist alongside the log line (best-effort, never affects trading).
+            try:
+                store = _get_fill_risk_store()
+                if store is not None:
+                    entry_trend_score_raw = custom_info.get('entry_trend_score')
+                    store.record(FillRiskSnapshot(
+                        executor_id=str(self.config.id),
+                        exchange=self.config.connector_name,
+                        quote_currency=self.config.trading_pair.split('-')[-1],
+                        bot_instance_id=str(custom_info.get('bot_instance_id', self.config.connector_name)),
+                        trading_pair=self.config.trading_pair,
+                        fill_number=fill_count,
+                        timestamp=float(self._strategy.current_timestamp),
+                        fill_price=float(fill_price),
+                        fill_amount_base=float(base_amount),
+                        fill_amount_quote=float(quote_amount),
+                        avg_entry_price=float(self.position_break_even_price),
+                        position_size_quote=float(self.position_size_quote),
+                        unrealized_pnl_quote=float(self.position_pnl_quote),
+                        unrealized_drawdown_pct=unrealized_dd_pct,
+                        current_price=float(self.mid_price),
+                        entry_atr_pct=float(custom_info.get('atr_pct', 0.0) or 0.0),
+                        entry_trend_score=float(entry_trend_score_raw) if entry_trend_score_raw is not None else None,
+                        effective_stop_pct=effective_stop_pct,
+                        risk_state=risk_state,
+                    ))
+            except Exception as db_e:
+                # Never let DB persistence break real trading flow.
+                self.logger().debug(f"[FILL_RISK_LOG] DB persist failed (non-critical): {db_e}")
+        except Exception as e:
+            # Never let shadow-logging break real trading flow.
+            self.logger().debug(f"[FILL_RISK_LOG] logging failed (non-critical): {e}")
+
+    def _maybe_sample_post_fill_risk(self, force_final: bool = False) -> None:
+        """
+        FASE 1C: Post-fill periodic shadow risk sampling (logging/DB only).
+
+        Active from buy_fill_count >= custom_info['post_fill_sampling_start_fill']
+        (default 3). This is a DEDICATED telemetry-cadence setting, deliberately
+        separate from soft_risk_baseline_fills (which only governs the
+        SOFT_RISK_SHADOW risk_state / candidate shadow-stop display in
+        _log_fill_risk_shadow / _record_post_fill_snapshot) - changing when
+        sampling starts must never change soft-risk enforcement semantics.
+        Throttled to avoid excessive I/O: samples when drawdown moves >=0.25
+        percentage points since the last sample, OR at most once per 45s while
+        active, plus exactly one final sample at close (force_final=True, called
+        from stop() below). Purely observational - never influences trading.
+
+        Ownership: unlike the event-driven FillRiskSnapshot hook, this is driven
+        by the executor's own control loop (not a shared connector-wide event),
+        so all fields read here (self.position_*, self.config.*) always belong
+        to THIS executor - no separate ownership check is needed.
+        """
+        custom_info = self.config.custom_info or {}
+        sampling_start_fill = int(custom_info.get("post_fill_sampling_start_fill", 3))
+        if self._buy_fill_count < sampling_start_fill:
+            return
+        if force_final and self._post_fill_final_snapshot_written:
+            return
+        try:
+            # LIFECYCLE FIX: some shutdown paths (e.g. control_shutdown_process()'s
+            # "position externally closed" branch) reset self.levels_by_state to {}
+            # right before calling stop() - update_position_metrics() then raises
+            # KeyError on direct dict-indexing. Isolate that refresh so a failure
+            # here falls back to the already-fresh values from this tick's earlier
+            # update_metrics() call instead of silently aborting the whole sample.
+            try:
+                self.update_position_metrics()
+            except Exception:
+                pass
+            now = self._strategy.current_timestamp
+            current_pnl_pct = float(self.position_pnl_pct * 100)
+
+            should_sample = force_final
+            if not should_sample:
+                if self._post_fill_last_drawdown_pct is None:
+                    should_sample = True
+                elif abs(current_pnl_pct - self._post_fill_last_drawdown_pct) >= 0.25:
+                    should_sample = True
+                elif now - self._post_fill_last_sample_ts >= 45.0:
+                    should_sample = True
+            if not should_sample:
+                return
+
+            self._post_fill_last_drawdown_pct = current_pnl_pct
+            self._post_fill_last_sample_ts = now
+            if force_final:
+                self._post_fill_final_snapshot_written = True
+            self._record_post_fill_snapshot(current_pnl_pct, is_final=force_final)
+        except Exception as e:
+            # Never let shadow-sampling break real trading flow.
+            self.logger().debug(f"[POST_FILL_RISK_LOG] sampling failed (non-critical): {e}")
+
+    def _record_post_fill_snapshot(self, current_pnl_pct: float, is_final: bool) -> None:
+        custom_info = self.config.custom_info or {}
+        if not custom_info.get("soft_risk_shadow_logging_enabled", True):
+            return
+        baseline_fills = int(custom_info.get("soft_risk_baseline_fills", 4))
+        fills_over = max(0, self._buy_fill_count - baseline_fills)
+        effective_stop_pct = float(self.config.triple_barrier_config.stop_loss or 0) \
+            if self.config.triple_barrier_config else 0.0
+        # Same candidate tightening factors as _log_fill_risk_shadow - NOT applied.
+        shadow_mild = effective_stop_pct * max(0.5, 1 - 0.10 * fills_over) if fills_over else effective_stop_pct
+        shadow_medium = effective_stop_pct * max(0.4, 1 - 0.20 * fills_over) if fills_over else effective_stop_pct
+        shadow_strong = effective_stop_pct * max(0.3, 1 - 0.35 * fills_over) if fills_over else effective_stop_pct
+
+        self.logger().info(
+            f"[POST_FILL_RISK_LOG] executor_id={self.config.id} "
+            f"exchange={self.config.connector_name} "
+            f"quote_currency={self.config.trading_pair.split('-')[-1]} "
+            f"bot_instance_id={custom_info.get('bot_instance_id', self.config.connector_name)} "
+            f"pair={self.config.trading_pair} "
+            f"timestamp={self._strategy.current_timestamp} "
+            f"buy_fill_count={self._buy_fill_count} "
+            f"avg_entry_price={float(self.position_break_even_price):.8f} "
+            f"current_price={float(self.mid_price):.8f} "
+            f"unrealized_pnl_pct={current_pnl_pct:.4f} "
+            f"position_size_quote={float(self.position_size_quote):.4f} "
+            f"effective_stop_pct={effective_stop_pct:.4f} "
+            f"shadow_stop_mild={shadow_mild:.4f} "
+            f"shadow_stop_medium={shadow_medium:.4f} "
+            f"shadow_stop_strong={shadow_strong:.4f} "
+            f"is_final={is_final}"
+        )
+
+        try:
+            store = _get_fill_risk_store()
+            if store is not None:
+                store.record_post_fill(PostFillRiskSnapshot(
+                    executor_id=str(self.config.id),
+                    exchange=self.config.connector_name,
+                    quote_currency=self.config.trading_pair.split('-')[-1],
+                    bot_instance_id=str(custom_info.get('bot_instance_id', self.config.connector_name)),
+                    trading_pair=self.config.trading_pair,
+                    timestamp=float(self._strategy.current_timestamp),
+                    buy_fill_count=self._buy_fill_count,
+                    avg_entry_price=float(self.position_break_even_price),
+                    current_price=float(self.mid_price),
+                    unrealized_pnl_pct=current_pnl_pct,
+                    position_size_quote=float(self.position_size_quote),
+                    effective_stop_pct=effective_stop_pct,
+                    shadow_stop_mild=shadow_mild,
+                    shadow_stop_medium=shadow_medium,
+                    shadow_stop_strong=shadow_strong,
+                    is_final=is_final,
+                ))
+        except Exception as db_e:
+            # Never let DB persistence break real trading flow.
+            self.logger().debug(f"[POST_FILL_RISK_LOG] DB persist failed (non-critical): {db_e}")
+
+    def stop(self):
+        """FASE 1C: guarantee one final post-fill risk sample before closing.
+
+        NOTE: not every close path is guaranteed to call stop() (several
+        lifecycle branches set self._status = RunnableStatus.TERMINATED directly,
+        e.g. dust-close, NL-restriction termination, insufficient-balance-after-
+        retries). Those are covered by the control_task() TERMINATED check below,
+        not by this override. This override is the FIRST of two safety nets;
+        _post_fill_final_snapshot_written guarantees only one write regardless
+        of which one fires.
+        """
+        try:
+            self._maybe_sample_post_fill_risk(force_final=True)
+        except Exception as e:
+            self.logger().debug(f"[POST_FILL_RISK_LOG] final snapshot failed (non-critical): {e}")
+        super().stop()
+
     def process_order_canceled_event(self, _, market: ConnectorBase, event: OrderCancelledEvent):
         """
         This method is responsible for processing the order canceled event
@@ -4191,15 +4525,18 @@ class GridExecutor(ExecutorBase):
         levels_close_order_placed = [level for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
         for level in levels_open_order_placed:
             if event.order_id == level.active_open_order.order_id:
+                self._archive_partial_fill(level.active_open_order)
                 self._canceled_orders.append(level.active_open_order.order_id)
                 self.max_open_creation_timestamp = 0
                 level.reset_open_order()
         for level in levels_close_order_placed:
             if event.order_id == level.active_close_order.order_id:
+                self._archive_partial_fill(level.active_close_order)
                 self._canceled_orders.append(level.active_close_order.order_id)
                 self.max_close_creation_timestamp = 0
                 level.reset_close_order()
         if self._close_order and event.order_id == self._close_order.order_id:
+            self._archive_partial_fill(self._close_order)
             self._canceled_orders.append(self._close_order.order_id)
             self._close_order = None
             # ZOMBIE GUARD FIX: Reset close guard so executor can retry close.
@@ -4212,6 +4549,46 @@ class GridExecutor(ExecutorBase):
             self._canceled_orders.append(event.order_id)
             self._closing_in_progress = False
             self._close_order_id = None
+
+    def _archive_partial_fill(self, tracked_order) -> bool:
+        """Preserve an executed amount from an order that is being cancelled.
+
+        FIX-001. A cancelled order can still carry a partial fill. Dropping it
+        removes the proceeds from realised PnL while the matching purchase
+        remains, which books the unsold notional as a loss.
+
+        Real case, XDC-USD 2026-10-06: order 461474338 was placed for the full
+        2020.6411 XDC, filled 999.9440 (33.45 USD), then cancelled. The executor
+        booked -33.39 USD on a position that had in fact closed at +0.46 USD.
+
+        Returns True when something was archived.
+        """
+        order = getattr(tracked_order, "order", None) if tracked_order is not None else None
+        if order is None:
+            return False
+        try:
+            executed_base = Decimal(str(getattr(order, "executed_amount_base", 0) or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            return False
+        if executed_base <= Decimal("0"):
+            return False
+
+        payload = order.to_json()
+        client_order_id = payload.get("client_order_id")
+        if client_order_id is not None and any(
+            existing.get("client_order_id") == client_order_id for existing in self._filled_orders
+        ):
+            return False  # already archived; never double count
+
+        self._filled_orders.append(payload)
+        self.logger().info(
+            f"📥 PARTIAL_FILL_ARCHIVED: {self.config.trading_pair} | "
+            f"order {client_order_id} cancelled after executing "
+            f"{float(executed_base):.8f} base "
+            f"({float(Decimal(str(getattr(order, 'executed_amount_quote', 0) or 0))):.4f} quote) "
+            f"— preserved for realised PnL"
+        )
+        return True
 
     def process_order_failed_event(self, _, market, event: MarketOrderFailureEvent):
         """

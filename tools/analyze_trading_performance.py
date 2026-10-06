@@ -30,20 +30,24 @@ from pathlib import Path
 from typing import Any, Optional
 
 CLOSE_TYPE_NAMES = {
-    1: "TAKE_PROFIT",
+    # Verified against the real hummingbot.strategy_v2.models.executors.CloseType
+    # enum (2026-09-27) - previous mapping here was wrong/guessed.
+    1: "TIME_LIMIT",
     2: "STOP_LOSS",
-    3: "TIME_LIMIT",
-    4: "EARLY_STOP",
-    5: "TRAILING_STOP",
-    6: "FAILED",
-    7: "FAILED_CANCELLED",
-    8: "EXPIRED",
-    9: "POSITION_HOLD",
-    10: "INSUFFICIENT_BALANCE",
+    3: "TAKE_PROFIT",
+    4: "EXPIRED",
+    5: "EARLY_STOP",
+    6: "TRAILING_STOP",
+    7: "INSUFFICIENT_BALANCE",
+    8: "FAILED",
+    9: "COMPLETED",
+    10: "POSITION_HOLD",
     11: "NO_FILL_TIMEOUT",
     12: "NO_PROGRESS_TIMEOUT",
-    13: "LIQUIDATION",
-    14: "HARD_CAP_TIME_LIMIT",
+    13: "HARD_CAP_TIME_LIMIT",
+    14: "RISK_KILL_SWITCH",
+    15: "MANUAL",
+    16: "SWITCH",
 }
 
 TRADEFILL_SCALE = 1e-8  # price/amount encoding, see memories/repo/tradefill-encoding.md

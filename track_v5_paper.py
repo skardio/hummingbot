@@ -141,7 +141,21 @@ def open_ledger():
             worst_dd_pct    REAL,
             min_to_hit      REAL,
             btc_15m_pct     REAL,
-            eth_15m_pct     REAL
+            eth_15m_pct     REAL,
+            tp1_hit_at_seconds  REAL,
+            tp2_hit_at_seconds  REAL,
+            stop_hit_at_seconds REAL,
+            tp1_price       REAL,
+            tp2_price       REAL,
+            invalidation_price REAL,
+            wide_outcome            TEXT,
+            wide_tp_hit_at_seconds  REAL,
+            p07_hit_at_seconds      REAL,
+            p10_hit_at_seconds      REAL,
+            m10_hit_at_seconds      REAL,
+            m15_hit_at_seconds      REAL,
+            mfe_at_seconds          REAL,
+            mae_at_seconds          REAL
         )
     """)
     led.commit()
@@ -158,8 +172,13 @@ def sync_ledger(led, source_con):
                s.price_change_5m_pct / NULLIF(s.price_change_15m_pct, 0) AS d5d15,
                s.market_regime_at_signal, s.market_breadth_15m,
                o.first_hit, o.best_exit_pct, o.worst_drawdown_pct,
-               o.stop_hit_at_seconds,
-               s.btc_15m_change_pct, s.eth_15m_change_pct
+               o.tp1_hit_at_seconds, o.tp2_hit_at_seconds, o.stop_hit_at_seconds,
+               s.btc_15m_change_pct, s.eth_15m_change_pct,
+               s.take_profit_1, s.take_profit_2, s.invalidation_price,
+               o.wide_first_hit, o.wide_tp_hit_at_seconds,
+               o.p07_hit_at_seconds, o.p10_hit_at_seconds,
+               o.m10_hit_at_seconds, o.m15_hit_at_seconds,
+               o.mfe_at_seconds, o.mae_at_seconds
         FROM signal_outcomes o JOIN signals s ON s.id=o.signal_id
         WHERE o.evaluated_at IS NOT NULL AND s.signal_label='BUY_NOW'
           AND {V5_WHERE}
@@ -169,11 +188,17 @@ def sync_ledger(led, source_con):
     for r in new_rows:
         if r[0] in existing:
             continue
-        sid, ts, exc, pair, entry, vol, d5d15, regime, breadth, outcome, best, dd, hit_secs, btc_d15m, eth_d15m = r
+        (sid, ts, exc, pair, entry, vol, d5d15, regime, breadth, outcome, best, dd,
+         tp1_secs, tp2_secs, stop_secs, btc_d15m, eth_d15m,
+         tp1_price, tp2_price, inv_price,
+         wide_outcome, wide_tp_secs, p07_secs, p10_secs, m10_secs, m15_secs,
+         mfe_secs, mae_secs) = r
         tp_h = 1 if outcome in ("TP1", "TP2") else 0
         st_h = 1 if outcome == "STOP" else 0
         to_h = 1 if outcome == "TIMEOUT" else 0
         e = ev(outcome, best)
+        # min_to_hit: tijd tot het daadwerkelijke first_hit-moment (TP1, TP2 of STOP)
+        hit_secs = tp1_secs if outcome == "TP1" else tp2_secs if outcome == "TP2" else stop_secs
         min_hit = round(hit_secs / 60, 1) if hit_secs else None
         sig_dt = datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%d %H:%M:%S")
         rec_dt = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
@@ -183,10 +208,18 @@ def sync_ledger(led, source_con):
                entry_price, volume_ratio, d5d15_ratio, regime, breadth,
                outcome, tp_hit, stop_hit, timeout_hit,
                ev_pct, best_exit_pct, worst_dd_pct, min_to_hit,
-               btc_15m_pct, eth_15m_pct)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               btc_15m_pct, eth_15m_pct,
+               tp1_hit_at_seconds, tp2_hit_at_seconds, stop_hit_at_seconds,
+               tp1_price, tp2_price, invalidation_price,
+               wide_outcome, wide_tp_hit_at_seconds,
+               p07_hit_at_seconds, p10_hit_at_seconds, m10_hit_at_seconds, m15_hit_at_seconds,
+               mfe_at_seconds, mae_at_seconds)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (sid, rec_dt, sig_dt, exc, pair, entry, vol, d5d15, regime, breadth,
-              outcome, tp_h, st_h, to_h, e, best, dd, min_hit, btc_d15m, eth_d15m))
+              outcome, tp_h, st_h, to_h, e, best, dd, min_hit, btc_d15m, eth_d15m,
+              tp1_secs, tp2_secs, stop_secs, tp1_price, tp2_price, inv_price,
+              wide_outcome, wide_tp_secs, p07_secs, p10_secs, m10_secs, m15_secs,
+              mfe_secs, mae_secs))
         inserted += 1
     led.commit()
     return inserted

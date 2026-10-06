@@ -1,0 +1,359 @@
+# =====================================================================
+# EXPERIMENT CONTRACT — pre-registered, immutable after frozen_at
+# =====================================================================
+#
+# This file is evidence, not configuration. Nothing in this repository
+# reads it at runtime. After `frozen_at` it must not be edited; if a
+# change is unavoidable, abort the experiment and open a new id.
+#
+# Adjudication is performed exclusively by the Evidence Engine under the
+# policy version recorded below. No manual reinterpretation of the
+# outcome is permitted.
+# =====================================================================
+
+schema_version: "1.0.0"
+
+# ---------------------------------------------------------------- id ---
+experiment_id: "EXP-2026-10-KRAKEN-USD-001"
+title: "First frozen validation run of the live Kraken USD multi-coin grid"
+created_at: "2026-10-04T13:49:00Z"
+frozen_at: "2026-10-04T13:49:00Z"      # immutable from this moment
+author: "Mo"
+
+# ------------------------------------------------------------- scope ---
+strategy: "multi_coin_grid_usd"
+venue: "kraken"
+quote: "USD"
+controller_id: "multi_coin_grid_usd"
+bot_instance_id: "usd"
+database: "data/multi_coin_grid_v2_usd.sqlite"
+config_file: "multi_coin_grid_pro/config/spot_grid_kraken_usd.yaml"
+
+# LIVE. The config carries `paper_trading: false`. A PASS on this
+# experiment does NOT authorise scaling up; that is a separate decision.
+mode: "live"
+
+# Actual available balance on the Kraken account at freeze time, as
+# reported by the operator on 2026-10-04. The YAML risk settings are
+# calibrated to a 300 USD reference, which this balance matches.
+available_capital_quote: 300.40
+starting_capital_quote: 300.40
+capital_currency: "USD"
+capital_verified_at: "2026-10-04T16:26:00Z"
+capital_source: "operator-reported account balance"
+
+# ----------------------------------------------------- frozen state ---
+policy_version: "1.3.0"
+git_commit: "9f18e2eeb41b27efc30f206ec29678981fbf1337"
+git_branch: "branch_20251109"
+config_file_sha256_prefix: "0d8a38ea918450f912d285c0a640496a"
+
+config_fingerprint_short: "49344cef79"
+config_fingerprint: "49344cef7937a3223e5cca2377540d1908dec907830a87855ebd74e132d043b9"
+config_fingerprint_field_count: 34
+
+# Reproduced over the 8 executors closed between 2026-10-02T12:47Z and
+# 2026-10-04T11:18Z; all eight hash identically.
+fingerprint_verified_at: "2026-10-04T13:49:00Z"
+fingerprint_verified_over_executors: 8
+
+# The nine fields the operator explicitly tracks, as recorded in the
+# executor config (not as written in the YAML).
+frozen_parameters:
+  triple_barrier_config.trailing_stop.activation_price: 0.015
+  triple_barrier_config.trailing_stop.trailing_delta: 0.01
+  custom_info.fee_aware_timeout_bypass_sec: 3600
+  custom_info.max_hold_time_sec: 5400
+  custom_info.close_grace_sec: 600
+  custom_info.dynamic_tp_min_pct: 0.025
+  custom_info.dynamic_tp_max_pct: 0.05
+  custom_info.dynamic_tp_atr_multiplier: 0.6
+  custom_info.dynamic_tp_enabled: true
+
+# Known, accepted YAML-vs-runtime divergence. Not a defect: the scalar is
+# only a fallback. The effective value comes from the regime_timeouts
+# block and is excluded from the fingerprint as of policy 1.3.0.
+known_divergences:
+  - field: "custom_info.no_progress_timeout_sec"
+    yaml_value: 2700
+    observed_runtime_value: 5400
+    reason: "regime bucket CHOP; BULL 7200 / CHOP 5400 / BEAR 3600"
+    handling: "denylisted in policy 1.3.0; regime flips do not invalidate the cohort"
+
+# The YAML risk settings are calibrated to a 300 USD reference balance.
+# The account holds 300.40 USD, so every percentage limit resolves to
+# within 0.13 percentage points of its stated intent. Verified at freeze
+# time and recorded so the measurement can be interpreted correctly.
+capital_calibration:
+  status: "aligned"
+  verified_at: "2026-10-04T16:26:00Z"
+  available_capital_quote: 300.40
+  risk_reference_balance_quote: 300        # spot_grid_kraken_usd.yaml:943
+  total_amount_quote: 300                  # spot_grid_kraken_usd.yaml:939
+  headroom_quote: 0.40
+  note: >
+    risk_reference_balance_quote is the denominator for every percentage
+    risk limit (daily/weekly/monthly loss, per-coin and portfolio
+    exposure). It matches the available balance, so no limit is measured
+    against a stale base. None of these three fields is part of the
+    fingerprint; changing any of them during the run would alter the risk
+    envelope mid-measurement and is therefore forbidden.
+
+risk_envelope_as_configured:
+  daily_loss_limit_quote: 9.00          # 3.00% of available capital
+  per_coin_exposure_cap_quote: 165.00   # 54.93% of available capital
+  portfolio_exposure_cap_quote: 285.00  # 94.87% of available capital
+  drawdown_abort_quote: -25.00          # 8.32% of available capital
+  expected_peak_exposure_quote: 128.23  # 42.7% of available capital
+  binding_guard_during_experiment: >
+    ABORT-DRAWDOWN at -25.00 USD cumulative. The bot's own daily limit
+    (9.00 USD) binds first on any single day; the cumulative guard binds
+    across days.
+
+# -------------------------------------------------------- hypothesis ---
+hypothesis: >
+  The frozen Kraken USD configuration (fingerprint 49344cef79) achieves,
+  over at least 100 matched trades, a net expectancy per matched trade
+  greater than zero after fees.
+
+changed_variable: null        # this is a baseline characterisation, not an A/B test
+baseline_id: null             # no valid historical cohort exists; see note below
+baseline_note: >
+  No historical cohort on this database reaches the sample gate: the
+  largest is 51 matched trades over 12 trading days. This experiment
+  therefore establishes the baseline rather than comparing against one.
+  Because gate G7 requires a baseline comparison, the best attainable
+  outcome here is FAIL or INSUFFICIENT_EVIDENCE; PASS is unreachable by
+  construction. That is intended: the purpose is to measure, and to
+  create the baseline that EXP-...-002 can be compared against.
+
+# ------------------------------------------------------- measurement ---
+primary_metric: "expectancy_per_trade_matched_net"
+primary_metric_view: "B"      # matched trades only
+success_threshold: 0.0        # strictly greater than zero, after fees
+failure_threshold: 0.0        # at or below zero is a FAIL under G6
+
+secondary_metrics:
+  - "return_on_deployed_matched_net"
+  - "win_rate"                # descriptive only; may never carry a verdict
+  - "payoff_ratio"
+  - "profit_factor"
+  - "fees"
+  - "pnl_sequence_drawdown"
+  - "operational_share_of_total"
+  - "unmatched_buy_rate"
+  - "heuristic_share_of_b"
+
+# ------------------------------------------------------------- size ---
+min_sample_size: 100          # matched trades, policy sample.min_matched_trades
+min_trading_days: 20
+min_distinct_pairs: 5
+max_duration_days: 45
+
+# Set to the exact moment the operator starts the bot. The engine's
+# --period-start must match period_start_unix exactly.
+period_start: "2026-10-04T15:01:50Z"      # 2026-10-04 16:55 CEST
+period_start_unix: 1791125758
+period_end_latest: "2026-11-18T15:01:50Z" # period_start + max_duration_days
+
+# Observed rate on this bot: ~4.25 matched trades per trading day, so
+# 100 matched trades is expected in roughly 24 trading days.
+expected_completion_days: 24
+
+# ------------------------------------------------- abort conditions ---
+# Any single condition below ends the experiment. Thresholds mirror the
+# policy; the engine evaluates them, the operator acts on them.
+abort_conditions:
+  - id: "ABORT-FINGERPRINT"
+    condition: "any closed executor carries a config_fingerprint != 49344cef79"
+    source: "tools/evidence fingerprint over config JSON"
+    action: "EXPERIMENT IMMEDIATELY INVALID - stop, do not analyse, open a new id"
+  - id: "ABORT-POLICY"
+    condition: "evidence_policy.yaml policy_version != 1.3.0"
+    source: "config/evidence_policy.yaml"
+    action: "EXPERIMENT INVALID (POLICY_DRIFT) - open a new id"
+  - id: "ABORT-DATA"
+    condition: "gate G0 fails: leg identity, A==B+C, negative fees or implausible fee rate"
+    source: "policy data_integrity"
+    action: "stop and investigate before collecting further"
+  - id: "ABORT-OPERATIONAL"
+    condition: "operational_share_of_total > 0.25"
+    source: "policy operational.max_operational_share_of_total"
+    action: "stop; view B is no longer representative"
+  - id: "ABORT-UNMATCHED-BUY"
+    condition: "unmatched_buy_rate > 0.10"
+    source: "policy operational.max_unmatched_buy_rate"
+    action: "stop; the April-May accounting failure mode has returned"
+  - id: "ABORT-DRAWDOWN"
+    condition: "cumulative realized-PnL-sequence drawdown of view A < -25.00 USD"
+    source: "contract; 8.32% of the 300.40 USD available balance"
+    action: "stop and protect capital"
+  - id: "ABORT-RISK"
+    condition: "the bot's own daily loss limit trips (max_daily_loss_pct 3.0)"
+    source: "spot_grid_kraken_usd.yaml:1016-1017"
+    note: >
+      Resolves to 9.00 USD, which is 3.00% of the available balance -
+      the limit is calibrated correctly.
+    action: "stop; a risk halt invalidates the trading-day count"
+  - id: "ABORT-CLASSIFICATION"
+    condition: "heuristic_share_of_b > 0.20 or dust sweep reports DUST_SENSITIVE"
+    source: "policy classification"
+    action: "stop; the verdict would rest on a threshold"
+  - id: "ABORT-TIMEOUT"
+    condition: "period_end_latest reached without min_sample_size"
+    action: "close as INSUFFICIENT_EVIDENCE (SAMPLE); do not extend"
+
+max_capital_at_risk_quote: 300.40     # cannot exceed the available balance
+
+# Observed deployment under this fingerprint: ~40 USD per executor,
+# max_simultaneous_coins = 3, so peak simultaneous exposure is roughly
+# 128 USD (42.7% of the available balance). The budget is therefore not
+# the binding constraint during this run.
+observed_capital_deployment:
+  avg_total_amount_quote_per_executor: 39.99
+  max_simultaneous_coins: 3
+  expected_peak_exposure_quote: 128.23
+  expected_peak_exposure_pct_of_available: 42.7
+
+# --------------------------------------------------- freeze contract ---
+# Changing any of these during the run breaks the experiment.
+frozen_surfaces:
+  - "every field inside config_fingerprint (34 fields)"
+  - "trading logic that writes the executor config (controller _create_grid_action and callers)"
+  - "fee logic (fee_aware_* paths, fee model)"
+  - "exit logic (triple barrier, trailing stop, no-progress, hard cap)"
+  - "risk logic (RiskGuardV2, drawdown, exposure caps)"
+  - "classification instrumentation (custom_info fields, filled_orders shape)"
+  - "config/evidence_policy.yaml"
+  - "tools/evidence/ (classification, metrics, gates)"
+
+allowed_during_run:
+  - "read-only Evidence Engine runs"
+  - "read-only log inspection"
+  - "monitoring listed under monitoring_metrics"
+
+forbidden_during_run:
+  - "any parameter tuning, however small"
+  - "restarting the bot to apply a change"
+  - "adding or removing fields from custom_info"
+  - "bugfixes - stop the experiment first and open a new id"
+
+# ---------------------------------------------------------- monitor ---
+# Observation only. None of these may trigger a change to the running
+# configuration, and none may be used to draw a profitability conclusion
+# before the sample gate is met.
+monitoring_metrics:
+  - "n_matched (view B)"
+  - "trading_days"
+  - "distinct_pairs"
+  - "unmatched_buy_rate"
+  - "operational_share_of_total"
+  - "data_integrity status (G0)"
+  - "fingerprint drift (distinct fingerprints since period_start)"
+monitoring_frequency: "at most once per day"
+monitoring_rule: >
+  Before the sample gate is met, the only permitted readings are the
+  metrics above. Expectancy, win rate and PnL are not to be inspected,
+  discussed or acted upon, because doing so invites stopping the run at a
+  favourable moment.
+
+# ------------------------------------------------------ adjudication ---
+adjudicated_by: "tools/evidence (gate engine G0..G7)"
+manual_interpretation_allowed: false
+
+# ---------------------------------------------------------------------
+# OUTCOME — recorded 2026-10-06, after 2.0 days
+# ---------------------------------------------------------------------
+outcome: "ABORTED"
+outcome_recorded_at: "2026-10-06T16:00:57Z"
+abort_trigger: "ABORT-OPERATIONAL"
+abort_detected_at: "2026-10-06T16:00:57Z"
+abort_event_at: "2026-10-06T04:20:19Z"     # XDC-USD executor close
+report_path: null                          # no final adjudication run: the
+                                           # measurement instrument is unsound
+
+metrics_at_abort:
+  elapsed_days: 2.0
+  closed_executors: 4
+  matched_trades: 3                        # of 100 required
+  trading_days: 2                          # of 20
+  distinct_pairs: 3                        # of 5
+  operational_share_of_total: 0.967        # limit 0.25  -> BREACHED
+  unmatched_buy_rate: 0.0
+  heuristic_share_of_b: 0.0
+  fingerprint_drift: false                 # all 4 carried 49344cef79
+  policy_drift: false
+
+# The abort is formally correct, but the cause is an instrumentation
+# defect rather than a trading loss. Recorded in full so the next
+# experiment is not designed around a false conclusion.
+abort_diagnosis:
+  summary: >
+    A single executor (XDC-USD) booked -33.3897 USD while the position was
+    in fact fully closed at a profit of +0.4642 USD. The 96.7% operational
+    share is an artefact of that mis-booking, not of operational losses.
+  executor_id: "DXswj7E81kirvTsy"
+  trading_pair: "XDC-USD"
+  opened_at: "2026-10-06T03:08:12Z"
+  closed_at: "2026-10-06T04:20:19Z"
+  close_type: 8                            # FAILED
+  classified_as: "PARTIAL_OPEN"
+
+  ground_truth_from_tradefill:
+    bought_base: 2020.6410
+    bought_quote: 67.0752
+    sold_base: 2020.6411
+    sold_quote: 67.5394
+    residual_base: -0.0001
+    economic_result_quote: 0.4642
+
+  booked_by_executor:
+    realized_buy_size_quote: 67.08
+    realized_sell_size_quote: 34.09
+    net_pnl_quote: -33.3897
+  accounting_error_quote: -33.85
+
+  root_cause: >
+    Order 461474338 was placed for the full 2020.6411 XDC, was partially
+    filled for 999.9440 XDC (33.4481 USD), and was then cancelled. The
+    cancellation path records only the order id in _canceled_orders and
+    resets the level; the partial fill is never carried over into
+    _filled_orders. Because realized_sell_size_quote is summed exclusively
+    from _filled_orders, that 33.45 USD of proceeds disappears from the
+    books while the matching purchase remains, producing a loss equal to
+    the unsold notional.
+  root_cause_location: >
+    hummingbot/strategy_v2/executors/grid_executor/grid_executor.py
+    process_order_canceled_event() lines 4507-4545, combined with
+    update_realized_pnl_metrics() lines 4849-4866.
+
+  # Applied to the full history of this database: 3 of the 14
+  # UNMATCHED_BUY/PARTIAL_OPEN executors show sell fills on cancelled
+  # orders that were never counted.
+  historical_exposure:
+    affected_executors: 3
+    unaccounted_proceeds_quote: 144.51
+    examples: ["PEPE-USD -56.02", "PEPE-USD -0.21", "XDC-USD -33.39"]
+    note: >
+      This supersedes the "terminal-fill race" hypothesis recorded during
+      the Part A investigation, which was inferred from timestamps. The
+      remaining 11 executors show no fills on cancelled orders and stay
+      unexplained.
+
+  capital_impact: "none - the position closed at a profit; no kill switch fired"
+  bot_state_at_abort: "running, 0 errors, no risk pause, no executors created since the event"
+
+# EXP-001 is closed, not repaired. The fix touches grid_executor.py, a
+# frozen surface, so the follow-up runs under a new id.
+successor_experiment: "EXP-2026-10-KRAKEN-USD-002 (after the fix is verified)"
+preconditions_for_successor:
+  - "partial fills on cancelled orders are counted in realized PnL"
+  - "regression test reproducing the XDC-USD case passes"
+  - "a re-run over history shows the 3 affected executors reclassified"
+  - "new fingerprint computed and frozen under a new contract"
+
+does_not_prove: >
+  Says nothing about other venues, other quote currencies, other capital
+  levels, or market regimes outside the measurement window. A result here
+  does not transfer to Bitget, and does not justify increasing position
+  size.

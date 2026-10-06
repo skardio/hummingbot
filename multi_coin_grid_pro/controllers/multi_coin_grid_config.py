@@ -1177,6 +1177,51 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # FASE 1A: Soft-risk shadow-mode (buy-fill accumulation risk).
+    # Shadow logging is data-collection only and never changes exit behavior.
+    # soft_risk_state_enabled stays False until offline calibration (see
+    # tools/analyze_fill_risk.py) validates a tightening formula - flipping it
+    # is intentionally deferred to a later phase, not part of this shadow rollout.
+    soft_risk_shadow_logging_enabled: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Enable FILL_RISK_LOG shadow-mode logging on every BUY fill? ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    soft_risk_state_enabled: bool = Field(
+        default=False,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Actually tighten the stop-loss from fill 5 onward (NOT YET VALIDATED - keep False)? ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    soft_risk_baseline_fills: int = Field(
+        default=4,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Buy-fill count below which soft-risk shadow state stays NONE (e.g., 4): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
+    # FASE 1C: post-fill periodic sampling start point. Deliberately SEPARATE from
+    # soft_risk_baseline_fills - this only controls when observational
+    # PostFillRiskSnapshot sampling begins (to study recovery-vs-non-recovery
+    # price paths), it has no bearing on soft-risk shadow/enforcement semantics.
+    post_fill_sampling_start_fill: int = Field(
+        default=3,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Buy-fill count from which periodic post-fill shadow sampling starts (observational only, e.g., 3): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     # Item 7: Dynamic Take-Profit — adjust TP based on trend strength
     use_dynamic_take_profit: bool = Field(
         default=False,

@@ -107,3 +107,29 @@ def sample_pair_list():
         "SOL-EUR", "BTC-EUR", "ETH-EUR", "ADA-EUR", "XRP-EUR",
         "DOGE-EUR", "LINK-EUR", "DOT-EUR", "SUI-EUR", "AVAX-EUR"
     ]
+
+
+@pytest.fixture(autouse=True)
+def isolate_realised_pnl_ledger(tmp_path, monkeypatch):
+    """Keep the FIX-002 ledger out of the production database during tests.
+
+    The controller creates a RealisedPnlLedger on a fixed path under data/.
+    Without isolation, tests would claim real executor ids in the live ledger -
+    permanently suppressing those ids in production - and would also block each
+    other, since a claim is by design one-shot.
+
+    Only the production default is redirected. A test that passes an explicit
+    path (its own tmp_path, for instance) keeps it.
+    """
+    import multi_coin_grid_pro.persistence.realised_pnl_ledger as ledger_module
+
+    original_init = ledger_module.RealisedPnlLedger.__init__
+    production_dir = str(Path("data"))
+
+    def isolated_init(self, db_path=None, logger=None):
+        if db_path is None or str(db_path).startswith(production_dir):
+            db_path = str(tmp_path / "test_realised_pnl_ledger.db")
+        original_init(self, db_path, logger)
+
+    monkeypatch.setattr(ledger_module.RealisedPnlLedger, "__init__", isolated_init)
+    yield

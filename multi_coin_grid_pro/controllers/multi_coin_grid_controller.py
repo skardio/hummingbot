@@ -8,6 +8,7 @@ Hummingbot's Strategy V2 architecture.
 import asyncio
 import json
 import logging
+import math
 import time
 import uuid
 from datetime import datetime
@@ -99,6 +100,9 @@ from multi_coin_grid_pro.persistence.cooldown_store import CooldownStore
 
 # T1-K4: Entry Price Persistence
 from multi_coin_grid_pro.persistence.entry_price_store import EntryPriceStore
+
+# FIX-002: exactly-once realised PnL propagation
+from multi_coin_grid_pro.persistence.realised_pnl_ledger import RealisedPnlLedger
 from multi_coin_grid_pro.risk.pnl_tracker import RealtimePnLTracker
 
 # US-005: Professional Risk Management
@@ -371,6 +375,10 @@ class MultiCoinGridController(ControllerBase):
         self._trade_labels: list = []  # List[TradeLabel] — fed on close
         self._active_executor_notional: Decimal = Decimal("0")
         self._realised_executors_tracked: Dict[str, Decimal] = {}
+        # FIX-002: executors handed over by the strategy just before they are
+        # removed from the orchestrator. Without this the controller never sees
+        # a closed executor and the kill switch is never fed.
+        self._pending_realised_executors: list = []
         self._next_allocation_quote: Optional[Decimal] = None
 
         # Memory cleanup tracking (TTL-based)
@@ -620,6 +628,22 @@ class MultiCoinGridController(ControllerBase):
         except Exception as e:
             self.logger().error(f"❌ T1-K4: EntryPriceStore init failed: {e}")
             self.entry_price_store = None
+
+        # FIX-002: durable exactly-once ledger for realised PnL propagation.
+        # Guarantees the kill switch, drawdown tracker and phantom-loss
+        # correction each see a closed executor once, and once only, across
+        # restarts.
+        try:
+            instance_id = getattr(config, 'instance_id', None)
+            rl_db_path = (
+                f"data/realised_pnl_ledger_{instance_id}.db" if instance_id
+                else "data/realised_pnl_ledger.db"
+            )
+            self.realised_pnl_ledger = RealisedPnlLedger(rl_db_path, logger=self.logger())
+            self.logger().info(f"✅ FIX-002: RealisedPnlLedger initialized ({rl_db_path})")
+        except Exception as e:
+            self.logger().error(f"❌ FIX-002: RealisedPnlLedger init failed: {e}")
+            self.realised_pnl_ledger = None
 
         # ===== HYBRID GRID BOT V2.0 - New Modular Components =====
         # Telegram Alerter
@@ -5229,7 +5253,7 @@ class MultiCoinGridController(ControllerBase):
 
         # Check if we should create/switch grid
         # Note: best_coin is already filtered to exclude coins in cooldown
-        if self._should_create_new_grid(best_coin):
+        if self._check_entry_trend_filter(best_coin) and self._should_create_new_grid(best_coin):
             # AI-F1: Log accepted entry decision
             self._log_entry_decision(
                 symbol=best_coin, accepted=True,
@@ -5862,6 +5886,11 @@ class MultiCoinGridController(ControllerBase):
                 # 2b. Multi-timeframe buy protection
                 if not self._check_multi_timeframe_buy(candidate_coin):
                     self.logger().debug("      ❌ Multi-timeframe protection rejected")
+                    continue
+
+                # 2c. Minimum entry trend score
+                if not self._check_entry_trend_filter(candidate_coin):
+                    self.logger().debug("      ❌ Entry trend filter rejected")
                     continue
 
                 # 3. Check if should create new grid
@@ -6856,6 +6885,78 @@ class MultiCoinGridController(ControllerBase):
         if hasattr(self, 'telegram_alerter'):
             self.telegram_alerter.critical(msg)
 
+    def enqueue_realised_executor(self, executor_info) -> None:
+        """Hand over a closed executor for realised-PnL processing (FIX-002).
+
+        Called by the strategy from ``store_actions_proposal()``, at the only
+        moment that is both deterministic and still has the executor in hand:
+        immediately before the orchestrator writes it to the database and drops
+        it from ``active_executors``.
+
+        Delivery is idempotent. The durable ledger decides whether the executor
+        is actually processed, so enqueuing the same executor repeatedly - or
+        after a restart - is harmless.
+        """
+        if executor_info is None:
+            return
+        executor_id = getattr(executor_info, "id", None)
+        if not executor_id:
+            return
+        if any(getattr(e, "id", None) == executor_id for e in self._pending_realised_executors):
+            return
+        self._pending_realised_executors.append(executor_info)
+
+    def _collect_realised_candidates(self) -> List:
+        """Return closed executors whose realised PnL still needs propagating.
+
+        Two sources, in order of reliability:
+
+        1. ``_pending_realised_executors`` - explicitly handed over by the
+           strategy. Deterministic.
+        2. ``executors_info`` filtered on TERMINATED - the original path. It
+           effectively never fires (see the comment at the call site) but is
+           kept as a safety net against framework changes.
+
+        The durable ledger is the gate: a candidate is only returned when the
+        claim succeeds, which can happen exactly once per executor id across the
+        lifetime of the ledger. On any ledger failure the candidate is skipped -
+        failing closed, because a missed PnL update is recoverable while double
+        counting a loss into the kill switch is not.
+        """
+        pending = self._pending_realised_executors
+        self._pending_realised_executors = []
+
+        seen_ids = {getattr(e, "id", None) for e in pending}
+        fallback = [
+            executor for executor in self.executors_info
+            if getattr(executor, "status", None) == RunnableStatus.TERMINATED
+            and getattr(executor, "id", None) not in seen_ids
+        ]
+        if fallback:
+            self.logger().info(
+                f"♻️ FIX-002 fallback: {len(fallback)} terminated executor(s) found in the snapshot"
+            )
+
+        claimed = []
+        for executor in pending + fallback:
+            executor_id = getattr(executor, "id", None)
+            if not executor_id:
+                continue
+            if self.realised_pnl_ledger is None:
+                # No durable ledger: fall back to the in-memory guard only.
+                if executor_id not in self._realised_executors_tracked:
+                    claimed.append(executor)
+                continue
+            if self.realised_pnl_ledger.claim(
+                executor_id,
+                controller_id=getattr(self.config, "id", None),
+                trading_pair=getattr(getattr(executor, "config", None), "trading_pair", None),
+                close_timestamp=getattr(executor, "close_timestamp", None),
+                realised_pnl=getattr(executor, "net_pnl_quote", None),
+            ):
+                claimed.append(executor)
+        return claimed
+
     def _sync_risk_state(self) -> None:
         """
         Synchronize realised PnL and cooldown information with the global risk manager.
@@ -6894,9 +6995,20 @@ class MultiCoinGridController(ControllerBase):
                             del self.price_history_for_volatility[trading_pair]
                             self.logger().debug(f"🧹 Cleaned up price history for {trading_pair}")
 
-        # Track realised PnL for terminated executors exactly once
-        for executor in self.executors_info:
-            if executor.status == RunnableStatus.TERMINATED:
+        # FIX-002: Track realised PnL for closed executors exactly once.
+        #
+        # This used to iterate self.executors_info and filter on TERMINATED.
+        # That never matched: with closed_executors_buffer = 0 the orchestrator
+        # removes a closed executor from active_executors inside the same
+        # strategy tick that publishes the snapshot, so the controller's async
+        # loop effectively never observes the TERMINATED state. The kill switch,
+        # the drawdown tracker and PHANTOM_LOSS_FIX were all dead as a result.
+        #
+        # Candidates now come from an explicit hand-over by the strategy, with
+        # the old snapshot scan kept as a fallback. The durable ledger makes the
+        # whole thing exactly-once regardless of which path delivered it.
+        for executor in self._collect_realised_candidates():
+            if executor is not None:
                 if executor.id not in self._realised_executors_tracked:
                     realised_pnl = Decimal(str(executor.net_pnl_quote))
                     trading_pair = getattr(getattr(executor, "config", None), "trading_pair", self.active_coin)
@@ -7260,6 +7372,54 @@ class MultiCoinGridController(ControllerBase):
 
                     except Exception as _phantom_e:
                         self.logger().debug(f"Close handler error: {_phantom_e}")
+
+                    # Keep the global risk manager in sync independently from
+                    # optional audit/metrics handlers above.  Those handlers are
+                    # deliberately best-effort and must not prevent a close from
+                    # being registered.
+                    try:
+                        from hummingbot.strategy_v2.models.executors import CloseType
+                        from multi_coin_grid_pro.core.exit_types import ExitType
+
+                        timeout_close_types = {
+                            CloseType.NO_FILL_TIMEOUT,
+                            CloseType.NO_PROGRESS_TIMEOUT,
+                            CloseType.TIME_LIMIT,
+                        }
+                        if hasattr(CloseType, "HARD_CAP_TIME_LIMIT"):
+                            timeout_close_types.add(CloseType.HARD_CAP_TIME_LIMIT)
+                        if hasattr(CloseType, "SWITCH"):
+                            timeout_close_types.add(CloseType.SWITCH)
+
+                        if executor.close_type == CloseType.STOP_LOSS:
+                            exit_type = ExitType.STOP_LOSS
+                        elif executor.close_type == CloseType.TAKE_PROFIT:
+                            exit_type = ExitType.TAKE_PROFIT
+                        elif executor.close_type in timeout_close_types and realised_pnl < 0:
+                            exit_type = ExitType.TREND_EXIT
+                        elif realised_pnl < 0:
+                            r_unit = float(getattr(self.config, "r_unit_quote", 5.0))
+                            exit_type = (
+                                ExitType.STOP_LOSS
+                                if abs(float(realised_pnl)) >= r_unit
+                                else ExitType.SMALL_LOSS
+                            )
+                        elif realised_pnl >= 0:
+                            exit_type = ExitType.TAKE_PROFIT
+                        else:
+                            exit_type = ExitType.UNKNOWN
+
+                        self.risk_manager.register_close_trade(
+                            symbol=trading_pair,
+                            realised_pnl_quote=realised_pnl,
+                            now=now,
+                            exit_type=exit_type,
+                        )
+                    except Exception as risk_error:
+                        self.logger().warning(
+                            f"⚠️ Risk manager close registration failed for "
+                            f"{trading_pair}: {risk_error}"
+                        )
 
                     self._realised_executors_tracked[executor.id] = realised_pnl
 
@@ -7833,6 +7993,20 @@ class MultiCoinGridController(ControllerBase):
                     # This prevents the DynamicPairManager from reducing a 24-coin pool to 9
                     self.monitored_coins = list(current_monitored | active_pairs | set(self.active_coins.keys()))
 
+            # Propagate volume/spread from DPM scan into pair_volumes/pair_spreads
+            # so the bucket-tracker can build MarketMetrics for any scanned coin.
+            # PairMetrics.spread_pct is in %; pair_spreads stores fractions (÷100).
+            if self.dynamic_pair_manager.all_pairs:
+                for sym, pm in self.dynamic_pair_manager.all_pairs.items():
+                    if pm.volume_24h > 0:
+                        self.pair_volumes[sym] = pm.volume_24h
+                    if pm.bid > 0 and pm.ask > 0:
+                        self.pair_spreads[sym] = (pm.ask - pm.bid) / pm.bid
+                self.logger().debug(
+                    f"[US-007] pair_volumes updated: {len(self.pair_volumes)} pairs, "
+                    f"pair_spreads: {len(self.pair_spreads)} pairs"
+                )
+
             self.logger().info(f"✅ US-007: Scanned {scanned_count} pairs")
 
         except Exception as e:
@@ -7866,6 +8040,47 @@ class MultiCoinGridController(ControllerBase):
             )
         except Exception as e:
             self.logger().error(f"❌ Error updating exposure tracking: {e}")
+
+    def _check_entry_trend_filter(self, trading_pair: str) -> bool:
+        """Return whether a pair meets the configured minimum trend score.
+
+        Missing or invalid market data is treated as unavailable and therefore
+        fails open; this filter must not halt trading because a data feed is
+        temporarily incomplete.
+        """
+        config = getattr(self.config, "entry_trend_filter", None) or {}
+        if not config.get("enabled", False):
+            return True
+
+        try:
+            minimum_score = float(config.get("min_entry_trend_score", 0.0))
+        except (TypeError, ValueError):
+            minimum_score = 0.0
+        if minimum_score <= 0:
+            return True
+
+        try:
+            trend = self.trend_calculator.get_trend(trading_pair) if self.trend_calculator else None
+            score = getattr(trend, "trend_score", None) if trend is not None else None
+            score_value = float(score) if score is not None else None
+        except (TypeError, ValueError, AttributeError):
+            score_value = None
+
+        if score_value is None or not math.isfinite(score_value):
+            self.logger().info(
+                f"ENTRY_FILTER_BYPASS symbol={trading_pair} "
+                f"reason=ENTRY_TREND_SCORE_UNAVAILABLE score={score_value}"
+            )
+            return True
+
+        if score_value < minimum_score:
+            self.logger().info(
+                f"ENTRY_BLOCKED symbol={trading_pair} "
+                f"reason=ENTRY_TREND_SCORE_BELOW_MIN "
+                f"score={score_value:.4f} min_score={minimum_score:.4f}"
+            )
+            return False
+        return True
 
     def _should_create_new_grid(self, best_coin: str) -> bool:
         """
@@ -10955,6 +11170,13 @@ class MultiCoinGridController(ControllerBase):
                 "entry_trend_pct": getattr(trend, 'consensus_trend_pct', None) or getattr(trend, 'trend_pct', None),
                 "entry_trend_score": getattr(trend, 'trend_score', None),
                 "entry_grid_score": self._get_cached_grid_score(symbol),
+                # FASE 1A: Soft-risk shadow-mode - generic across all spot bots (Bitget/OKX/Kraken USD/EUR)
+                "bot_instance_id": getattr(self.config, 'instance_id', None) or self.config.controller_name,
+                "soft_risk_shadow_logging_enabled": bool(getattr(self.config, 'soft_risk_shadow_logging_enabled', True)),
+                "soft_risk_state_enabled": bool(getattr(self.config, 'soft_risk_state_enabled', False)),
+                "soft_risk_baseline_fills": int(getattr(self.config, 'soft_risk_baseline_fills', 4)),
+                # FASE 1C: observational-only, independent from soft_risk_baseline_fills.
+                "post_fill_sampling_start_fill": int(getattr(self.config, 'post_fill_sampling_start_fill', 3)),
             }
         )
 
