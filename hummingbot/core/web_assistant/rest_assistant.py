@@ -1,5 +1,6 @@
 import json
 from asyncio import wait_for
+from contextlib import nullcontext
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Union
 
@@ -105,8 +106,10 @@ class RESTAssistant:
     async def call(self, request: RESTRequest, timeout: Optional[float] = None) -> RESTResponse:
         request = deepcopy(request)
         request = await self._pre_process_request(request)
-        request = await self._authenticate(request)
-        resp = await wait_for(self._connection.call(request), timeout)
+        context = self._auth.rest_request_context() if self._auth and request.is_auth_required else nullcontext()
+        async with context:
+            request = await self._authenticate(request)
+            resp = await wait_for(self._connection.call(request), timeout)
         resp = await self._post_process_response(resp)
         return resp
 

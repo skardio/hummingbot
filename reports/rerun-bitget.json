@@ -1,0 +1,566 @@
+{
+  "bootstrap": {
+    "ci_high": -0.04418541581716012,
+    "ci_low": -0.18577625009428936,
+    "method": "block_bootstrap_day",
+    "n_blocks": 129,
+    "n_observations": 460,
+    "n_resamples": 10000,
+    "point_estimate": -0.11010434376580544,
+    "seed": 20261004
+  },
+  "class_distribution": {
+    "MATCHED_DUST_CONFIRMED": 115,
+    "MATCHED_DUST_HEURISTIC": 338,
+    "MATCHED_EXACT": 7,
+    "NO_FILL": 606,
+    "OVERSOLD": 2,
+    "PARTIAL_OPEN": 25,
+    "UNMATCHED_BUY": 1
+  },
+  "class_pnl": {
+    "MATCHED_DUST_CONFIRMED": "-12.5320628876674990880",
+    "MATCHED_DUST_HEURISTIC": "-37.3900816350430001170886",
+    "MATCHED_EXACT": "-0.72585360956",
+    "NO_FILL": "-0.5182941954875",
+    "OVERSOLD": "5.92580231399",
+    "PARTIAL_OPEN": "-7.9844150029999999862",
+    "UNMATCHED_BUY": "-28.87762878"
+  },
+  "close_type_distribution": {
+    "11": 89,
+    "12": 246,
+    "13": 1,
+    "2": 14,
+    "3": 86,
+    "5": 607,
+    "6": 14,
+    "8": 37
+  },
+  "cohort": {
+    "controller_id": "spot_grid_bitget",
+    "fingerprint_distinct": 33,
+    "fingerprint_dominant_share": 0.3656307129798903,
+    "fingerprint_health": 0.03016453382084095,
+    "quote": "USDT",
+    "venue": "bitget"
+  },
+  "data_quality": {
+    "abc_identity": {
+      "limit": "0.01",
+      "passed": true,
+      "value": "0E-22"
+    },
+    "count_conservation": {
+      "limit": "0",
+      "passed": true,
+      "value": "0"
+    },
+    "fee_rate_plausible": {
+      "limit": "0.006",
+      "passed": true,
+      "value": "0.001074433673318422812469027625"
+    },
+    "leg_identity": {
+      "limit": "0.5",
+      "passed": true,
+      "value": "-0.41413956644757058062059"
+    },
+    "non_negative_fees": {
+      "limit": "0",
+      "passed": true,
+      "value": "32.051468906549000046"
+    }
+  },
+  "database": "data/spot_grid_bitget.sqlite",
+  "dust_sensitivity": {
+    "composition_spread": 0.7402061855670103,
+    "detail": "verdict identical across the full sweep (but view B composition varies 126..485; stability is masked by gate G1 blocking every point)",
+    "n_points": 25,
+    "n_view_b_max": 485,
+    "n_view_b_min": 126,
+    "points": [
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 126,
+        "pnl_view_b": "-13.5516762557074990880",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 369,
+        "pnl_view_b": "-4.9129207411914991241886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 369,
+        "pnl_view_b": "-4.9129207411914991241886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 369,
+        "pnl_view_b": "-4.9129207411914991241886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 369,
+        "pnl_view_b": "-4.9129207411914991241886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 126,
+        "pnl_view_b": "-13.5516762557074990880",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 447,
+        "pnl_view_b": "-42.3594304350204992090886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 450,
+        "pnl_view_b": "-42.7027073976404992090886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 450,
+        "pnl_view_b": "-42.7027073976404992090886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 450,
+        "pnl_view_b": "-42.7027073976404992090886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 126,
+        "pnl_view_b": "-13.5516762557074990880",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 450,
+        "pnl_view_b": "-48.8496538586504992090886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 460,
+        "pnl_view_b": "-50.6479981322704992050886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 471,
+        "pnl_view_b": "-53.6009613552704991950886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 476,
+        "pnl_view_b": "-55.4735334552704991950886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 126,
+        "pnl_view_b": "-13.5516762557074990880",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 450,
+        "pnl_view_b": "-48.8496538586504992090886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 460,
+        "pnl_view_b": "-50.6479981322704992050886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 478,
+        "pnl_view_b": "-55.6442512752704991912886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 484,
+        "pnl_view_b": "-57.7759611752704991912886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 126,
+        "pnl_view_b": "-13.5516762557074990880",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 450,
+        "pnl_view_b": "-48.8496538586504992090886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 460,
+        "pnl_view_b": "-50.6479981322704992050886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 478,
+        "pnl_view_b": "-55.6442512752704991912886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 485,
+        "pnl_view_b": "-58.6324131352704991912886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      }
+    ],
+    "stability_masked_by_earlier_gate": true,
+    "stable": true
+  },
+  "field_volatility": [
+    {
+      "distinct": 4,
+      "examples": [
+        "2700",
+        "3600",
+        "5400"
+      ],
+      "key": "custom_info.no_progress_timeout_sec",
+      "total": 1094
+    },
+    {
+      "distinct": 4,
+      "examples": [
+        "0.015",
+        "0.017",
+        "0.02"
+      ],
+      "key": "triple_barrier_config.trailing_stop.activation_price",
+      "total": 1094
+    },
+    {
+      "distinct": 3,
+      "examples": [
+        "0.005",
+        "0.01",
+        "0.03"
+      ],
+      "key": "triple_barrier_config.trailing_stop.trailing_delta",
+      "total": 1094
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "false",
+        "true"
+      ],
+      "key": "coerce_tp_to_step",
+      "total": 1094
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "120",
+        "600"
+      ],
+      "key": "custom_info.close_grace_sec",
+      "total": 1094
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "0.35",
+        "0.6"
+      ],
+      "key": "custom_info.dynamic_tp_atr_multiplier",
+      "total": 1094
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "0.03",
+        "0.04"
+      ],
+      "key": "custom_info.dynamic_tp_max_pct",
+      "total": 1094
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "0.015",
+        "0.02"
+      ],
+      "key": "custom_info.dynamic_tp_min_pct",
+      "total": 1094
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "0",
+        "1800"
+      ],
+      "key": "custom_info.fee_aware_timeout_bypass_sec",
+      "total": 1094
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "14400",
+        "21600"
+      ],
+      "key": "custom_info.max_hold_time_sec",
+      "total": 1094
+    }
+  ],
+  "gate": "G1",
+  "heuristic_share_of_b": "0.7347826086956521739130434783",
+  "input_hash": "7f7d645100097489427ea362e3953bbd8be12a4a7a67ba3b5c4dbc9f9d24514f",
+  "not_measurable": [
+    "equity_drawdown",
+    "sharpe",
+    "sortino",
+    "time_weighted_return",
+    "maker_taker_true_split",
+    "regime_segmentation",
+    "expected_vs_realised_slippage"
+  ],
+  "operational_share_of_total": "0.3831128493836535045552479272",
+  "policy_version": "1.2.0",
+  "reason": "dominant config fingerprint covers only 37% of the cohort (33 distinct fingerprints); trades cannot be pooled.",
+  "reason_code": "MIXED_COHORT",
+  "schema_version": "1.0.0",
+  "trace": [
+    {
+      "advisory": false,
+      "detail": "net_pnl vs (sell - buy) - fees",
+      "gate": "G0",
+      "limit": "0.5",
+      "name": "leg_identity",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "-0.41413956644757058062059"
+    },
+    {
+      "advisory": false,
+      "detail": "pnl(A) vs pnl(B) + pnl(C)",
+      "gate": "G0",
+      "limit": "0.01",
+      "name": "abc_identity",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "0.0000000000000000000000"
+    },
+    {
+      "advisory": false,
+      "detail": "cumulative fees must not be negative",
+      "gate": "G0",
+      "limit": "0",
+      "name": "non_negative_fees",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "32.051468906549000046"
+    },
+    {
+      "advisory": false,
+      "detail": "fees / (buy + sell) notional must lie within [0.0, 0.006]",
+      "gate": "G0",
+      "limit": "0.006",
+      "name": "fee_rate_plausible",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "0.001074433673318422812469027625"
+    },
+    {
+      "advisory": false,
+      "detail": "every executor must be classified exactly once",
+      "gate": "G0",
+      "limit": "0",
+      "name": "count_conservation",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "0"
+    },
+    {
+      "advisory": false,
+      "detail": "distinct fingerprints / n executors",
+      "gate": "G1",
+      "limit": "0.7000",
+      "name": "fingerprint_health",
+      "passed": true,
+      "policy_key": "cohort.fingerprint_health_stale",
+      "value": "0.0302"
+    },
+    {
+      "advisory": false,
+      "detail": "33 distinct fingerprints over 1094 executors",
+      "gate": "G1",
+      "limit": "0.9000",
+      "name": "dominant_fingerprint_share",
+      "passed": false,
+      "policy_key": "cohort.min_dominant_fingerprint_share",
+      "value": "0.3656"
+    }
+  ],
+  "tradefill_attribution": {
+    "attributable": true,
+    "attributed_fees": "29.8249398099999999",
+    "attributed_volume": "29824.563363200",
+    "controller_ids": [
+      "spot_grid_bitget"
+    ],
+    "effective_fee_rate": "0.001000012622038935342504722822",
+    "executor_volume": "29890.692976755180999",
+    "n_matched_fills": 1903,
+    "n_order_ids": 26207,
+    "n_total_fills": 4541,
+    "ratio": "0.9977876185872770696718232262",
+    "reason": "matched on TradeFill.order_id"
+  },
+  "unmatched_buy_rate": "0.0009140767824497257769652650823",
+  "verdict": "INSUFFICIENT_EVIDENCE",
+  "views": {
+    "A": {
+      "deployed_capital": "14999.99375671218099910970590",
+      "distinct_pairs": 86,
+      "expectancy_per_trade": "-0.07504801992391956050392010969",
+      "fees": "32.051468906549000046",
+      "gross_pnl": "-50.0510648902189991452886",
+      "max_consecutive_losses": 13,
+      "n": 1094,
+      "net_pnl": "-82.1025337967679991912886",
+      "payoff_ratio": "1.676452419183019758092920841",
+      "pnl_sequence_drawdown": "-82.1991812782479991892886",
+      "profit_factor": "0.4015113058429252769098822898",
+      "return_on_deployed": "-0.005473504531295477778301488790",
+      "trading_days": 138,
+      "win_rate": "0.1928702010968921389396709324",
+      "worst_trade": "-28.87762878"
+    },
+    "B": {
+      "deployed_capital": "14147.41831789246299911003208",
+      "distinct_pairs": 66,
+      "expectancy_per_trade": "-0.1101043437658054330545404348",
+      "fees": "30.330815624538000036",
+      "gross_pnl": "-20.3171825077324991690886",
+      "max_consecutive_losses": 13,
+      "n": 460,
+      "net_pnl": "-50.6479981322704992050886",
+      "payoff_ratio": "0.6565700497611530014503612917",
+      "pnl_sequence_drawdown": "-50.7446456137504992030886",
+      "profit_factor": "0.5324938198850295996014741185",
+      "return_on_deployed": "-0.003580017003400201818841089547",
+      "trading_days": 129,
+      "win_rate": "0.4478260869565217391304347826",
+      "worst_trade": "-8.56400587449"
+    },
+    "C": {
+      "deployed_capital": "852.5754388197179999996738182",
+      "distinct_pairs": 59,
+      "expectancy_per_trade": "-0.04961283227838722395299684543",
+      "fees": "1.720653282011000010",
+      "gross_pnl": "-29.7338823824864999762",
+      "max_consecutive_losses": 4,
+      "n": 634,
+      "net_pnl": "-31.4545356644974999862",
+      "payoff_ratio": "4.425672846343360314207552634",
+      "pnl_sequence_drawdown": "-37.3803379784874999862",
+      "profit_factor": "0.03529244694053716359017187108",
+      "return_on_deployed": "-0.03689355127100810512141895893",
+      "trading_days": 73,
+      "win_rate": "0.007886435331230283911671924290",
+      "worst_trade": "-28.87762878"
+    }
+  }
+}

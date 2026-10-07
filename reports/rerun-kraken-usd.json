@@ -1,0 +1,571 @@
+{
+  "bootstrap": {
+    "ci_high": -0.11275602498520004,
+    "ci_low": -0.3739453420217876,
+    "method": "block_bootstrap_day",
+    "n_blocks": 47,
+    "n_observations": 198,
+    "n_resamples": 10000,
+    "point_estimate": -0.23644943534629018,
+    "seed": 20261004
+  },
+  "class_distribution": {
+    "MATCHED_DUST_CONFIRMED": 7,
+    "MATCHED_DUST_HEURISTIC": 38,
+    "MATCHED_EXACT": 153,
+    "NO_FILL": 338,
+    "OVERSOLD": 3,
+    "PARTIAL_OPEN": 3,
+    "UNMATCHED_BUY": 10,
+    "UNMATCHED_SELL": 3
+  },
+  "class_pnl": {
+    "MATCHED_DUST_CONFIRMED": "-5.22424601254569929",
+    "MATCHED_DUST_HEURISTIC": "1.522670603270878071",
+    "MATCHED_EXACT": "-43.1154127892906380275",
+    "NO_FILL": "-0.992661902578955",
+    "OVERSOLD": "11.734478058438",
+    "PARTIAL_OPEN": "-72.4695342014",
+    "UNMATCHED_BUY": "-484.19689441077160",
+    "UNMATCHED_SELL": "82.609272117"
+  },
+  "close_type_distribution": {
+    "11": 27,
+    "12": 57,
+    "13": 36,
+    "2": 12,
+    "3": 60,
+    "5": 94,
+    "6": 1,
+    "7": 210,
+    "8": 58
+  },
+  "cohort": {
+    "controller_id": "multi_coin_grid_usd",
+    "fingerprint_distinct": 22,
+    "fingerprint_dominant_share": 0.3153153153153153,
+    "fingerprint_health": 0.03963963963963964,
+    "quote": "USD",
+    "venue": "kraken"
+  },
+  "data_quality": {
+    "abc_identity": {
+      "limit": "0.01",
+      "passed": true,
+      "value": "0E-19"
+    },
+    "count_conservation": {
+      "limit": "0",
+      "passed": true,
+      "value": "0"
+    },
+    "fee_rate_plausible": {
+      "limit": "0.006",
+      "passed": true,
+      "value": "0.003166409067608890097130613038"
+    },
+    "leg_identity": {
+      "limit": "2.5506616426893900712325",
+      "passed": true,
+      "value": "-0.418216458153607863025901"
+    },
+    "non_negative_fees": {
+      "limit": "0",
+      "passed": true,
+      "value": "58.00937687000000000"
+    }
+  },
+  "database": "data/multi_coin_grid_v2_usd.sqlite",
+  "dust_sensitivity": {
+    "composition_spread": 0.0,
+    "detail": "verdict identical across the full sweep",
+    "n_points": 25,
+    "n_view_b_max": 198,
+    "n_view_b_min": 198,
+    "points": [
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 198,
+        "pnl_view_b": "-46.8169881985654592465",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      }
+    ],
+    "stability_masked_by_earlier_gate": true,
+    "stable": true
+  },
+  "field_volatility": [
+    {
+      "distinct": 5,
+      "examples": [
+        "0.015",
+        "0.02",
+        "0.022"
+      ],
+      "key": "triple_barrier_config.trailing_stop.activation_price",
+      "total": 555
+    },
+    {
+      "distinct": 4,
+      "examples": [
+        "2700",
+        "3600",
+        "5400"
+      ],
+      "key": "custom_info.no_progress_timeout_sec",
+      "total": 555
+    },
+    {
+      "distinct": 3,
+      "examples": [
+        "0",
+        "1800",
+        "3600"
+      ],
+      "key": "custom_info.fee_aware_timeout_bypass_sec",
+      "total": 555
+    },
+    {
+      "distinct": 3,
+      "examples": [
+        "14400",
+        "21600",
+        "5400"
+      ],
+      "key": "custom_info.max_hold_time_sec",
+      "total": 555
+    },
+    {
+      "distinct": 3,
+      "examples": [
+        "0.005",
+        "0.01",
+        "0.03"
+      ],
+      "key": "triple_barrier_config.trailing_stop.trailing_delta",
+      "total": 555
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "120",
+        "600"
+      ],
+      "key": "custom_info.close_grace_sec",
+      "total": 555
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "0.35",
+        "0.6"
+      ],
+      "key": "custom_info.dynamic_tp_atr_multiplier",
+      "total": 555
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "0.04",
+        "0.05"
+      ],
+      "key": "custom_info.dynamic_tp_max_pct",
+      "total": 555
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "0.02",
+        "0.025"
+      ],
+      "key": "custom_info.dynamic_tp_min_pct",
+      "total": 555
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "0.3",
+        "0.4"
+      ],
+      "key": "custom_info.fee_aware_min_net_profit_pct",
+      "total": 555
+    }
+  ],
+  "gate": "G1",
+  "heuristic_share_of_b": "0.1919191919191919191919191919",
+  "input_hash": "3ec3fc545a155b3ad18992cbb4a04f90b8863bbac5179c34a8a23d0c7a644995",
+  "not_measurable": [
+    "equity_drawdown",
+    "sharpe",
+    "sortino",
+    "time_weighted_return",
+    "maker_taker_true_split",
+    "regime_segmentation",
+    "expected_vs_realised_slippage"
+  ],
+  "operational_share_of_total": "0.9082257963678747039968058680",
+  "policy_version": "1.2.0",
+  "reason": "dominant config fingerprint covers only 32% of the cohort (22 distinct fingerprints); trades cannot be pooled.",
+  "reason_code": "MIXED_COHORT",
+  "schema_version": "1.0.0",
+  "trace": [
+    {
+      "advisory": false,
+      "detail": "net_pnl vs (sell - buy) - fees",
+      "gate": "G0",
+      "limit": "2.5506616426893900712325",
+      "name": "leg_identity",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "-0.418216458153607863025901"
+    },
+    {
+      "advisory": false,
+      "detail": "pnl(A) vs pnl(B) + pnl(C)",
+      "gate": "G0",
+      "limit": "0.01",
+      "name": "abc_identity",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "0.0000000000000000000"
+    },
+    {
+      "advisory": false,
+      "detail": "cumulative fees must not be negative",
+      "gate": "G0",
+      "limit": "0",
+      "name": "non_negative_fees",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "58.00937687000000000"
+    },
+    {
+      "advisory": false,
+      "detail": "fees / (buy + sell) notional must lie within [0.0, 0.006]",
+      "gate": "G0",
+      "limit": "0.006",
+      "name": "fee_rate_plausible",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "0.003166409067608890097130613038"
+    },
+    {
+      "advisory": false,
+      "detail": "every executor must be classified exactly once",
+      "gate": "G0",
+      "limit": "0",
+      "name": "count_conservation",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "0"
+    },
+    {
+      "advisory": false,
+      "detail": "distinct fingerprints / n executors",
+      "gate": "G1",
+      "limit": "0.7000",
+      "name": "fingerprint_health",
+      "passed": true,
+      "policy_key": "cohort.fingerprint_health_stale",
+      "value": "0.0396"
+    },
+    {
+      "advisory": false,
+      "detail": "22 distinct fingerprints over 555 executors",
+      "gate": "G1",
+      "limit": "0.9000",
+      "name": "dominant_fingerprint_share",
+      "passed": false,
+      "policy_key": "cohort.min_dominant_fingerprint_share",
+      "value": "0.3153"
+    }
+  ],
+  "tradefill_attribution": {
+    "attributable": true,
+    "attributed_fees": "46.47328490",
+    "attributed_volume": "18442.7178696674138",
+    "controller_ids": [
+      "multi_coin_grid_usd"
+    ],
+    "effective_fee_rate": "0.002519871812192834601471042756",
+    "executor_volume": "19130.23668648054593",
+    "n_matched_fills": 723,
+    "n_order_ids": 2966,
+    "n_total_fills": 3976,
+    "ratio": "0.9640611442461134921716350814",
+    "reason": "matched on TradeFill.order_id"
+  },
+  "unmatched_buy_rate": "0.01801801801801801801801801802",
+  "verdict": "INSUFFICIENT_EVIDENCE",
+  "views": {
+    "A": {
+      "deployed_capital": "10249.39957813941353862202101",
+      "distinct_pairs": 86,
+      "expectancy_per_trade": "-0.9191573487168973229666666667",
+      "fees": "58.00937687000000000",
+      "gross_pnl": "-452.1229516678780142465",
+      "max_consecutive_losses": 6,
+      "n": 555,
+      "net_pnl": "-510.1323285378780142465",
+      "payoff_ratio": "0.2145532320804976018702952583",
+      "pnl_sequence_drawdown": "-510.3238163480440142465",
+      "profit_factor": "0.04022873101509330035068036094",
+      "return_on_deployed": "-0.04977192318913211701411136715",
+      "trading_days": 51,
+      "win_rate": "0.1567567567567567567567567568",
+      "worst_trade": "-77.06884266424"
+    },
+    "B": {
+      "deployed_capital": "8586.877811824450717622021014",
+      "distinct_pairs": 71,
+      "expectancy_per_trade": "-0.2364494353462901982146464646",
+      "fees": "53.18026646599999997",
+      "gross_pnl": "6.3632782674345407235",
+      "max_consecutive_losses": 8,
+      "n": 198,
+      "net_pnl": "-46.8169881985654592465",
+      "payoff_ratio": "0.5269306937886600562595455986",
+      "pnl_sequence_drawdown": "-47.0084760087314592465",
+      "profit_factor": "0.3425049509626290365687046390",
+      "return_on_deployed": "-0.005452154930409830912817815437",
+      "trading_days": 47,
+      "win_rate": "0.3939393939393939393939393939",
+      "worst_trade": "-3.4706106324132002"
+    },
+    "C": {
+      "deployed_capital": "1662.521766314962821000000000",
+      "distinct_pairs": 53,
+      "expectancy_per_trade": "-1.297802073779586988795518207",
+      "fees": "4.82911040400000003",
+      "gross_pnl": "-458.48622993531255497",
+      "max_consecutive_losses": 3,
+      "n": 357,
+      "net_pnl": "-463.315340339312555",
+      "payoff_ratio": "0.06790509946347426039319492599",
+      "pnl_sequence_drawdown": "-463.411657880512555",
+      "profit_factor": "0.001776586904567640533542890506",
+      "return_on_deployed": "-0.2786822703478145025191614202",
+      "trading_days": 37,
+      "win_rate": "0.02521008403361344537815126050",
+      "worst_trade": "-77.06884266424"
+    }
+  }
+}

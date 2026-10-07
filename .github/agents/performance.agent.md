@@ -29,11 +29,22 @@ You query SQLite trading databases and generate performance reports for a multi-
 
 ## Important: Decimal Encoding
 
-Values in TradeFill and Order tables are stored as BIGINT:
-- **amount**: divide by `1000000000.0` (1e9)
-- **price**: divide by `100000000.0` (1e8)
-- **trade_fee**: JSON field `{"currency": "...", "amount": N}` — amount also needs 1e9 division
+Values in TradeFill and Order tables are stored as BIGINT, **all scaled by 1e8**:
+- **amount**: divide by `1e8`
+- **price**: divide by `1e8`
+- **trade_fee_in_quote**: divide by `1e8` — this is the only reliable fee column
 - **timestamp**: milliseconds since epoch → `datetime(timestamp/1000, 'unixepoch', 'localtime')`
+
+> Corrected 2026-10-04. `amount` was previously documented as `1e9`; that was wrong by a
+> factor ten. Proof: order `1381052760` has `amount = 12162587330`, and `/1e8 = 121.62587330`,
+> exactly the `executed_amount_base` recorded in `Executors.custom_info.filled_orders`.
+>
+> Write the divisor as the REAL literal `1e8`. SQLite performs integer division on
+> `price/100000000` and truncates it to zero.
+>
+> **Never sum `trade_fee.flat_fees[0].amount`.** For BUY orders that token is the BASE asset,
+> so summing adds ADA units to AAVE units. `json_extract(trade_fee, '$.amount')` does not
+> exist at all and always returns NULL.
 
 ## Core Queries
 
@@ -43,8 +54,8 @@ SELECT base_asset,
        COUNT(*) as trades,
        SUM(CASE WHEN trade_type='BUY' THEN 1 ELSE 0 END) as buys,
        SUM(CASE WHEN trade_type='SELL' THEN 1 ELSE 0 END) as sells,
-       ROUND(SUM(CASE WHEN trade_type='BUY' THEN -(amount/1e9)*(price/1e8)
-                      WHEN trade_type='SELL' THEN (amount/1e9)*(price/1e8)
+       ROUND(SUM(CASE WHEN trade_type='BUY' THEN -(amount/1e8)*(price/1e8)
+                      WHEN trade_type='SELL' THEN (amount/1e8)*(price/1e8)
                       ELSE 0 END), 4) as net_pnl
 FROM TradeFill
 WHERE timestamp > (strftime('%s','now','-7 days') * 1000)
@@ -83,8 +94,8 @@ ORDER BY timestamp DESC LIMIT 30;
 ```sql
 SELECT base_asset,
        COUNT(*) as trades,
-       ROUND(SUM(json_extract(trade_fee, '$.amount') / 1e9), 6) as total_fees,
-       json_extract(trade_fee, '$.currency') as fee_currency
+       ROUND(SUM(trade_fee_in_quote / 1e8), 6) as total_fees,
+       quote_asset as fee_currency
 FROM TradeFill
 WHERE timestamp > (strftime('%s','now','-7 days') * 1000)
 GROUP BY base_asset, fee_currency ORDER BY total_fees DESC;

@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
+from typing import AsyncContextManager
 
 from hummingbot.core.web_assistant.connections.data_types import RESTRequest, WSRequest
 
@@ -10,6 +12,10 @@ class AuthBase(ABC):
     server that is required in the message signature, this class can be passed a `RESTConnection`
     object that it can use to that end.
     """
+
+    def rest_request_context(self) -> AsyncContextManager:
+        """Optionally serialize authentication and HTTP execution."""
+        return nullcontext()
 
     @abstractmethod
     async def rest_authenticate(self, request: RESTRequest) -> RESTRequest:

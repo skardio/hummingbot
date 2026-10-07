@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -5,6 +6,7 @@ import json
 import time
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
+from weakref import WeakValueDictionary
 
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
@@ -13,6 +15,17 @@ from hummingbot.core.web_assistant.connections.data_types import RESTRequest, WS
 
 class KrakenAuth(AuthBase):
     _last_tracking_nonce: int = 0
+    _request_locks: WeakValueDictionary = WeakValueDictionary()
+
+    def rest_request_context(self) -> asyncio.Lock:
+        # Locks are shared by API key within an event loop, including across
+        # connector instances. Weak values avoid retaining unused credentials.
+        key = (asyncio.get_running_loop(), self.api_key)
+        lock = self._request_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._request_locks[key] = lock
+        return lock
 
     def __init__(self, api_key: str, secret_key: str, time_provider: TimeSynchronizer):
         self.api_key = api_key

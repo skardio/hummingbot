@@ -99,13 +99,20 @@ grep "gate_passed" logs/events/events_*.jsonl | tail -20
 
 **TradeFill** - Actual executed trades:
 ```sql
--- Note: amount and price are stored as BIGINT (multiply by 1e-9 for actual values)
--- trade_fee is JSON with {currency, amount} structure
+-- Note: amount, price and trade_fee_in_quote are stored as BIGINT, ALL scaled by 1e8.
+-- (Corrected 2026-10-04: amount was previously documented as 1e9, which is wrong.
+--  Proof: order 1381052760 has amount 12162587330; /1e8 = 121.62587330, exactly the
+--  executed_amount_base in Executors.custom_info.filled_orders for that order.)
+-- Always write the divisor as the REAL literal 1e8: SQLite truncates price/100000000
+-- to zero via integer division.
+-- trade_fee is JSON: {"fee_type", "percent", "flat_fees":[{"token", "amount"}]}.
+-- For BUY orders the flat_fee token is the BASE asset, so flat_fees amounts must
+-- never be summed across rows. Use trade_fee_in_quote/1e8 instead.
 SELECT datetime(timestamp/1000, 'unixepoch', 'localtime') as time,
        trade_type, base_asset,
-       amount/1000000000.0 as qty,
-       price/100000000.0 as px,
-       (amount/1000000000.0)*(price/100000000.0) as value,
+       amount/1e8 as qty,
+       price/1e8 as px,
+       (amount/1e8)*(price/1e8) as value,
        order_id
 FROM TradeFill WHERE base_asset='BTC' ORDER BY timestamp DESC LIMIT 20;
 ```
@@ -114,7 +121,7 @@ FROM TradeFill WHERE base_asset='BTC' ORDER BY timestamp DESC LIMIT 20;
 ```sql
 SELECT datetime(creation_timestamp/1000, 'unixepoch', 'localtime') as time,
        id, symbol, order_type, last_status, exchange_order_id,
-       amount/1000000000.0 as qty, price/100000000.0 as px
+       amount/1e8 as qty, price/1e8 as px
 FROM "Order" WHERE symbol LIKE '%BTC%' ORDER BY creation_timestamp DESC LIMIT 20;
 ```
 
@@ -206,13 +213,13 @@ grep -E "disconnect|reconnect|timeout|Insufficient balance" logs/logs_*.log | ta
 # Trades breakdown by coin (last session)
 sqlite3 data/multi_coin_grid_v2_usd.sqlite \
   "SELECT base_asset, trade_type, COUNT(*) as cnt,
-          SUM(amount/1000000000.0) as total_qty
+          SUM(amount/1e8) as total_qty
    FROM TradeFill GROUP BY base_asset, trade_type ORDER BY base_asset"
 
 # Net position per coin
 sqlite3 data/multi_coin_grid_v2_usd.sqlite \
   "SELECT base_asset,
-          SUM(CASE WHEN trade_type='BUY' THEN amount ELSE -amount END)/1000000000.0 as net_qty
+          SUM(CASE WHEN trade_type='BUY' THEN amount ELSE -amount END)/1e8 as net_qty
    FROM TradeFill GROUP BY base_asset HAVING net_qty != 0"
 
 # Recent orders with status

@@ -1,0 +1,558 @@
+{
+  "bootstrap": {
+    "ci_high": -0.04371241382914641,
+    "ci_low": -0.18733415227044425,
+    "method": "block_bootstrap_day",
+    "n_blocks": 128,
+    "n_observations": 459,
+    "n_resamples": 10000,
+    "point_estimate": -0.11027636257575273,
+    "seed": 20261004
+  },
+  "class_distribution": {
+    "MATCHED_DUST_CONFIRMED": 115,
+    "MATCHED_DUST_HEURISTIC": 337,
+    "MATCHED_EXACT": 7,
+    "NO_FILL": 606,
+    "OVERSOLD": 2,
+    "PARTIAL_OPEN": 25,
+    "UNMATCHED_BUY": 1
+  },
+  "class_pnl": {
+    "MATCHED_DUST_CONFIRMED": "-12.5320628876674990880",
+    "MATCHED_DUST_HEURISTIC": "-37.3589339250430001150886",
+    "MATCHED_EXACT": "-0.72585360956",
+    "NO_FILL": "-0.5182941954875",
+    "OVERSOLD": "5.92580231399",
+    "PARTIAL_OPEN": "-7.9844150029999999862",
+    "UNMATCHED_BUY": "-28.87762878"
+  },
+  "close_type_distribution": {
+    "11": 89,
+    "12": 246,
+    "13": 1,
+    "2": 14,
+    "3": 86,
+    "5": 607,
+    "6": 14,
+    "8": 36
+  },
+  "cohort": {
+    "controller_id": "spot_grid_bitget",
+    "fingerprint_distinct": 202,
+    "fingerprint_dominant_share": 0.32570905763952424,
+    "fingerprint_health": 0.1848124428179323,
+    "quote": "USDT",
+    "venue": "bitget"
+  },
+  "data_quality": {
+    "abc_identity": {
+      "limit": "0.01",
+      "passed": true,
+      "value": "0E-22"
+    },
+    "count_conservation": {
+      "limit": "0",
+      "passed": true,
+      "value": "0"
+    },
+    "fee_rate_plausible": {
+      "limit": "0.006",
+      "passed": true,
+      "value": "0.001074558786042266904120772218"
+    },
+    "leg_identity": {
+      "limit": "0.5",
+      "passed": true,
+      "value": "-0.41413956644757057862059"
+    },
+    "non_negative_fees": {
+      "limit": "0",
+      "passed": true,
+      "value": "32.001411196549000046"
+    }
+  },
+  "database": "data/spot_grid_bitget.sqlite",
+  "dust_sensitivity": {
+    "composition_spread": 0.7396694214876033,
+    "detail": "verdict identical across the full sweep (but view B composition varies 126..484; stability is masked by gate G1 blocking every point)",
+    "n_points": 25,
+    "n_view_b_max": 484,
+    "n_view_b_min": 126,
+    "points": [
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 126,
+        "pnl_view_b": "-13.5516762557074990880",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 368,
+        "pnl_view_b": "-4.8817730311914991221886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 368,
+        "pnl_view_b": "-4.8817730311914991221886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 368,
+        "pnl_view_b": "-4.8817730311914991221886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.05",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 368,
+        "pnl_view_b": "-4.8817730311914991221886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 126,
+        "pnl_view_b": "-13.5516762557074990880",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 446,
+        "pnl_view_b": "-42.3282827250204992070886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 449,
+        "pnl_view_b": "-42.6715596876404992070886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 449,
+        "pnl_view_b": "-42.6715596876404992070886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.1",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 449,
+        "pnl_view_b": "-42.6715596876404992070886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 126,
+        "pnl_view_b": "-13.5516762557074990880",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 449,
+        "pnl_view_b": "-48.8185061486504992070886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 459,
+        "pnl_view_b": "-50.6168504222704992030886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 470,
+        "pnl_view_b": "-53.5698136452704991930886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "0.5",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 475,
+        "pnl_view_b": "-55.4423857452704991930886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 126,
+        "pnl_view_b": "-13.5516762557074990880",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 449,
+        "pnl_view_b": "-48.8185061486504992070886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 459,
+        "pnl_view_b": "-50.6168504222704992030886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 477,
+        "pnl_view_b": "-55.6131035652704991892886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "1.0",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 483,
+        "pnl_view_b": "-57.7448134652704991892886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.001",
+        "gate": "G1",
+        "n_view_b": 126,
+        "pnl_view_b": "-13.5516762557074990880",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.005",
+        "gate": "G1",
+        "n_view_b": 449,
+        "pnl_view_b": "-48.8185061486504992070886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.01",
+        "gate": "G1",
+        "n_view_b": 459,
+        "pnl_view_b": "-50.6168504222704992030886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.02",
+        "gate": "G1",
+        "n_view_b": 477,
+        "pnl_view_b": "-55.6131035652704991892886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      },
+      {
+        "dust_abs_quote": "5.0",
+        "dust_rel_pct": "0.05",
+        "gate": "G1",
+        "n_view_b": 484,
+        "pnl_view_b": "-58.6012654252704991892886",
+        "reason_code": "MIXED_COHORT",
+        "verdict": "INSUFFICIENT_EVIDENCE"
+      }
+    ],
+    "stability_masked_by_earlier_gate": true,
+    "stable": true
+  },
+  "field_volatility": [
+    {
+      "distinct": 17,
+      "examples": [
+        "0.0210957447345",
+        "0.0342587902338",
+        "0.0408432070272"
+      ],
+      "key": "triple_barrier_config.stop_loss",
+      "total": 1093
+    },
+    {
+      "distinct": 11,
+      "examples": [
+        "1",
+        "10",
+        "15"
+      ],
+      "key": "max_open_orders",
+      "total": 1093
+    },
+    {
+      "distinct": 7,
+      "examples": [
+        "1200",
+        "1680",
+        "1800"
+      ],
+      "key": "custom_info.no_fill_timeout_sec",
+      "total": 1093
+    },
+    {
+      "distinct": 5,
+      "examples": [
+        "10800",
+        "14400",
+        "3600"
+      ],
+      "key": "custom_info.no_progress_max_extension_sec",
+      "total": 1093
+    },
+    {
+      "distinct": 4,
+      "examples": [
+        "2700",
+        "3600",
+        "5400"
+      ],
+      "key": "custom_info.no_progress_timeout_sec",
+      "total": 1093
+    },
+    {
+      "distinct": 4,
+      "examples": [
+        "0.035",
+        "0.05",
+        "0.0625"
+      ],
+      "key": "triple_barrier_config.take_profit",
+      "total": 1093
+    },
+    {
+      "distinct": 4,
+      "examples": [
+        "0.015",
+        "0.017",
+        "0.02"
+      ],
+      "key": "triple_barrier_config.trailing_stop.activation_price",
+      "total": 1093
+    },
+    {
+      "distinct": 3,
+      "examples": [
+        "0.05",
+        "0.0625",
+        "0.075"
+      ],
+      "key": "activation_bounds",
+      "total": 1093
+    },
+    {
+      "distinct": 3,
+      "examples": [
+        "0.005",
+        "0.01",
+        "0.03"
+      ],
+      "key": "triple_barrier_config.trailing_stop.trailing_delta",
+      "total": 1093
+    },
+    {
+      "distinct": 2,
+      "examples": [
+        "false",
+        "true"
+      ],
+      "key": "coerce_tp_to_step",
+      "total": 1093
+    }
+  ],
+  "gate": "G1",
+  "heuristic_share_of_b": "0.7342047930283224400871459695",
+  "input_hash": "067029da00b6e9d4790962318b346748dd603f7f3b032fb72298d8012148f734",
+  "not_measurable": [
+    "equity_drawdown",
+    "sharpe",
+    "sortino",
+    "time_weighted_return",
+    "maker_taker_true_split",
+    "regime_segmentation",
+    "expected_vs_realised_slippage"
+  ],
+  "operational_share_of_total": "0.3832582482674649677689180330",
+  "policy_version": "1.1.0",
+  "reason": "dominant config fingerprint covers only 33% of the cohort (202 distinct fingerprints); trades cannot be pooled.",
+  "reason_code": "MIXED_COHORT",
+  "schema_version": "1.0.0",
+  "trace": [
+    {
+      "advisory": false,
+      "detail": "net_pnl vs (sell - buy) - fees",
+      "gate": "G0",
+      "limit": "0.5",
+      "name": "leg_identity",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "-0.41413956644757057862059"
+    },
+    {
+      "advisory": false,
+      "detail": "pnl(A) vs pnl(B) + pnl(C)",
+      "gate": "G0",
+      "limit": "0.01",
+      "name": "abc_identity",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "0.0000000000000000000000"
+    },
+    {
+      "advisory": false,
+      "detail": "cumulative fees must not be negative",
+      "gate": "G0",
+      "limit": "0",
+      "name": "non_negative_fees",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "32.001411196549000046"
+    },
+    {
+      "advisory": false,
+      "detail": "fees / (buy + sell) notional must lie within [0.0, 0.006]",
+      "gate": "G0",
+      "limit": "0.006",
+      "name": "fee_rate_plausible",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "0.001074558786042266904120772218"
+    },
+    {
+      "advisory": false,
+      "detail": "every executor must be classified exactly once",
+      "gate": "G0",
+      "limit": "0",
+      "name": "count_conservation",
+      "passed": true,
+      "policy_key": "data_integrity",
+      "value": "0"
+    },
+    {
+      "advisory": false,
+      "detail": "distinct fingerprints / n executors",
+      "gate": "G1",
+      "limit": "0.7000",
+      "name": "fingerprint_health",
+      "passed": true,
+      "policy_key": "cohort.fingerprint_health_stale",
+      "value": "0.1848"
+    },
+    {
+      "advisory": false,
+      "detail": "202 distinct fingerprints over 1093 executors",
+      "gate": "G1",
+      "limit": "0.9000",
+      "name": "dominant_fingerprint_share",
+      "passed": false,
+      "policy_key": "cohort.min_dominant_fingerprint_share",
+      "value": "0.3257"
+    }
+  ],
+  "tradefill_coverage": "0.2188314650952316744887552671",
+  "unmatched_buy_rate": "0.0009149130832570905763952424520",
+  "verdict": "INSUFFICIENT_EVIDENCE",
+  "views": {
+    "A": {
+      "deployed_capital": "14974.97435671218099910970590",
+      "distinct_pairs": 86,
+      "expectancy_per_trade": "-0.07508818489182799559861720037",
+      "fees": "32.001411196549000046",
+      "gross_pnl": "-50.0699748902189991432886",
+      "max_consecutive_losses": 13,
+      "n": 1093,
+      "net_pnl": "-82.0713860867679991892886",
+      "payoff_ratio": "1.674904212497776809059010859",
+      "pnl_sequence_drawdown": "-82.1991812782479991892886",
+      "profit_factor": "0.4015963509511714848993764672",
+      "return_on_deployed": "-0.005480569390757014916713170026",
+      "trading_days": 137,
+      "win_rate": "0.1930466605672461116193961574",
+      "worst_trade": "-28.87762878"
+    },
+    "B": {
+      "deployed_capital": "14122.39891789246299911003208",
+      "distinct_pairs": 66,
+      "expectancy_per_trade": "-0.1102763625757527215753564270",
+      "fees": "30.280757914538000036",
+      "gross_pnl": "-20.3360925077324991670886",
+      "max_consecutive_losses": 13,
+      "n": 459,
+      "net_pnl": "-50.6168504222704992030886",
+      "payoff_ratio": "0.6541732088823591965395753363",
+      "pnl_sequence_drawdown": "-50.7446456137504992030886",
+      "profit_factor": "0.5326469605919604525183894043",
+      "return_on_deployed": "-0.003584153847838213881462129645",
+      "trading_days": 128,
+      "win_rate": "0.4488017429193899782135076253",
+      "worst_trade": "-8.56400587449"
+    },
+    "C": {
+      "deployed_capital": "852.5754388197179999996738182",
+      "distinct_pairs": 59,
+      "expectancy_per_trade": "-0.04961283227838722395299684543",
+      "fees": "1.720653282011000010",
+      "gross_pnl": "-29.7338823824864999762",
+      "max_consecutive_losses": 4,
+      "n": 634,
+      "net_pnl": "-31.4545356644974999862",
+      "payoff_ratio": "4.425672846343360314207552634",
+      "pnl_sequence_drawdown": "-37.3803379784874999862",
+      "profit_factor": "0.03529244694053716359017187108",
+      "return_on_deployed": "-0.03689355127100810512141895893",
+      "trading_days": 73,
+      "win_rate": "0.007886435331230283911671924290",
+      "worst_trade": "-28.87762878"
+    }
+  }
+}
