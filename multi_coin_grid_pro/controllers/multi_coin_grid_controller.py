@@ -6965,9 +6965,33 @@ class MultiCoinGridController(ControllerBase):
         """
         now = self.market_data_provider.time()
 
+        # FIX-003: position/bucket/budget cleanup and realised PnL propagation
+        # (FIX-002, below) share one collection call. Both concerns are "this
+        # executor just closed, apply its one-time side effects", and both
+        # failed identically before FIX-002: this loop iterated
+        # self.executors_info filtered on TERMINATED, which effectively never
+        # matched once closed_executors_buffer = 0 removed the executor from
+        # active_executors within the same tick that published the snapshot.
+        # FIX-002 fixed the PnL half by introducing an explicit hand-over
+        # (_collect_realised_candidates); this cleanup half was left scanning
+        # the same dead executors_info snapshot.
+        #
+        # Observed in production: Kraken USD bucket ILLIQUID stuck at 44.7%
+        # for 7 days straight (2026-10-07 to 2026-10-14) with 0 active
+        # executors, blocking every new entry. Affects every bot derived from
+        # this controller (Kraken EUR/USD, Bitget spot/futures, OKX spot), all
+        # of which share this one method.
+        #
+        # Gating both concerns on the same durable ledger claim is deliberate:
+        # if we cannot confirm an executor's closure has been recorded, we
+        # should not release its exposure either. Treating "unconfirmed" as
+        # "still occupied" is the safe direction - a missed trading
+        # opportunity, not an over-exposure.
+        realised_candidates = self._collect_realised_candidates()
+
         # 🔧 CLEANUP: Remove terminated/failed executors from active_coins
         # This prevents "ghost actives" where bot thinks coin is active but it's not
-        for executor in self.executors_info:
+        for executor in realised_candidates:
             status_name = getattr(getattr(executor, "status", None), "name", str(getattr(executor, "status", "")))
             if position_tracking_cleanup_allowed(status_name, executor.is_active):
                 trading_pair = getattr(getattr(executor, "config", None), "trading_pair", None)
@@ -6997,17 +7021,13 @@ class MultiCoinGridController(ControllerBase):
 
         # FIX-002: Track realised PnL for closed executors exactly once.
         #
-        # This used to iterate self.executors_info and filter on TERMINATED.
-        # That never matched: with closed_executors_buffer = 0 the orchestrator
-        # removes a closed executor from active_executors inside the same
-        # strategy tick that publishes the snapshot, so the controller's async
-        # loop effectively never observes the TERMINATED state. The kill switch,
-        # the drawdown tracker and PHANTOM_LOSS_FIX were all dead as a result.
-        #
-        # Candidates now come from an explicit hand-over by the strategy, with
-        # the old snapshot scan kept as a fallback. The durable ledger makes the
+        # Reuses realised_candidates collected above for cleanup (FIX-003) -
+        # _collect_realised_candidates() pops the pending hand-over queue and
+        # consults the durable ledger, so it must only be called once per tick.
+        # Candidates come from an explicit hand-over by the strategy, with the
+        # old snapshot scan kept as a fallback. The durable ledger makes the
         # whole thing exactly-once regardless of which path delivered it.
-        for executor in self._collect_realised_candidates():
+        for executor in realised_candidates:
             if executor is not None:
                 if executor.id not in self._realised_executors_tracked:
                     realised_pnl = Decimal(str(executor.net_pnl_quote))
