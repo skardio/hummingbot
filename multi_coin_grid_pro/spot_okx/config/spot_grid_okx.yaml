@@ -168,8 +168,8 @@ pair_scan_interval_seconds: 300
 max_spread_pct: 0.50             # OKX EU USDC-paren; 0.15 filtert alles weg
 
 # OKX EU-specific fee parameters (VIP0 tier — OKX EU, niet OKX Global)
-okx_maker_fee_pct: 0.002         # 0.20% maker (OKX EU VIP0)
-okx_taker_fee_pct: 0.0035        # 0.35% taker (OKX EU VIP0)
+okx_maker_fee_pct: 0.001         # 0.10% maker (OKX Europe Spot-only VIP0, 2026-09-25)
+okx_taker_fee_pct: 0.002         # 0.20% taker (regular pairs; excludes stablecoin/fee-free pairs)
 
 # OKX rate limiting (generous — 60 orders/sec)
 rate_limit_buffer: 0.8
@@ -338,14 +338,14 @@ regime_coin_selection:
 
 # ==============================================================================
 # FEE-AWARE FILTER
-# OKX VIP0: 0.08% maker + 0.08% maker (limit/grid orders) = 0.16% RT
+# OKX Europe Spot-only VIP0: maker/maker 0.20%, maker/taker 0.30% RT
 # ==============================================================================
 
 fee_aware_filter:
   enabled: true
-  taker_fee_pct: 0.35            # OKX EU VIP0 taker (0.35%)
-  maker_fee_pct: 0.20            # OKX EU VIP0 maker (0.20%)
-  fee_model: best_case           # LIMIT_MAKER (post_only) on OKX → gegarandeerd maker; 0.20+0.20=0.40% RT
+  taker_fee_pct: 0.20            # OKX Europe Spot-only VIP0 taker (0.20%)
+  maker_fee_pct: 0.10            # OKX Europe Spot-only VIP0 maker (0.10%)
+  fee_model: best_case           # Normal grid LIMIT_MAKER/post_only fills: 0.20% RT; other exits may be taker
   min_net_profit_pct: 0.40       # Align met Kraken USD profiel
   hourly_profit_check_enabled: true
   min_profit_per_hour_pct: 0.10  # P10 threshold voor OKX EU (hogere fees)
@@ -364,13 +364,12 @@ idle_mode:
 
 # ==============================================================================
 # ST-12: ECONOMIC EDGE GATE
-# OKX EU: spread (0.50%) - costs (0.20%×2 + 0.03% slippage) = 0.07% edge
-# min_edge_pct gelijk aan Kraken gezien vergelijkbare fee-structuur
+# Fee scenarios: maker/maker 0.20%, maker/taker 0.30%, taker/taker 0.40% RT
 # ==============================================================================
 
 economic_edge_gate:
   enabled: true
-  min_edge_pct: 0.15             # Vergelijkbaar met Kraken (OKX EU fees ~gelijk)
+  min_edge_pct: 0.15             # Existing net edge requirement, unchanged by fee correction
   include_spread_cost: false
   include_slippage_buffer_pct: 0.02  # Very low slippage on OKX (top-3 liquidity)
 
@@ -801,14 +800,14 @@ capital_reserve_pct: 10.0
 
 # Trailing stop:
 #  Activation = 2.0% (above TP-min=1.5%, below TP-max=3%)
-#  Minimum voor positief resultaat: activation > delta + fees = 1.0% + 0.16% = 1.16% ✓
+#  Fee scenario only: delta 1.0% + maker/maker fees 0.20% = 1.20%; not an execution guarantee
 trailing_stop_activation_pct: 0.020   # 2.0% — tussen TP-min (1.5%) en TP-max (3%)
 trailing_stop_delta_pct: 0.010        # 1.0% pullback buffer
 
 # Dynamic TP: scale with ATR
 dynamic_tp_enabled: true
 dynamic_tp_atr_multiplier: 0.60      # 🔧 2026-05-31: 0.35→0.60 (0.35 gaf altijd floor; bij ATR 4% nu 2.4%, bij 6% = 3.6%)
-dynamic_tp_min_pct: 0.020            # 🔧 2026-05-31: 0.015→0.020 (OKX RT fees 0.14% → 2% floor geeft 1.86% netto)
+dynamic_tp_min_pct: 0.020            # Existing 2% floor; maker/maker fees 0.20%, other costs additional
 dynamic_tp_max_pct: 0.04             # 🔧 2026-05-31: 0.03→0.04 (ruimere cap voor volatiele coins)
 
 # Context-Aware Time Exits
@@ -823,7 +822,7 @@ min_win_rate_threshold: 0.35
 pause_cooldown_minutes: 30
 resume_min_pnl_pct: 0.0
 
-min_grid_profit_pct: 1.5             # OKX EU: hogere fees → hogere drempel nodig
+min_grid_profit_pct: 1.5             # Existing profit threshold, unchanged by fee correction
 
 # Crash Protection
 emergency_exit_pct: -5.0
@@ -940,9 +939,9 @@ momentum_sleeve:
 #    - Check: OKX > Assets > Trading Account
 #
 # 3. FEES:
-#    - VIP0: 0.08% maker / 0.10% taker
-#    - Grid orders = limit orders → altijd maker fee
-#    - Roundtrip kosten: 0.08% + 0.08% = 0.16% (vs Bitget 0.20%, Kraken 0.40%)
+#    - OKX Europe Spot-only VIP0: 0.10% maker / 0.20% taker (regular pairs)
+#    - LIMIT_MAKER maps to post_only; plain LIMIT and emergency exits are not guaranteed maker
+#    - Roundtrip: maker/maker 0.20%, maker/taker 0.30%, taker/taker 0.40%
 #
 # 4. RATE LIMITS:
 #    - Spot orders: 60/sec
