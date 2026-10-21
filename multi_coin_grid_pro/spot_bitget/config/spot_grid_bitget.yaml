@@ -1538,7 +1538,7 @@ trailing_stop_delta_pct: 0.010
 dynamic_tp_enabled: true
 dynamic_tp_atr_multiplier: 0.60     # 🔧 2026-05-31: 0.35→0.60 (0.35 gaf altijd floor; bij ATR 4% nu 2.4%, bij 6% = 3.6%)
 dynamic_tp_min_pct: 0.020           # 🔧 2026-05-31: 0.015→0.020 (Bitget RT fees 0.20% → 2% floor geeft 1.8% netto)
-dynamic_tp_max_pct: 0.04            # 🔧 2026-05-31: 0.03→0.04 (ruimere cap voor volatiele coins)
+dynamic_tp_max_pct: 0.020           # 2026-10-21: fixed 2% dynamic TP, subject to grid-step floor
 
 # Context-Aware Time Exits (stall + no fills check)
 time_based_stop_minutes: 360      # 6 hours (grids need time!)

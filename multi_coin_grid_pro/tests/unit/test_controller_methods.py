@@ -240,14 +240,31 @@ class TestGridCreation:
             # Should return False if executor is still active and conditions aren't met
             assert isinstance(result, bool)
 
-    def test_create_grid_action(self, controller, mock_connector):
+    @pytest.mark.parametrize(
+        "connector_name,volatility,min_stop,max_stop,expected_stop",
+        [
+            ("bitget", 0.70, "0.02", "0.05", "0.02"),
+            ("bitget", 1.50, "0.02", "0.05", "0.03"),
+            ("bitget", 4.00, "0.02", "0.05", "0.05"),
+            ("bitget", 0.10, "0.02", "0.05", "0.02"),
+            ("bitget", 0.00, "0.02", "0.05", "0.05"),
+            ("kraken", 0.70, "0.01", "0.02", "0.02"),
+            ("kraken", 1.50, "0.01", "0.02", "0.02"),
+            ("bitget_perpetual", 0.70, "0.02", "0.08", "0.08"),
+            ("bitget_perpetual", 1.50, "0.02", "0.08", "0.08"),
+        ],
+    )
+    def test_create_grid_action(
+        self, controller, mock_connector, connector_name,
+        volatility, min_stop, max_stop, expected_stop,
+    ):
         """Test _create_grid_action method"""
         controller.active_coin = None
         controller.last_grid_price = {}
         controller.connector = mock_connector
         controller.trend_calculator = MagicMock()
         trend = MagicMock()
-        trend.volatility = 0.02
+        trend.volatility = volatility
         trend.current_price = Decimal("2.0")  # Use Decimal, not MagicMock
         trend.price_history = [{"price": Decimal("2.0"), "high": Decimal(
             "2.05"), "low": Decimal("1.95"), "timestamp": 1000}] * 20
@@ -256,12 +273,29 @@ class TestGridCreation:
         controller.trend_calculator.get_trend = MagicMock(return_value=trend)
         controller.bot_start_time = 0  # Set bot start time
         controller.config.min_startup_wait_seconds = 0  # Skip startup delay
+        controller.config.connector_name = connector_name
+        controller.config.use_professional_risk_mgmt = True
+        controller.config.atr_stop_multiplier = 2.0
+        controller.config.min_stop_pct = Decimal(min_stop)
+        controller.config.max_stop_pct = Decimal(max_stop)
+        controller.config.stop_loss_pct = Decimal("0.05")
+        controller.config.use_dynamic_take_profit = False
+        controller.config.take_profit_pct = Decimal("0.05")
+        controller.config.dynamic_tp_enabled = True
+        controller.config.dynamic_tp_min_pct = Decimal("0.020")
+        controller.config.dynamic_tp_max_pct = Decimal("0.020")
 
         action = controller._create_grid_action("XRP-EUR")
 
         assert action is not None
         assert isinstance(action, CreateExecutorAction)
         assert action.executor_config.trading_pair == "XRP-EUR"
+        assert action.executor_config.triple_barrier_config.stop_loss == Decimal(expected_stop)
+        assert action.executor_config.triple_barrier_config.take_profit == Decimal("0.05")
+        assert action.executor_config.activation_bounds == Decimal("0.05")
+        assert action.executor_config.custom_info["atr_pct"] == volatility
+        assert action.executor_config.custom_info["dynamic_tp_min_pct"] == 0.020
+        assert action.executor_config.custom_info["dynamic_tp_max_pct"] == 0.020
 
     def test_create_stop_action(self, controller):
         """Test _create_stop_action method"""

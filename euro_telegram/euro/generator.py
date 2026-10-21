@@ -11,7 +11,7 @@ from .analyzer import EuroAnalyzer
 from .models import Combination, ComboKey
 
 LOGGER = logging.getLogger(__name__)
-Strategy = Literal["hot", "cold"]
+Strategy = Literal["hot", "cold", "random"]
 
 
 DISCLAIMER = (
@@ -32,13 +32,14 @@ class CombinationGenerator:
         exclude_keys: set[ComboKey] | None = None,
         max_attempts: int = 25_000,
     ) -> list[Combination]:
-        main_counts, euro_counts = self.analyzer.number_frequencies()
+        main_counts, _ = self.analyzer.number_frequencies()
+        euro_rates = self.analyzer.euro_number_rates()
         existing = self.analyzer.database.existing_combinations()
 
         main_numbers = list(range(1, 51))
         euro_numbers = list(range(1, 13))
         main_weights = self._weights(main_counts, main_numbers, strategy)
-        euro_weights = self._weights(euro_counts, euro_numbers, strategy)
+        euro_weights = self._weights(euro_rates, euro_numbers, strategy)
 
         generated: list[Combination] = []
         generated_keys: set[ComboKey] = set(exclude_keys or set())
@@ -65,7 +66,7 @@ class CombinationGenerator:
             )
 
         LOGGER.info(
-            "Generated %s %s-bias combinations after %s attempts",
+            "Generated %s combinations (strategy=%s) after %s attempts",
             len(generated),
             strategy,
             attempts,
@@ -74,11 +75,12 @@ class CombinationGenerator:
 
     @staticmethod
     def _weights(counts: pd.Series, values: Sequence[int], strategy: Strategy) -> list[float]:
-        if counts.empty or counts.sum() == 0:
+        if strategy == "random" or counts.empty or counts.sum() == 0:
             return [1.0 for _ in values]
 
         mean_count = float(counts.mean())
-        smoothing = max(mean_count * 0.35, 1.0)
+        # Scale with the series' own units (raw counts or 0-1 rates), not an absolute floor.
+        smoothing = mean_count * 0.35
         weights: list[float] = []
         for value in values:
             count = float(counts.get(value, 0))
@@ -134,27 +136,29 @@ class CombinationGenerator:
 
 
 def generate_hybrid_combinations(generator: CombinationGenerator, count: int = 10) -> list[tuple[str, list[Combination]]]:
-    hot_count = count // 2
-    cold_count = count - hot_count
+    exclude_keys: set[ComboKey] = set()
 
-    hot = generator.generate(count=hot_count, strategy="hot")
-    exclude_keys = {combo.combo_key for combo in hot}
-    cold = generator.generate(count=cold_count, strategy="cold", exclude_keys=exclude_keys)
+    hot = generator.generate(count=count, strategy="hot", exclude_keys=exclude_keys)
+    exclude_keys |= {combo.combo_key for combo in hot}
+
+    cold = generator.generate(count=count, strategy="cold", exclude_keys=exclude_keys)
+    exclude_keys |= {combo.combo_key for combo in cold}
+
+    pure_random = generator.generate(count=count, strategy="random", exclude_keys=exclude_keys)
 
     return [
-        ("Jouw idee - vaker gevallen nummers", hot),
-        ("Huidige idee - minder vaak gevallen nummers", cold),
+        ("Vaker gevallen nummers", hot),
+        ("Minder vaak gevallen nummers", cold),
+        ("Volledig willekeurig", pure_random),
     ]
 
 
 def format_grouped_combinations_message(groups: Sequence[tuple[str, Sequence[Combination]]]) -> str:
     lines = ["Euro combinaties voor deze week:", ""]
-    index = 1
     for title, combinations in groups:
         lines.append(f"{title}:")
         for combo in combinations:
-            lines.append(combo.format_line(index))
-            index += 1
+            lines.append(combo.format_line())
         lines.append("")
     lines.append(DISCLAIMER)
     return "\n".join(lines)

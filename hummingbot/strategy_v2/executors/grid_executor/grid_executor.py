@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+import sys
 from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Union
 
@@ -205,6 +206,11 @@ class GridExecutor(ExecutorBase):
         # US-006: Early Stop Reason Tracking
         # ==============================================================================
         self._early_stop_reason: Optional[EarlyStopReason] = None  # Detailed reason for EARLY_STOP
+        # Observability-only diagnostic note for EARLY_STOP/FAILED closes that have no
+        # dedicated EarlyStopReason value yet (e.g. a stop_action arriving without a
+        # reason, or the external-position-closed detection path). Pure logging aid —
+        # never read by trading/risk logic, never changes close_type semantics.
+        self._exit_diagnostic: Optional[str] = None
         # ==============================================================================
 
         # ==============================================================================
@@ -1974,6 +1980,22 @@ class GridExecutor(ExecutorBase):
         elif self._early_stop_reason is None:
             # Set default reason if none provided
             self._early_stop_reason = EarlyStopReason.UNKNOWN
+            # Observability-only: record who called early_stop() without a reason,
+            # so a reason-less stop is distinguishable post-hoc from a logged
+            # EarlyStopReason. Wrapped defensively — a logging failure here must
+            # never interrupt the actual stop (cancel/close) below.
+            try:
+                try:
+                    caller = sys._getframe(1).f_code.co_name
+                except Exception:
+                    caller = "unknown"
+                self._exit_diagnostic = f"early_stop_no_reason:caller={caller}"
+                self.logger().warning(
+                    f"⚠️  US-006: early_stop() called for {self.config.trading_pair} without an explicit "
+                    f"reason (caller={caller}); recorded as EarlyStopReason.UNKNOWN."
+                )
+            except Exception:
+                pass
 
         mapped_close_type = (
             CloseType.STOP_LOSS
@@ -2230,6 +2252,14 @@ class GridExecutor(ExecutorBase):
                             )
                             order_execution_completed = True
                             self.close_type = CloseType.FAILED  # Mark as failed since we didn't close it ourselves
+                            # Observability-only: this path never sets _early_stop_reason,
+                            # so without this the FAILED close is indistinguishable from
+                            # any other reason-less FAILED close. Pure diagnostic string,
+                            # does not touch close_type or EarlyStopReason semantics.
+                            self._exit_diagnostic = (
+                                f"external_position_closed:tracked={self.position_size_base}_"
+                                f"actual={actual_balance}_{base_asset}"
+                            )
                             # FIX: Reset position to zero since coins are confirmed gone on exchange.
                             # Without this, position_pnl_quote is calculated with stale position_size
                             # and possibly zero mid_price, causing catastrophic PnL miscalculation
@@ -3991,6 +4021,10 @@ class GridExecutor(ExecutorBase):
             # US-006: Early stop reason tracking
             "early_stop_reason": self._early_stop_reason.name if self._early_stop_reason else None,
             "early_stop_reason_code": self._early_stop_reason.value if self._early_stop_reason else None,
+            # Observability-only: free-text diagnostic for EARLY_STOP/FAILED closes
+            # that have no dedicated EarlyStopReason. None when a proper reason was
+            # recorded. Never consumed by trading/risk logic.
+            "exit_diagnostic": self._exit_diagnostic,
         }
 
     async def on_start(self):

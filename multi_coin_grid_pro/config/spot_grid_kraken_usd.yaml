@@ -991,8 +991,8 @@ trailing_stop_delta_pct: 0.010        # 1.0% pullback buffer; fee-aware guard st
 # Dynamic TP: scale take-profit with ATR (volatile coins get wider TP, quiet coins get tighter)
 dynamic_tp_enabled: true
 dynamic_tp_atr_multiplier: 0.60     # 🔧 2026-05-31: 0.35→0.60 (0.35 gaf altijd 2% floor; bij ATR 4% nu 2.4%, bij 6% = 3.6%)
-dynamic_tp_min_pct: 0.025           # 🔧 2026-05-31: 0.020→0.025 (Kraken fees 0.55% RT → 2.5% floor geeft 1.95% netto)
-dynamic_tp_max_pct: 0.05            # 🔧 2026-05-31: 0.04→0.05 (match take_profit_pct ceiling)
+dynamic_tp_min_pct: 0.012           # 2026-10-18: per-level TP floor 1.2%, subject to grid-step floor
+dynamic_tp_max_pct: 0.012           # 2026-10-18: fixed dynamic TP 1.2%, subject to grid-step floor
 
 time_based_stop_minutes: 360
 time_stop_requires_stall: true
@@ -1004,7 +1004,7 @@ min_win_rate_threshold: 0.35
 pause_cooldown_minutes: 30             # 🔧 TUNED 2026-04-03: 120→30 (2h too long; caused death spiral with 641 blocks)
 resume_min_pnl_pct: 0.0
 
-min_grid_profit_pct: 2.0          # 🔧 TUNED 2026-04-03: 1.2→2.0 (must exceed 0.42% RT fees + margin; matches dynamic_tp_min_pct)
+min_grid_profit_pct: 2.5          # 2026-10-18: preserve global net TP at 2.5%
 
 emergency_exit_pct: -3.0     # 🔧 TUNED 2026-04-14: -5%→-3% (bij $5 grid = max -$0.15 verlies, aligned met 3% stop_loss)
 hard_stop_pct: -5.0           # 🔧 TUNED 2026-04-14: -8%→-5% (smaller grids need tighter safety net)
@@ -1117,9 +1117,19 @@ regime_coin_selection:
 
 fee_aware_filter:
   enabled: true
-  taker_fee_pct: 0.35            # 🔧 FIX 2026-05-01: 0.26→0.35 (observed taker fee at <$10k/30d volume tier)
-  maker_fee_pct: 0.20            # 🔧 FIX 2026-05-01: 0.16→0.20 (observed maker fee at <$10k/30d volume tier)
-  fee_model: best_case           # Grid orders use LIMIT_MAKER (post-only) → gegarandeerd maker; maker+maker=0.40% RT
+  # 🔧 FIX 2026-10-17: 0.35/0.20 → 0.30/0.30 (empirisch gemeten uit Kraken
+  # trade-CSV: fee/cost ≈ 0.28-0.30% op ELKE fill, buy en sell, zonder
+  # zichtbare maker/taker-tweedeling. `is_taker` in de fill-data is geen
+  # betrouwbaar kenmerk (zie eerdere analyse), dus een aparte maker/taker-
+  # waarde zou ongefundeerd zijn. Beide velden op de gemeten vlakke waarde
+  # gezet i.p.v. een geraden split.
+  taker_fee_pct: 0.30
+  maker_fee_pct: 0.30
+  # 🔧 FIX 2026-10-17: best_case → average. Met maker==taker is de keuze
+  # tussen best_case/average/worst_case numeriek identiek (alle drie 0.60%
+  # RT) — maar best_case suggereerde een gegarandeerde-maker-aanname die
+  # empirisch niet klopt (zie hierboven). average verwoordt dit eerlijker.
+  fee_model: average
   min_net_profit_pct: 0.3        # Min expected profit after fees
   # V2-04: Expected-Fill Hourly Profit Model
   hourly_profit_check_enabled: false  # false = shadow mode (logs only), true = blocks entry
@@ -1158,9 +1168,11 @@ economic_edge_gate:
 connector_overrides:
   kraken_spot:
     fee_aware_filter:
-      taker_fee_pct: 0.35        # Kraken USD taker fee at <$10k/30d volume
-      maker_fee_pct: 0.20        # Kraken USD maker fee
-      fee_model: best_case       # LIMIT_MAKER (post-only) on Kraken → gegarandeerd maker fills
+      # 🔧 FIX 2026-10-17: mirrors the global fee_aware_filter correction above —
+      # 0.30%/0.30%/average, replacing the unverified 0.35/0.20/best_case split.
+      taker_fee_pct: 0.30
+      maker_fee_pct: 0.30
+      fee_model: average
     economic_edge_gate:
       min_edge_pct: 0.10         # 🔧 US1: raise to 0.25 if fees increase or spread widens
       include_spread_cost: false
@@ -1183,7 +1195,9 @@ close_cooldowns:
 # ==============================================================================
 # US13: ATR-FEE GATE
 # Blocks entry when ATR is too low to cover roundtrip fees.
-# Kraken taker=0.35% maker=0.20% → average RT fee=0.55% → required ATR=1.10% (2.0×)
+# 🔧 FIX 2026-10-17: Kraken taker=0.30% maker=0.30% (empirically measured,
+# see fee_aware_filter above) → RT fee=0.60% (any fee_model, maker==taker
+# now) → required ATR=1.20% (2.0×). Was 1.10% under the old 0.35/0.20 split.
 # ==============================================================================
 atr_fee_gate:
   enabled: true

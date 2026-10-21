@@ -1,0 +1,1296 @@
+# =============================================================================
+# 🧪 TP-TEST CONFIG — TIJDELIJK, NIET DE LIVE CONFIG
+# =============================================================================
+# Kopie van spot_grid_kraken_usd.yaml met UITSLUITEND 3 gewijzigde velden:
+#   dynamic_tp_min_pct : 0.025 -> 0.012
+#   dynamic_tp_max_pct : 0.05  -> 0.012
+#   min_grid_profit_pct: 2.0   -> 2.5
+#
+# ONGEWIJZIGD (bewust): stop_loss_pct, min_stop_pct, max_stop_pct,
+#   trailing_stop_activation_pct, trailing_stop_delta_pct, emergency_exit_pct,
+#   hard_stop_pct, atr_stop_multiplier, alle US-005 PROFIT_LOCK-tiers.
+#
+# GEMETEN EFFECT (echte GridExecutor-code, niet nagerekend):
+#   per-level TP 5.000% -> 1.715-1.800%  (NIET 1.2%: de max(self.step, ..)-vloer
+#                                         bindt, zie rapport punt 2)
+#   globale TP   2.500% -> 2.500%        (ongewijzigd, zoals bedoeld)
+#
+# TERUGDRAAIEN: verwijder dit bestand. De live config is nooit aangeraakt.
+# =============================================================================
+
+# ==============================================================================
+# HYBRID GRID CONFIG v3.3 - USD VARIANT
+# Kraken USD Multi-Coin Grid Bot (separate from EUR instance)
+# Created: 2026-01-17
+# ==============================================================================
+# ⚠️ INSTANCE ISOLATION: This config runs INDEPENDENTLY from EUR bot
+#    - Separate cooldowns DB: data/cooldowns_usd.db
+#    - Separate logs: logs/logs_multi_coin_grid_usd_*.log
+#    - Separate orders/state: no shared executors
+# ==============================================================================
+
+# INSTANCE IDENTIFIER - Used for DB path separation
+instance_id: "usd"                  # 🔑 CRITICAL: Separates state from EUR bot
+
+
+log_level: INFO
+connector_name: kraken
+quote_asset: USD                    # 🔄 CHANGED: EUR → USD
+paper_trading: false                # 💰 LIVE TRADING MODE
+auto_sell_orphaned_positions: true  # 🔧 2026-05-31: sell stranded coins on restart (capped at executor-tracked base)
+
+# ==============================================================================
+# DYNAMIC PAIR DISCOVERY (USD pairs)
+# ==============================================================================
+
+use_dynamic_pair_discovery: true
+max_coins_to_monitor: 30                  # Was 25 → 30 (match met top_n voor orderbook prefetch)
+min_24h_volume_quote: 500000          # Minimum 24h volume in quote currency (USD)
+
+# US-007: Dynamic Pair Manager (two-tier discovery: REST scans all, WebSocket for best)
+use_dynamic_pair_manager: true       # Enable two-tier pair discovery
+pair_scan_interval_seconds: 300      # Interval between REST scans (5 min)
+max_spread_pct: 0.5                  # Maximum bid-ask spread filter
+exclude_expensive_coins: false
+
+blacklist:
+  # Stablecoins (no volatility)
+  - USDT-USD
+  - USDC-USD
+  - DAI-USD
+  - TUSD-USD
+  - USDP-USD
+  - GUSD-USD
+  - PYUSD-USD
+  # Wrapped/pegged assets
+  - WBTC-USD
+  - WETH-USD
+  # Known problematic coins
+  - MON-USD
+  - CCD-USD
+  - FARTCOIN-USD
+  - GIGA-USD
+  - XPL-USD
+  - NIGHT-USD
+  - AB-USD
+  - XT-USD
+  - EURC-USD
+  - TRX-USD
+  - PAXG-USD
+  - SPX-USD
+  - CH-USD
+  - SAPIEN-USD
+  - USELESS-USD
+  # Structural SmartEntry failures (2026-04-29: 337× en 103× rejected, nooit door SmartEntry)
+  - RLS-USD
+  - BLEND-USD
+  - PUMP-USD
+  - WLFI-USD
+  # NL-restricted coins (if applicable)
+  - Q-USD
+  - STBL-USD
+  # Non-existent Kraken USD pairs (cause WebSocket errors)
+  - AUT-USD
+  - AUD-USD
+  - ACU-USD
+  - XNY-USD
+  - CC-USD
+  - ZRO-USD
+  - XCN-USD
+  - VIRTUAL-USD   # Stuck executor - causes infinite retry loop
+  - AAVE-USD      # No orderbook data
+  # HYPE-USD removed from blacklist 2026-05-25: grid loser due to trending, now momentum candidate
+  - NEAR-USD      # No orderbook data
+  - AXS-USD
+  # Poor performers (2026-04-02 session review)
+  - VVV-USD              # illiquid, gap-prone, -10.9% open bag
+  - PTB-USD              # -2.56% margin, too illiquid for grid
+  # Poor performers (2026-04-13 session: -$0.82 from SUI alone = 109% total loss)
+  # SUI-USD removed from blacklist 2026-05-25: trends too hard for GRID but ideal momentum candidate
+  # Catastrophic loss (2026-04-16: -$68.14 ALGO, bought but never sold = EARLY_STOP with 0 sells)
+  - ALGO-USD             # Entire position stuck, close_type=8 with realized_sell=0
+  # Zero-WR + type-8 orphan dominated losses (2026-05-31 analysis: 526 trades, -$493 netto)
+  - PEPE-USD             # 9 trades, 0% WR, -$107 (3× FAILED orphan, sell=0)
+  - UNI-USD              # 3 trades, 0% WR, -$77 (zombie_close deadlock → restart orphan)
+  - ICP-USD              # 10 trades, 0% WR, -$44 (1× FAILED orphan, systematic loser)
+  - 0G-USD               # 3 trades, -$67 (1× FAILED orphan, illiquid pair)
+  - TON-USD              # 7 trades, 43% WR but -$74 all from 2× FAILED orphan; net negative
+  - SOL-USD              # 29 trades, 3.4% WR, -$44 (systematic underperformer, 4× type-8)
+  # Large-cap coins: not grid-trading targets + cause persistent batch update WARNINGs (no_price_in_batch)
+  - ETH-USD              # Too expensive for grid, fails Kraken batch price API
+  - LTC-USD              # Low volatility for grid, fails Kraken batch price API
+  - ZEC-USD              # Low volatility for grid, fails Kraken batch price API
+  - ELX-USD              # Structural SmartEntry fail: spread 1-4% (limit 0.5%) + ATR 11% (limit 7%)
+
+# ==============================================================================
+# ADAPTIVE REGIME DETECTION & FILTERS
+# ==============================================================================
+
+adaptive_regime_detection:
+  enabled: true
+  logging_only: false
+
+  # V2-02: Require N consecutive identical detections before accepting a regime switch.
+  # Prevents flicker. Higher = more stable, slower reaction. 1 = immediate (old behavior).
+  regime_smoothing_count: 3
+
+  # V2-06: Auto BEAR-light — allow 1 grid in shallow BEAR when score > threshold.
+  # Safe default: disabled. Enable only after reviewing live BEAR regime behavior.
+  bear_auto_light_enabled: true       # V2-06: BEAR-light active
+  bear_auto_light_threshold: -5.0    # Score above this = shallow BEAR → allow 1 grid
+  bear_size_multiplier: 0.5          # Position size fraction in BEAR-light (0.5 = 50%)
+
+  bull_score_min: 5.0
+  chop_score_min: -3.0
+  bear_score_max: -3.0
+  min_confidence: 0.65
+
+  bull_min_duration_sec: 1800
+  chop_min_duration_sec: 900
+  bear_min_duration_sec: 1800
+  hysteresis_buffer: 1.0
+
+  log_regime_changes: true
+  log_filter_updates: true
+
+adaptive_filters:
+  baseline:
+    rsi_buy_min: 25.0
+    rsi_buy_max: 72.0       # T3-F3: 68→72 (baseline omhoog, was #1 reject reason)
+    rsi_extreme_min: 18.0
+    vwap_max_deviation_pct: 12.0    # 🔧 TUNED 2026-04-03: 18→12 (stop adverse selection: coins te ver van VWAP zijn extended, niet mean-reversion)
+    max_up_accel_pct: 5.0           # T3-F3: 4→5 (align met smart_entry_filter)
+    max_down_accel_pct: -6.0        # T3-F3: -8→-6 (align met smart_entry_filter)
+    atr_min_pct: 0.15       # 🔧 HF-01 2026-04-04: 1.5→0.15 (1.5% filterde ALLE coins, typische ATR 0.05-0.5%)
+    atr_max_pct: 7.0
+    spike_5m_max_pct: 4.0
+    wick_ratio_min: 0.0
+    grid_spacing_mult: 1.0
+    max_active_grids: 2           # T2.6: 4→2 (match max_simultaneous_coins)
+    entry_confidence_min: 0.60    # T3-F3: 0.65→0.60 (minder restrictief)
+
+  BULL:
+    rsi_buy_max: 76.0       # T3-F3: 72→76 (bull regime is ruimer)
+    vwap_max_deviation_pct: 15.0    # 🔧 TUNED 2026-04-03: 20→15 (bull mag iets ruimer, maar niet 20%)
+    max_up_accel_pct: 5.0           # T3-F3: 3→5
+    max_down_accel_pct: -4.0
+    atr_min_pct: 0.05       # 🔧 FIX: 0.08→0.05
+    spike_5m_max_pct: 3.5
+    max_trend_24h_pct: 25.0  # FIX 2026-05-01: pumps normaal in BULL (baseline=15)
+    max_trend_4h_pct: 5.0    # FIX 2026-05-01: 4h rally OK in BULL (baseline=2.5)
+    grid_spacing_mult: 1.2
+    max_active_grids: 2           # T2.6: 6→2 (match budget)
+    entry_confidence_min: 0.55    # T3-F3: 0.60→0.55
+
+  CHOP:
+    rsi_buy_max: 72.0       # T3-F3: 68→72 (was te restrictief, #1 reject)
+    vwap_max_deviation_pct: 12.0    # T3-F3: 10→12 (iets ruimer)
+    max_up_accel_pct: 2.5           # T3-F3: 1.8→2.5 (iets ruimer)
+    max_down_accel_pct: -3.0        # T3-F3: -2.5→-3.0 (iets ruimer)
+    atr_min_pct: 0.06       # 🔧 FIX: 0.10→0.06 (was too restrictive in quiet markets)
+    spike_5m_max_pct: 2.5
+    max_trend_24h_pct: 15.0  # FIX 2026-05-01: baseline waarde (ranging market)
+    max_trend_4h_pct: 2.5    # FIX 2026-05-01: baseline waarde
+    grid_spacing_mult: 0.8
+    max_active_grids: 2           # T2.6: 3→2 (match budget)
+    entry_confidence_min: 0.65    # T3-F3: 0.75→0.65 (te hoog, blokkeerde te veel)
+
+  BEAR:
+    rsi_buy_max: 66.0       # T3-F3: 62→66 (iets ruimer voor mean-reversion)
+    vwap_max_deviation_pct: 10.0    # T3-F3: 8→10 (iets ruimer)
+    max_up_accel_pct: 2.0           # T3-F3: 1.5→2.0
+    max_down_accel_pct: -3.0        # T3-F3: -2.0→-3.0 (ruimer voor dips)
+    atr_min_pct: 0.08       # 🔧 FIX: 0.15→0.08 (still allow some trades)
+    spike_5m_max_pct: 2.0
+    max_trend_24h_pct: 10.0  # FIX 2026-05-01: strenger in BEAR (al 10% up = extended)
+    max_trend_4h_pct: 2.0    # FIX 2026-05-01: strenger in BEAR
+    grid_spacing_mult: 1.5
+    max_active_grids: 1             # 🔧 FIX: 0→1 (allow 1 grid for mean-reversion)
+    entry_confidence_min: 0.80    # T3-F3: 0.90→0.80
+    bear_allow_meanrev: false    # 🔧 2026-05-20: true→false (bear_auto_light_enabled=true is de actieve BEAR-gate; score-gebaseerd ipv binaire override)
+
+# ==============================================================================
+# GRID SUITABILITY SCORER (Per-Coin Mean-Reversion Fitness)
+# ==============================================================================
+# Scores each coin on how well it suits grid (mean-reversion) trading.
+# Trending coins score low, choppy/bouncy coins score high.
+# Modes: logging_only=true (log but don't filter) or false (actively filter).
+
+grid_suitability:
+  enabled: true
+  logging_only: false            # ACTIVE mode — filters coins below threshold
+  min_grid_score: 0.50           # 0-1 threshold (was 0.30, raised after 13h data)
+  lookback_candles: 48           # 48 × 5min = 4 hours of data
+  range_efficiency_max: 0.70     # Max acceptable range efficiency
+
+# ==============================================================================
+# COIN PROFILES & SMART ENTRY (USD pairs)
+# ==============================================================================
+
+manual_trading_pairs: []  # Dynamic discovery mode
+
+# ==============================================================================
+# MULTI-TIMEFRAME BUY PROTECTION
+# ==============================================================================
+
+use_multi_timeframe_buy: true
+mtf_1h_min_pct: -2.0              # 🔧 FIX: 0→-2 (allow -2% pullback)
+mtf_4h_min_pct: -1.5              # 🔧 FIX: 0→-1.5 (allow -1.5% pullback)
+mtf_24h_min_pct: -2.5
+mtf_declining_1h_max: -4.0
+mtf_declining_4h_max: -2.0
+
+# ==============================================================================
+# WARMUP TREND OVERRIDE
+# ==============================================================================
+
+warmup_override_enabled: true
+warmup_4h_strong_min: -0.5
+warmup_1h_min_if_4h_strong: -1.5
+warmup_max_minutes: 120
+
+# ==============================================================================
+# FEATURE 1.1: MARKET REGIME FILTER - BTC Trend Following
+# ==============================================================================
+
+market_regime:
+  enabled: true
+  btc_symbol: "BTC-USD"             # 🔄 CHANGED: BTC-EUR → BTC-USD
+
+  btc_trend_1h_min_pct: -2.0
+  btc_trend_4h_min_pct: 0.0
+  btc_trend_24h_min_pct: -5.0
+
+  dump_threshold_pct: -5.0
+  dump_pause_minutes: 60
+
+  altcoin_breadth_min_pct: 30.0
+  altcoin_breadth_sample_pairs:     # 🔄 CHANGED: USD pairs
+    - ETH-USD
+    - SOL-USD
+    - BNB-USD
+    - AVAX-USD
+    - LINK-USD
+
+  recovery_threshold_pct: 2.0
+
+# ==============================================================================
+# FEATURE 1.2: TIME-BASED TRADING RULES
+# ==============================================================================
+
+time_based_rules:
+  enabled: false
+
+  low_liquidity_hours: [0, 1, 2]
+  low_liquidity_action: "monitor_only"
+
+  high_liquidity_hours: [13, 14, 15, 16, 17, 18]
+  high_liquidity_bonus_pct: 10.0
+
+  max_total_size_multiplier: 1.2
+
+  weekend_trading_enabled: true
+  weekend_risk_multiplier: 0.5
+
+  low_liquidity_overrides_weekend: true
+
+  holidays: ["2025-12-25", "2026-01-01"]
+  holiday_action: "reduce_size"
+  holiday_risk_multiplier: 0.5
+
+# ==============================================================================
+# FEATURE 1.2b: LIQUIDITY-AWARE SMART SIZING
+# ==============================================================================
+
+liquidity_aware_sizing:
+  enabled: true
+
+  sizing_priority: ["low_liquidity", "holiday", "weekend", "time_bonus", "regime_bonus", "volatility_bonus"]
+  base_size_calculation: "capital_pct_daily"
+
+  cumulative_check_enabled: true
+  cumulative_log_level: "WARNING"
+
+  time_bonus_scalar:
+    high_liquidity: 1.10
+    normal_hours: 1.00
+    low_liquidity: 0.70
+
+  regime_bonus_scalar:
+    strong_bull: 1.15
+    neutral: 1.00
+    weak_bear: 0.60
+
+  volatility_bonus_scalar:
+    high_vol: 0.85
+    normal_vol: 1.00
+    low_vol: 1.10
+
+  max_cumulative_multiplier: 1.20
+
+  log_sizing_calc: true
+  log_format: "JSON"
+
+# ==============================================================================
+# FEATURE 1.3: PERFORMANCE TRACKING
+# ==============================================================================
+
+performance_tracking:
+  enabled: true
+
+  min_win_rate_pct: 45.0
+  min_profit_factor: 1.2
+  min_sharpe_ratio: 0.5
+  max_drawdown_pct: 5.0
+
+  lookback_trades: 20
+  lookback_days: 7
+
+  report_interval_hours: 4
+  save_to_database: true
+
+  track_per_symbol: true
+  min_trades_per_symbol: 3
+
+# ==============================================================================
+# ORDERBOOK DEPTH-BASED LIQUIDITY PROXY
+# ==============================================================================
+
+orderbook_liquidity:
+  enabled: true
+  mode: live
+  regime_aware: true
+  depth_pct_range: 0.5
+  depth_levels: 10
+  min_depth_multiplier: 5.0
+  use_for_ranking: true
+  use_for_entry: true
+  log_depth_metrics: true
+
+# ==============================================================================
+# ORDERBOOK PREFETCH
+# ==============================================================================
+
+orderbook_prefetch:
+  enabled: true
+  mode: live
+  top_n: 30                          # Was 15 → 30 (moet >= max_coins_to_monitor zijn!)
+  max_subscriptions_per_minute: 20
+
+# ==============================================================================
+# SMART ENTRY FILTER v2
+# ==============================================================================
+
+use_smart_entry_filter: true
+
+smart_entry_filter:
+  rsi_buy_max: 65.0              # 🔧 RE-02 2026-04-27: 60→65 (claim niet statistisch onderbouwd, n=13)
+  rsi_extreme_low: 18.0
+  rsi_block_min: 85.0
+
+  vwap_max_deviation_pct: 12.0      # 🔧 TUNED 2026-04-03: 18→12 (align met adaptive baseline, stop adverse selection)
+  min_wick_ratio: 0.0
+
+  max_atr_pct_for_grid: 7.0
+  min_atr_pct_for_grid: 0.15        # 🔧 2026-04-29: 0.30→0.15 fallback (regime override: BULL=0.05, CHOP=0.06, BEAR=0.08 via adaptive_filters)
+
+  max_5m_spike_pct: 4.0
+  max_down_accel_pct: -6.0         # T3-F3: -8→-6 (iets strikter falling knife)
+  max_up_accel_pct: 5.0            # T3-F3: 4→5 (12% rejects waren blow-off accel)
+
+  max_trend_4h_pct: 2.5            # 🔧 RE-01 2026-04: NEW (4h trend >1.2% = 4× worse PnL, cap at 2.5%)
+  max_trend_24h_pct: 15.0          # 🔧 TUNED 2026-04-03: 25→15 (stop trend-chasing: coins +25% in 24h zijn geen grid-candidates)
+  min_trend_24h_pct: -10.0
+
+  max_entry_spread_pct: 0.5        # T3-F3: 0.3→0.5 (25% rejects, Kraken spreads 0.3-0.6%)
+  slippage_check_enabled: true
+
+  min_depth_multiplier: 5.0
+  depth_check_enabled: true
+
+  # EPIC v3.4: MOMENTUM HEALTH GUARDS
+  vwap_slope_guard_enabled: true
+  vwap_slope_guard_shadow_mode: false
+  vwap_slope_dual_confirmation: true
+
+  parabolic_detector_enabled: true
+  parabolic_detector_shadow_mode: false
+  parabolic_cooldown_minutes: 60
+  parabolic_cooldown_persist: true
+
+  market_exhaustion_enabled: true
+  market_exhaustion_threshold_pct: 0.70
+  market_exhaustion_sample_size: 10
+  market_exhaustion_cooldown_min: 30
+  market_exhaustion_telegram: true
+
+  momentum_thresholds:
+    baseline:
+      slope_min_pct_5m: 0.05
+      slope_min_pct_15m: 0.02
+      slope_max_pct_15m: 0.30
+      dev_max_pct: 5.0
+      accel_5m_min_pct: 1.0
+      accel_5m_max_pct: 5.0
+      accel_15m_max_pct: 8.0
+
+    regimes:
+      BULL:
+        slope_min_pct_5m: 0.00
+        slope_min_pct_15m: 0.02
+        slope_max_pct_15m: 0.40
+        dev_max_pct: 8.0
+        accel_5m_max_pct: 7.0
+        accel_15m_max_pct: 12.0
+
+      CHOP:
+        slope_min_pct_5m: 0.05
+        slope_min_pct_15m: 0.03
+        slope_max_pct_15m: 0.25
+        dev_max_pct: 4.0
+        accel_5m_max_pct: 4.0
+        accel_15m_max_pct: 6.0
+
+      BEAR:
+        slope_min_pct_5m: 0.10
+        slope_min_pct_15m: 0.05
+        slope_max_pct_15m: 0.20
+        dev_max_pct: 3.0
+        accel_5m_max_pct: 3.0
+        accel_15m_max_pct: 5.0
+
+# ==============================================================================
+# COIN PROFILES (USD pairs - will be populated as needed)
+# ==============================================================================
+
+coin_profiles:
+
+  ADI-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8           # Kleinere midcap, hogere volatiliteit
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 77.0
+    max_trend_24h_pct: 24.0
+    max_5m_spike_pct: 1.8
+    max_entry_spread_pct: 0.5         # Spread op Kraken ~0.37%, ruimte houden
+
+  ONDO-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7           # RWA midcap, iets stabieler
+    vwap_max_deviation_pct: 12.0
+    rsi_extreme_low: 21.0
+    rsi_block_min: 75.0
+    max_trend_24h_pct: 22.0
+    max_5m_spike_pct: 1.6
+
+  KAT-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5           # Strak: grootste verliezer, alleen rustige markt
+    vwap_max_deviation_pct: 10.0
+    rsi_extreme_low: 22.0
+    rsi_block_min: 70.0               # Vroeg blokkeren bij overbought
+    max_trend_24h_pct: 18.0
+    max_5m_spike_pct: 1.5
+
+  FET-USD:
+    rsi_extreme_low: 20.0
+    rsi_block_min: 76.0
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7           # Strakker: niet beide extreem
+    vwap_max_deviation_pct: 14.0      # Midcap AI
+    max_trend_24h_pct: 25.0
+
+  SUI-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 15.0
+    rsi_extreme_low: 18.0
+    rsi_block_min: 75.0
+    max_trend_24h_pct: 25.0
+
+  TAO-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7           # AI coin - midcap
+    vwap_max_deviation_pct: 14.0      # Midcap AI
+    rsi_extreme_low: 20.0
+    rsi_block_min: 73.0
+    max_trend_24h_pct: 22.0           # AI coins kunnen hard pumpen
+
+  PEPE-USD:
+    rsi_extreme_low: 18.0
+    rsi_block_min: 80.0
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 20.0
+    max_trend_24h_pct: 40.0
+
+  AVAX-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7           # Iets strakker: niet beide extreem
+    vwap_max_deviation_pct: 11.0     # Strakker: L1
+    rsi_extreme_low: 22.0
+    rsi_block_min: 74.0
+    max_trend_24h_pct: 20.0
+
+  LINK-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 9.0      # Strakker: stable oracle
+    rsi_extreme_low: 23.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 18.0
+
+  DOT-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 9.0      # Strakker: stable L1
+    rsi_extreme_low: 22.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 18.0
+
+  # NEAR-USD removed - in blacklist (no orderbook data)
+
+  ATOM-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 10.0     # Strakker: stable cosmos
+    rsi_extreme_low: 22.0
+    rsi_block_min: 71.0
+    max_trend_24h_pct: 18.0
+
+  FTM-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7           # Iets strakker: niet beide extreem
+    vwap_max_deviation_pct: 13.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 75.0
+    max_trend_24h_pct: 22.0
+
+  SOL-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 10.0     # Strakker: large cap
+    rsi_extreme_low: 22.0
+    rsi_block_min: 71.0
+    max_trend_24h_pct: 16.0
+    max_5m_spike_pct: 1.8
+
+  ADA-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 4
+    vwap_max_deviation_pct: 9.0      # Strakker: stable large cap
+    rsi_extreme_low: 23.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 16.0
+
+  XRP-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 9.0      # Strakker: large cap
+    rsi_extreme_low: 22.0
+    rsi_block_min: 71.0
+    max_trend_24h_pct: 18.0
+
+  POL-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 10.0     # Strakker: L2
+    rsi_extreme_low: 22.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 20.0
+
+  LTC-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 4
+    vwap_max_deviation_pct: 8.0      # Strakker: OG stable
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 14.0
+
+  BCH-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 8.0      # Strakker: OG stable
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 14.0
+
+  # PUMP-USD removed - in blacklist
+
+  DYDX-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8           # Iets strakker
+    vwap_max_deviation_pct: 13.0     # Midcap DeFi
+    rsi_extreme_low: 22.0
+    rsi_block_min: 76.0
+    max_trend_24h_pct: 22.0
+
+  XDC-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 10.0     # Strakker
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 18.0
+
+  SNX-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5.0
+    vwap_max_deviation_pct: 10.0
+    rsi_extreme_low: 25.0
+    rsi_block_min: 74.0
+    max_trend_24h_pct: 18.0
+    max_5m_spike_pct: 1.5
+
+  BTC-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 3
+    vwap_max_deviation_pct: 6.0
+    rsi_extreme_low: 25.0
+    rsi_block_min: 68.0
+    max_trend_24h_pct: 10.0
+    max_5m_spike_pct: 1.2
+
+  ETH-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 4
+    vwap_max_deviation_pct: 7.5
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 12.0
+    max_5m_spike_pct: 1.3
+
+  DOGE-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 18.0
+    rsi_extreme_low: 18.0
+    rsi_block_min: 80.0
+    max_trend_24h_pct: 35.0
+    max_5m_spike_pct: 1.8
+
+  SHIB-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 22.0
+    rsi_extreme_low: 17.0
+    rsi_block_min: 82.0
+    max_trend_24h_pct: 40.0
+    max_5m_spike_pct: 2.0
+
+  # AAVE-USD removed - in blacklist (no orderbook data)
+
+  UNI-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 12.0
+    rsi_extreme_low: 22.0
+    rsi_block_min: 75.0
+    max_trend_24h_pct: 18.0
+    max_5m_spike_pct: 1.5
+
+  INJ-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 77.0
+    max_trend_24h_pct: 22.0
+    max_5m_spike_pct: 1.6
+
+  RNDR-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 13.0
+    rsi_extreme_low: 21.0
+    rsi_block_min: 76.0
+    max_trend_24h_pct: 22.0
+    max_5m_spike_pct: 1.6
+
+  ARB-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 78.0
+    max_trend_24h_pct: 25.0
+    max_5m_spike_pct: 1.7
+
+  OP-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 78.0
+    max_trend_24h_pct: 25.0
+    max_5m_spike_pct: 1.7
+
+  SEI-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 16.0
+    rsi_extreme_low: 19.0
+    rsi_block_min: 79.0
+    max_trend_24h_pct: 30.0
+    max_5m_spike_pct: 1.8
+
+  WIF-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 11
+    vwap_max_deviation_pct: 22.0
+    rsi_extreme_low: 17.0
+    rsi_block_min: 84.0
+    max_trend_24h_pct: 45.0
+    max_5m_spike_pct: 2.2
+
+  SAND-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 12.0
+    rsi_extreme_low: 21.0
+    rsi_block_min: 74.0
+    max_trend_24h_pct: 20.0
+
+  QNT-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 9.0
+    rsi_extreme_low: 23.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 16.0
+
+  HBAR-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 10.0
+    rsi_extreme_low: 22.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 18.0
+
+  MANA-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 12.0
+    rsi_extreme_low: 21.0
+    rsi_block_min: 74.0
+    max_trend_24h_pct: 20.0
+
+  PENGU-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 20.0
+    rsi_extreme_low: 17.0
+    rsi_block_min: 82.0
+    max_trend_24h_pct: 40.0
+
+  0G-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 18.0
+    rsi_extreme_low: 18.0
+    rsi_block_min: 80.0
+    max_trend_24h_pct: 35.0
+
+  KTA-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 16.0
+    rsi_extreme_low: 19.0
+    rsi_block_min: 79.0
+    max_trend_24h_pct: 30.0
+
+  SENT-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 77.0
+    max_trend_24h_pct: 24.0
+
+  ALGO-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 9.0
+    rsi_extreme_low: 23.0
+    rsi_block_min: 72.0
+    max_trend_24h_pct: 16.0
+
+  FLR-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 6
+    vwap_max_deviation_pct: 10.0
+    rsi_extreme_low: 22.0
+    rsi_block_min: 73.0
+    max_trend_24h_pct: 18.0
+
+  DASH-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 5
+    vwap_max_deviation_pct: 9.0
+    rsi_extreme_low: 23.0
+    rsi_block_min: 71.0
+    max_trend_24h_pct: 14.0
+
+  BNB-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 4
+    vwap_max_deviation_pct: 8.0
+    rsi_extreme_low: 24.0
+    rsi_block_min: 70.0
+    max_trend_24h_pct: 14.0
+
+  WLD-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 77.0
+    max_trend_24h_pct: 24.0
+
+  ICP-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 7
+    vwap_max_deviation_pct: 12.0
+    rsi_extreme_low: 21.0
+    rsi_block_min: 74.0
+    max_trend_24h_pct: 20.0
+
+  HYPE-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 18.0
+    rsi_extreme_low: 18.0
+    rsi_block_min: 82.0
+    max_trend_24h_pct: 35.0
+
+  BONK-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 10
+    vwap_max_deviation_pct: 22.0
+    rsi_extreme_low: 17.0
+    rsi_block_min: 83.0
+    max_trend_24h_pct: 45.0
+
+  AZTEC-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 9
+    vwap_max_deviation_pct: 15.0
+    rsi_extreme_low: 19.0
+    rsi_block_min: 78.0
+    max_trend_24h_pct: 28.0
+
+  FUN-USD:
+    min_wick_ratio: 0.00
+    max_atr_pct_for_grid: 8
+    vwap_max_deviation_pct: 14.0
+    rsi_extreme_low: 20.0
+    rsi_block_min: 77.0
+    max_trend_24h_pct: 24.0
+
+# ==============================================================================
+# GRID CONFIGURATION
+# ==============================================================================
+
+grid_range_pct_down: 4.0
+grid_range_pct_up: 12.0
+
+num_grids: 3                      # 🔧 FIX: 5→3 ($300/2=$150, 3 grids=$50/level — snelle fill)
+min_grid_level_spacing_pct: 0.80  # 🔧 US12 2026-05-22: 0.60→0.80 (worst_case RT fee 0.42%; 0.80 geeft 0.38% marge, veilig bij taker fill)
+
+use_dynamic_grid_sizer: true
+
+dynamic_grid_sizer:
+  min_grids: 3                    # 🔧 FIX: 4→3 (match num_grids)
+  max_grids: 5                    # 🔧 FIX: 12→5 ($300 budget = max 5 small levels)
+  low_vol_atr_pct: 0.7
+  mid_vol_atr_pct: 2.0
+  high_vol_atr_pct: 4.0
+
+use_atr_grid_ranges: true
+atr_multiplier_down: 1.5
+atr_multiplier_up: 2.0
+
+use_asymmetric_grids: true
+smart_refill_threshold_pct: 3.0
+
+# ==============================================================================
+# TREND ENGINE
+# ==============================================================================
+
+use_multi_timeframe: true
+trend_lookback_short_minutes: 60
+trend_lookback_mid_minutes: 240
+trend_lookback_long_minutes: 1440
+
+switch_threshold_percent: 5.0         # 🔧 TUNED 2026-04-03: 3→5 (hogere bar voor switch, kosten moeten het waard zijn)
+exit_short_threshold: -4.0
+exit_mid_threshold: -3.0
+
+trend_min_change_pct: 0.007
+trend_min_entry_strength: 0.007
+
+# ==============================================================================
+# COIN ROTATION & MONITORING
+# ==============================================================================
+
+coin_rotation_threshold: 180
+pool_membership_cooldown_seconds: 1800  # ST-03: 30 min cooldown voordat coin uit pool mag (voorkom 29× in/uit flipping)
+price_update_interval: 30
+
+max_price_age_ms: 35000
+max_orderbook_age_ms: 60000
+
+max_coin_monitoring_seconds: 600     # T0-Q11: Was 180 (3 min) → 600 (10 min) - coins tijd geven
+session_blacklist_duration_seconds: 7200
+
+coin_discovery_refresh_interval_seconds: 3600
+
+# ==============================================================================
+# CAPITAL & RISK MANAGEMENT (USD - scaled appropriately)
+# ==============================================================================
+# 💡 $300 trading budget (van $1475 exchange balance: rest is long-term coins)
+#    2 slots × $150/coin → 3 grid levels × $50/level
+# ==============================================================================
+
+max_simultaneous_coins: 3             # Aligned met dynamic_slots.max_slots: 3 (CHOP=2, BULL=3)
+                                      # 🔧 US9: Verlaging naar 2 zodra edge bewezen is (→$150/coin)
+
+total_amount_quote: 300             # Origineel: $300 USD budget
+                                    # 🔧 US9: Verlaging naar 200 zodra edge bewezen is (→$100/coin bij 2 slots)
+min_order_amount_quote: 15          # $15 minimum order
+
+risk_reference_balance_quote: 300   # Origineel: $300 referentiebalans
+risk_bucket_limits:                 # Max % van portfolio per bucket (optioneel; weglaten = module defaults)
+  L1: 10.0                          # BTC/ETH -- zelden gehandeld, klein houden
+  L2: 60.0                          # Origineel
+  MEME: 30.0                        # Origineel
+  ILLIQUID: 60.0                    # Max 60% in illiquid
+  BLOCKED: 0.0                      # Nooit handelen
+risk_max_daily_loss_pct: 3           # T0-Q7: Was 30% ("TIJDELIJK" since 2025-02-14) → 3% real limit
+risk_max_balance_per_trade_pct: 55   # Origineel
+risk_max_total_open_risk_pct: 95     # Origineel
+
+max_exposure_per_coin_pct: 55        # Origineel
+max_total_exposure_pct: 95           # Origineel
+
+switch_grace_period_seconds: 600      # 🔧 TUNED 2026-04-03: 180→600 (10 min grace, positie moet zich ontwikkelen)
+
+# ==============================================================================
+# PROFESSIONAL RISK MANAGEMENT
+# ==============================================================================
+
+use_professional_risk_mgmt: true
+
+# T0-Q8: Stop-loss enabled (was null, unbounded losses until -12% emergency)
+stop_loss_pct: 0.015                 # 🔧 TUNED 2026-05-22: 3%→1.5% (XDC-USD run: -2.9% dodged 3% stop, still lost -$1.72)
+atr_stop_multiplier: 1.5            # 🔧 TUNED 2026-04-14: 2.0→1.5 (tighter ATR stop, sneller sluiten)
+min_stop_pct: 0.010                  # 🔧 TUNED 2026-05-22: 1.5%→1.0% (tighter floor, aligned with new stop_loss_pct)
+max_stop_pct: 0.020                   # 🔧 TUNED 2026-05-22: 3%→2.0% (cap aligned with new stop_loss_pct)
+
+take_profit_pct: 0.05
+
+# Item 7: Dynamic TP op basis van trendsterkte (0.70x–1.50x basis-TP)
+use_dynamic_take_profit: true
+min_take_profit_pct: 0.020         # Floor: 2.0%
+max_take_profit_pct: 0.08          # Ceiling: 8%
+
+# Item 4: Daily coin kill switch (-1R = halve size, -2R = disable voor vandaag)
+daily_kill_switch_enabled: true
+r_unit_quote: 5.0                  # 1R = $5
+
+# Item 16: Kapitaalreserve voor beste setups
+capital_reserve_pct: 10.0         # 10% achtergehouden voor hoge-kwaliteit entries
+
+# Trailing TP: lock in profit when price rises past activation, exit if it drops back by delta.
+# 2026-05-07: global TAKE_PROFIT now requires real fee-aware net target first; trailing can wake earlier
+# without the old "tiny positive TP close" problem. Keep delta wider than old 0.5% noise setting.
+trailing_stop_activation_pct: 0.015   # Activeer bij +1.5% net/open P&L zodat winnaars eerder tracked worden
+trailing_stop_delta_pct: 0.010        # 1.0% pullback buffer; fee-aware guard still blocks below break-even
+
+# Dynamic TP: scale take-profit with ATR (volatile coins get wider TP, quiet coins get tighter)
+dynamic_tp_enabled: true
+dynamic_tp_atr_multiplier: 0.60     # 🔧 2026-05-31: 0.35→0.60 (0.35 gaf altijd 2% floor; bij ATR 4% nu 2.4%, bij 6% = 3.6%)
+dynamic_tp_min_pct: 0.012           # 🧪 TP-TEST 2026-10-18: 0.025→0.012 (per-level TP-vloer 1.2%; zie TP-TEST kop)
+dynamic_tp_max_pct: 0.012           # 🧪 TP-TEST 2026-10-18: 0.05→0.012 (gelijk aan min => neutraliseert ATR-unitbug)
+
+time_based_stop_minutes: 360
+time_stop_requires_stall: true
+price_stall_threshold_atr: 0.3
+min_minutes_since_last_fill: 45
+
+min_rolling_pnl_pct: -0.02
+min_win_rate_threshold: 0.35
+pause_cooldown_minutes: 30             # 🔧 TUNED 2026-04-03: 120→30 (2h too long; caused death spiral with 641 blocks)
+resume_min_pnl_pct: 0.0
+
+min_grid_profit_pct: 2.5          # 🧪 TP-TEST 2026-10-18: 2.0→2.5 (houdt GLOBALE TP exact op 2.5% netto)
+
+emergency_exit_pct: -3.0     # 🔧 TUNED 2026-04-14: -5%→-3% (bij $5 grid = max -$0.15 verlies, aligned met 3% stop_loss)
+hard_stop_pct: -5.0           # 🔧 TUNED 2026-04-14: -8%→-5% (smaller grids need tighter safety net)
+
+# ==============================================================================
+# DRAWDOWN / KILL SWITCH
+# ==============================================================================
+
+max_daily_loss_pct: 3.0              # T0-Q7: Was 30% "TIJDELIJK" (13 maanden!) → 3% echte limiet
+max_daily_loss_quote: 9.0           # 🔧 FIX: 120→9 (3% van $300 = $9 max dagverlies)
+max_weekly_loss_pct: 7.0
+max_monthly_loss_pct: 10.0
+
+# ==============================================================================
+# TELEGRAM ALERTS
+# ==============================================================================
+
+telegram:
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+
+# ==============================================================================
+# ORDER MANAGEMENT
+# ==============================================================================
+
+max_open_orders: 20               # 🔧 FIX: 60→20 (2 coins × 5 levels × 2 = 20 voldoende)
+order_frequency: 3
+
+min_switch_interval_seconds: 1800     # 🔧 TUNED 2026-04-03: 600→1800 (30 min cooldown, voorkom rapid-fire switches)
+min_hold_time_seconds: 2700          # 🔧 TUNED 2026-04-14: 7200→2700 (45 min - data toont sweet spot 5-30m, >1h verliesgevend)
+max_hold_time_seconds: 5400          # 🔧 TUNED 2026-04-14: 21600→5400 (90 min hard cap - 2-6h bucket was -$0.40)
+
+# ==============================================================================
+# TREND-AWARE EXIT SYSTEM (Soft/Hard Hold Time)
+# ==============================================================================
+# Prevents "dom verkopen" after fixed time when trend is still bullish
+# After soft_hold: only exit if trend bearish OR pnl too negative
+# After hard_hold: always exit (bag-holder prevention)
+# ==============================================================================
+
+soft_hold_time_seconds: 2700       # 🔧 TUNED 2026-04-14: 7200→2700 (45 min - aligned with sweet spot)
+hard_hold_time_seconds: 5400       # 🔧 TUNED 2026-04-14: 21600→5400 (90 min - trades >1h zijn verliesgevend)
+soft_exit_min_trend_pct: 0.3       # 📈 Trend must be > 0.3% to extend hold
+soft_exit_max_loss_pct: -0.5       # 🔧 TUNED 2026-04-14: -1.0→-0.5 (exit eerder bij verlies, kleine grids)
+soft_exit_extend_seconds: 900      # 🔧 TUNED 2026-04-14: 1800→900 (15 min extend ipv 30, sneller roteren)
+
+no_fill_timeout_sec: 1800            # 🔧 TUNED 2026-04-14: 3600→1800 (30 min - geen fills = dode liquiditeit, cut sneller)
+no_progress_timeout_sec: 2700    # 🔧 TUNED 2026-04-14: 3600→2700 (45 min - aligned met soft_hold sweet spot)
+fee_aware_timeout_bypass_sec: 3600   # 🔧 NEW 2026-05-22: after 60 min the fee-aware guard is lifted (US2)
+                                     #    Rationale: no_progress fires at 45 min, fee-guard may block it;
+                                     #    after 60 min capital efficiency > fee optimisation (max_hold=90 min)
+no_progress_min_loss_pct: 0.5    # 🔧 TUNED 2026-04-03: 1.0→0.5 (cut bags at -0.5%, halves NO_PROGRESS losses)
+no_progress_atr_multiplier: 1.5
+close_grace_sec: 600               # ST-05b: 120→600 (10 min graceful LIMIT orders before aggressive market exit)
+coerce_tp_to_step: true            # Zorg dat TP >= 1 grid-stap (nodig voor coarse step-size exchanges zoals Kraken INJ)
+
+min_startup_wait_seconds: 60
+
+smart_switch_k: 2.0
+switch_cost_multiplier: 3.5           # 🔧 TUNED 2026-04-03: 2.5→3.5 (straf switching zwaarder af, fees + spread zijn reëel)
+
+# ==============================================================================
+# DEBUG TRACE SYSTEM
+# ==============================================================================
+
+debug_trace_enabled: true
+debug_trace_format: compact
+debug_trace_log_accepted: false
+debug_trace_log_rejected: true
+
+# ==============================================================================
+# OBSERVABILITY
+# ==============================================================================
+
+observability:
+  structured_events_enabled: true
+  events_output_dir: "logs/events_usd"  # 🔄 CHANGED: Separate events dir
+  buffer_size: 100
+  why_no_trade_report_enabled: true
+  report_interval_seconds: 3600
+
+# ==============================================================================
+# DYNAMIC SLOT MANAGER
+# ==============================================================================
+
+dynamic_slots:
+  enabled: true
+  min_slots: 1
+  max_slots: 3               # 🔧 FIX: 12→3 ($300 budget = max 2-3 coins)
+  regime_multipliers:
+    BULL: 1.5
+    CHOP: 0.75
+    BEAR: 0.25
+
+# ==============================================================================
+# REGIME-FIRST COIN SELECTION
+# ==============================================================================
+
+regime_coin_selection:
+  bear_allow_trading: false       # Sit out in BEAR regime
+  bear_max_grids: 0
+  chop_use_grid_ranking: true     # CHOP: rank by grid suitability
+  chop_min_trend_pct: 0.001      # Near-zero floor: accept flat/sideways coins
+  chop_max_trend_pct: 3.0        # >3% |trend| = too trendy for grid
+  bull_use_grid_ranking: false    # BULL: rank by trend strength
+
+# ==============================================================================
+# FEE-AWARE FILTER
+# ==============================================================================
+
+fee_aware_filter:
+  enabled: true
+  # 🔧 FIX 2026-10-17: 0.35/0.20 → 0.30/0.30 (empirisch gemeten uit Kraken
+  # trade-CSV: fee/cost ≈ 0.28-0.30% op ELKE fill, buy en sell, zonder
+  # zichtbare maker/taker-tweedeling. `is_taker` in de fill-data is geen
+  # betrouwbaar kenmerk (zie eerdere analyse), dus een aparte maker/taker-
+  # waarde zou ongefundeerd zijn. Beide velden op de gemeten vlakke waarde
+  # gezet i.p.v. een geraden split.
+  taker_fee_pct: 0.30
+  maker_fee_pct: 0.30
+  # 🔧 FIX 2026-10-17: best_case → average. Met maker==taker is de keuze
+  # tussen best_case/average/worst_case numeriek identiek (alle drie 0.60%
+  # RT) — maar best_case suggereerde een gegarandeerde-maker-aanname die
+  # empirisch niet klopt (zie hierboven). average verwoordt dit eerlijker.
+  fee_model: average
+  min_net_profit_pct: 0.3        # Min expected profit after fees
+  # V2-04: Expected-Fill Hourly Profit Model
+  hourly_profit_check_enabled: false  # false = shadow mode (logs only), true = blocks entry
+  min_profit_per_hour_pct: 0.05       # Min expected profit per hour as % of capital per level
+  fills_calibration_factor: 1.0       # Tunable: fills/h = (atr/spacing) × factor
+
+# ==============================================================================
+# ST-11: IDLE MODE
+# Reduces scan frequency when no trading edge is found, saving resources.
+# ==============================================================================
+
+idle_mode:
+  enabled: true
+  no_edge_cycles_to_idle: 10     # Cycles with no edge before entering idle
+  idle_scan_interval_seconds: 120  # Seconds between scans in idle mode
+  normal_scan_interval_seconds: 10  # Normal scan interval (reference only)
+  log_interval_cycles: 5         # Log idle status every N cycles
+
+# ==============================================================================
+# ST-12: ECONOMIC EDGE GATE
+# Blocks grid creation when expected profit per level is too thin.
+# ==============================================================================
+
+economic_edge_gate:
+  enabled: true
+  min_edge_pct: 0.10             # Min expected edge after all costs
+  include_spread_cost: false     # 🔧 FIX 2026-05-02: disabled (spread cost was 0.275% extra; total now 0.60% vs 1.10%)
+  include_slippage_buffer_pct: 0.05  # Slippage buffer to subtract
+
+# ==============================================================================
+# US1: PER-CONNECTOR FEE + EDGE OVERRIDES
+# Allows fine-tuning fee model and min edge per exchange without changing globals.
+# Values here merge on top of the global fee_aware_filter / economic_edge_gate.
+# ==============================================================================
+
+connector_overrides:
+  kraken_spot:
+    fee_aware_filter:
+      # 🔧 FIX 2026-10-17: mirrors the global fee_aware_filter correction above —
+      # 0.30%/0.30%/average, replacing the unverified 0.35/0.20/best_case split.
+      taker_fee_pct: 0.30
+      maker_fee_pct: 0.30
+      fee_model: average
+    economic_edge_gate:
+      min_edge_pct: 0.10         # 🔧 US1: raise to 0.25 if fees increase or spread widens
+      include_spread_cost: false
+      include_slippage_buffer_pct: 0.05
+    min_grid_level_spacing_pct: 0.80  # 🔧 US12 2026-05-22: 0.60→0.80 (fee-realistisch; zie US12)
+
+# ==============================================================================
+# ENHANCED CLOSE COOLDOWNS
+# ==============================================================================
+
+close_cooldowns:
+  failed_sec: 21600              # 6h cooldown after FAILED
+  early_stop_sec: 10800          # 3h cooldown after EARLY_STOP
+  stop_loss_sec: 21600           # 🔧 US15 2026-05-22: 6h cooldown after STOP_LOSS (markt sloeg hard terug)
+  no_progress_sec: 3600          # 1h cooldown after timeout
+  take_profit_sec: 7200          # 2h cooldown after TAKE_PROFIT (prevents re-entry trap)
+  loss_streak_multiplier: 1.5    # Escalate cooldown per consecutive loss
+  max_streak_before_blacklist: 2  # 🔧 US11 2026-05-22: 3→2 (2 opeenvolgende verliezen = voldoende bewijs)
+
+# ==============================================================================
+# US13: ATR-FEE GATE
+# Blocks entry when ATR is too low to cover roundtrip fees.
+# 🔧 FIX 2026-10-17: Kraken taker=0.30% maker=0.30% (empirically measured,
+# see fee_aware_filter above) → RT fee=0.60% (any fee_model, maker==taker
+# now) → required ATR=1.20% (2.0×). Was 1.10% under the old 0.35/0.20 split.
+# ==============================================================================
+atr_fee_gate:
+  enabled: true
+  min_atr_fee_multiplier: 2.0   # ATR must be >= 2× roundtrip fee
+  # fee_model/taker_fee_pct/maker_fee_pct read from fee_aware_filter (connector_overrides)
+
+# ==============================================================================
+# ATR COIN SELECTION
+# prefilter_ratio=0.75 → soft threshold = 1.10% × 0.75 = 0.825%
+# ==============================================================================
+atr_coin_selection:
+  enabled: true
+  prefilter_ratio: 0.50         # soft threshold = required_atr × ratio (1.10% × 0.50 = 0.55%)
+  use_as_ranking_signal: true
+
+# ==============================================================================
+# US16: RE-ENTRY PRICE GUARD
+# Blocks re-entry when current price has dropped significantly since last exit.
+# ==============================================================================
+reentry_price_guard:
+  enabled: true
+  max_drop_below_last_exit_pct: 0.50  # Block if price dropped > 0.50% vs last exit mid-price
+  apply_after_close_types:
+    - TAKE_PROFIT
+    - STOP_LOSS
+    - EARLY_STOP
+
+# ==============================================================================
+# REGIME-BASED TIMEOUTS
+# ==============================================================================
+
+regime_timeouts:
+  bull_no_progress_sec: 7200     # 2h - trending coins need time
+  chop_no_progress_sec: 5400     # 1.5h - should bounce within window
+  bear_no_progress_sec: 3600     # 1h - faster cuts in bear
+  bull_no_fill_sec: 5400         # 1.5h
+  chop_no_fill_sec: 3600         # 1h
+  bear_no_fill_sec: 2400         # 40m
+
+# ==============================================================================
+# MOMENTUM SLEEVE (Fase 2 — detect-only, geen orders)
+# ==============================================================================
+
+momentum_sleeve:
+  mode: paper                           # detect_only | paper | live
+  enabled: true
+  # --- paper/live trading params eersttest met source ~/.venvs/bot/bin/activate && python analyze_momentum_paper.py --since 1000 ---
+  max_positions: 1
+  max_quote_per_position: 25
+  min_score: 75
+  stop_loss_pct: 0.012
+  take_profit_pct: 0.020
+  trailing_activation_pct: 0.012
+  trailing_distance_pct: 0.008
+  max_hold_minutes: 90
+  cooldown_minutes: 60
+  summary_interval_minutes: 60
+  # --- scoring gate params (used by MomentumCandidateScorer) ---
+  min_score_to_enter: 55
+  momentum_1h_min_pct: 0.5
+  momentum_4h_min_pct: 1.0
+  momentum_max_rsi: 80
+  momentum_min_volume_expansion: 1.0   # Verlaagd van 1.2 → 1.0: in CHOP is volume flat, niet uitbreidend
+  momentum_regime_gate:
+    - BULL
+    - CHOP
+  momentum_max_spread_pct: 0.5
+  momentum_max_wick_risk: 0.7
+  rejected_log_throttle_seconds: 300
+  scorer_weights:
+    trend_1h: 0.25
+    trend_4h: 0.30
+    volume_expansion: 0.20
+    relative_strength: 0.15
+    spread: 0.05
+    rsi_wick_risk: 0.05

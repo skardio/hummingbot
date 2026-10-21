@@ -10857,18 +10857,23 @@ class MultiCoinGridController(ControllerBase):
                 trend = self.trend_calculator.get_trend(symbol)
 
                 if trend and trend.volatility and trend.volatility > 0:
-                    # Volatility is rolling std dev as decimal (e.g., 0.035 = 3.5%)
                     volatility_pct = float(trend.volatility)
+                    # Normalize only the Bitget Spot SL input; preserve TP and other connectors.
+                    stop_volatility = (
+                        volatility_pct / 100
+                        if self.config.connector_name == "bitget"
+                        else volatility_pct
+                    )
                     multiplier = float(getattr(self.config, 'atr_stop_multiplier', 2.0))
                     min_stop = float(getattr(self.config, 'min_stop_pct', 0.02))
                     max_stop = float(getattr(self.config, 'max_stop_pct', 0.05))
 
                     # Calculate: clamp(volatility × multiplier, min, max)
-                    calculated_stop = volatility_pct * multiplier
+                    calculated_stop = stop_volatility * multiplier
                     dynamic_stop = max(min_stop, min(calculated_stop, max_stop))
 
                     dynamic_stop_loss_pct = Decimal(str(dynamic_stop))
-                    atr_info = f" (volatility: {volatility_pct * 100:.2f}% × {multiplier} = {calculated_stop * 100:.2f}%, clamped to {dynamic_stop * 100:.2f}%)"
+                    atr_info = f" (volatility: {stop_volatility * 100:.2f}% × {multiplier} = {calculated_stop * 100:.2f}%, clamped to {dynamic_stop * 100:.2f}%)"
 
                     self.logger().info(
                         f"✅ Dynamic stop for {symbol}: -{dynamic_stop_loss_pct * 100:.2f}%{atr_info}"

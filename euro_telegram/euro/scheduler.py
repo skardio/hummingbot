@@ -20,13 +20,16 @@ VALID_DAYS = {
 
 
 def run_weekly(run_day: str, run_time: str, job: Callable[[], None]) -> None:
-    day = run_day.lower().strip()
-    if day not in VALID_DAYS:
-        raise ValueError(f"RUN_DAY must be one of {sorted(VALID_DAYS)}, got {run_day!r}")
+    days = [part.strip().lower() for part in run_day.split(",") if part.strip()]
+    invalid = [day for day in days if day not in VALID_DAYS]
+    if invalid or not days:
+        raise ValueError(
+            f"RUN_DAY must be one or more comma-separated values from {sorted(VALID_DAYS)}, got {run_day!r}"
+        )
 
-    scheduled_job = getattr(schedule.every(), day)
-    scheduled_job.at(run_time).do(job)
-    LOGGER.info("Scheduler started: every %s at %s", day, run_time)
+    for day in days:
+        getattr(schedule.every(), day).at(run_time).do(job)
+    LOGGER.info("Scheduler started: every %s at %s", ", ".join(days), run_time)
 
     while True:
         schedule.run_pending()

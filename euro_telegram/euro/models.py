@@ -28,7 +28,7 @@ class Combination:
     def combo_key(self) -> ComboKey:
         return (tuple(sorted(self.main_numbers)), tuple(sorted(self.euro_numbers)))
 
-    def format_line(self, index: int) -> str:
+    def format_line(self) -> str:
         main = ", ".join(str(n) for n in self.main_numbers)
         euro = ", ".join(str(n) for n in self.euro_numbers)
-        return f"{index}. {main} | {euro}"
+        return f"{main} | {euro}"
