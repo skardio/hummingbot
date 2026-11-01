@@ -3,7 +3,7 @@ import logging
 import math
 import sys
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.core.data_type.common import OrderType, PositionAction, PriceType, TradeType
@@ -4942,6 +4942,10 @@ class GridExecutor(ExecutorBase):
         ])
         self.realized_fees_quote = self.realized_buy_fees_quote + self.realized_sell_fees_quote
 
+        # Buy fee charged in the base token (deduct_base_fees) is already netted out of the
+        # quantity we sell, so it is embedded in (sell - buy); it is still registered as a fee.
+        base_fee_base, base_fee_quote = self._buy_base_fee_deducted(regular_filled_orders)
+
         # Residual-dust correction: when step-size quantization leaves a tiny
         # unsellable base residual (< min_order_size), remove its proportional
         # cost from realized_buy_size_quote so TAKE_PROFIT PnL is not negative.
@@ -4954,16 +4958,18 @@ class GridExecutor(ExecutorBase):
                 Decimal(order["executed_amount_base"])
                 for order in regular_filled_orders if order["trade_type"] == TradeType.SELL.name
             )
-            residual_base = total_buy_base - total_sell_base
+            residual_base = total_buy_base - base_fee_base - total_sell_base
             min_order_size = self.trading_rules.min_order_size
             if Decimal("0") < residual_base < min_order_size:
                 avg_entry = self.realized_buy_size_quote / total_buy_base
                 residual_cost = residual_base * avg_entry
                 self.realized_buy_size_quote -= residual_cost
 
+        # Cost of the units actually received; fees stay fully registered, so gross = net + fees
+        # is the pure price-move result for both base-fee (Bitget) and quote-fee (Kraken) exchanges.
         self.realized_pnl_quote = self.calculate_realized_net_pnl(
             realized_sell_quote=self.realized_sell_size_quote,
-            realized_buy_quote=self.realized_buy_size_quote,
+            realized_buy_quote=self.realized_buy_size_quote - base_fee_quote,
             realized_buy_fees_quote=self.realized_buy_fees_quote,
             realized_sell_fees_quote=self.realized_sell_fees_quote,
         )
@@ -4971,6 +4977,23 @@ class GridExecutor(ExecutorBase):
             self.realized_pnl_quote / self.realized_buy_size_quote
             if self.realized_buy_size_quote > 0 else Decimal("0")
         )
+
+    def _buy_base_fee_deducted(self, orders: list) -> Tuple[Decimal, Decimal]:
+        """Base-token buy fees withheld from received units (deduct_base_fees): (base units, quote value)."""
+        if not getattr(getattr(self, "config", None), "deduct_base_fees", False):
+            return Decimal("0"), Decimal("0")
+        fee_base = fee_quote = Decimal("0")
+        for order in orders:
+            if order["trade_type"] != TradeType.BUY.name:
+                continue
+            base_asset = order["trading_pair"].split("-")[0]
+            for fill in (order.get("order_fills") or {}).values():
+                for flat_fee in (fill.get("fee") or {}).get("flat_fees") or []:
+                    if flat_fee.get("token") == base_asset:
+                        amount = Decimal(str(flat_fee["amount"]))
+                        fee_base += amount
+                        fee_quote += amount * Decimal(str(fill["fill_price"]))
+        return fee_base, fee_quote
 
     def _reset_metrics(self):
         """Helper method to reset all PnL metrics"""

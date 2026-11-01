@@ -18,6 +18,7 @@ cd /home/mo/repos/hummingbot
 
 python -m euro refresh
 python -m euro bot
+python -m euro generate --count 10
 
 
 source ~/.venvs/bot/bin/activate
@@ -27,6 +28,10 @@ bin/hummingbot.py
 
 instaleer package:
 sudo apt install ./code_1.139.1-1790309529_amd64.deb
+
+ls je VS Code via Ubuntu, Debian of Linux Mint met APT hebt geïnstalleerd, kun je meestal gewoon updaten met:
+sudo apt update
+sudo apt install --only-upgrade code
 
 Dit is een Euro-analyse- en Telegrambot. Het programma:
 
