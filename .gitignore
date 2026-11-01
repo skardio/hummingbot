@@ -45,7 +45,11 @@ __pycache__
 **/.DS_Store
 portfolio_value.csv
 /notebooks
-/data
+# Negeer de inhoud van data, behalve twee databases
+/data/*
+!/data/spot_grid_bitget.sqlite
+!/data/multi_coin_grid_v2_usd.sqlite
+
 debug.log
 /installation/docker-commands/hummingbot_files
 
