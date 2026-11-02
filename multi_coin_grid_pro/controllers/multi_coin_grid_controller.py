@@ -104,6 +104,12 @@ from multi_coin_grid_pro.persistence.entry_price_store import EntryPriceStore
 
 # FIX-002: exactly-once realised PnL propagation
 from multi_coin_grid_pro.persistence.realised_pnl_ledger import RealisedPnlLedger
+from multi_coin_grid_pro.persistence.regime_telemetry import (
+    EXIT_NOT_OBSERVED_RESTART,
+    get_regime_store,
+    publish_regime,
+    publish_regime_failure,
+)
 from multi_coin_grid_pro.risk.pnl_tracker import RealtimePnLTracker
 
 # US-005: Professional Risk Management
@@ -2049,9 +2055,32 @@ class MultiCoinGridController(ControllerBase):
                 except Exception as e:
                     self.logger().warning(f"⚠️  Feature 1.1 initialization failed: {e}")
 
+    def _regime_bot_key(self) -> str:
+        # Same key the executors read from custom_info['bot_instance_id']
+        return str(getattr(self.config, 'instance_id', None) or self.config.controller_name)
+
+    def _init_regime_telemetry(self) -> None:
+        """Mark exits lost to a previous process and publish an explicit state when no detector runs."""
+        try:
+            store = get_regime_store()
+            if store is not None:
+                lost = store.mark_unobserved_exits(self._regime_bot_key(), self.config.connector_name)
+                if lost:
+                    self.logger().warning(
+                        f"[REGIME_TELEMETRY] {lost} executor(s) of a previous run have no observed exit "
+                        f"(exit_state={EXIT_NOT_OBSERVED_RESTART})"
+                    )
+            if not self.regime_detector:
+                publish_regime_failure(
+                    self._regime_bot_key(), "regime_detector", "regime detector disabled or unavailable",
+                    float(self.market_data_provider.time()))
+        except Exception as e:
+            self.logger().warning(f"[REGIME_TELEMETRY] init failed (trading unaffected): {e}")
+
     async def on_start(self):
         """Override to log when control_loop starts"""
         self.logger().info("🚀 Controller.on_start() called - control_loop is starting!")
+        self._init_regime_telemetry()
 
         # Story 10: Load active cooldowns from database on startup
         if self.cooldown_store:
@@ -3072,6 +3101,11 @@ class MultiCoinGridController(ControllerBase):
                     # Story 6 Part 2: Cache smoothed regime for momentum guards
                     self._last_detected_regime = accepted_regime
                     self._last_regime_score = regime_state.score  # V2-06: cache raw score
+                    publish_regime(
+                        self._regime_bot_key(), accepted_regime,
+                        f"regime_detector:{getattr(self, '_last_regime_input_source', None) or 'unknown'}/"
+                        f"{getattr(self, '_last_regime_input_pair', None) or 'unknown'}",
+                        float(self.market_data_provider.time()), float(regime_state.score))
 
                     regime_changed = accepted_regime != self._last_logged_regime
                     if regime_changed:
@@ -3125,8 +3159,16 @@ class MultiCoinGridController(ControllerBase):
                             self._apply_adaptive_filters(active_filters)
                             if regime_changed:
                                 self.logger().info("✅ Adaptive filters applied to SmartEntry")
+                else:
+                    publish_regime_failure(
+                        self._regime_bot_key(), "regime_detector",
+                        "detection returned no regime (no trend input or detector error)",
+                        float(self.market_data_provider.time()))
             except Exception as e:
                 self.logger().error(f"❌ Regime detection error: {e}")
+                publish_regime_failure(
+                    self._regime_bot_key(), "regime_detector", f"detection error: {e}",
+                    float(self.market_data_provider.time()))
 
         # ===== FEATURE 1.3: PERIODIC PERFORMANCE REPORTING =====
         if self.performance_tracker:
@@ -11532,6 +11574,7 @@ class MultiCoinGridController(ControllerBase):
                 "soft_risk_shadow_logging_enabled": bool(getattr(self.config, 'soft_risk_shadow_logging_enabled', True)),
                 "soft_risk_state_enabled": bool(getattr(self.config, 'soft_risk_state_enabled', False)),
                 "soft_risk_baseline_fills": int(getattr(self.config, 'soft_risk_baseline_fills', 4)),
+                "regime_telemetry_max_age_sec": float(getattr(self.config, 'regime_telemetry_max_age_seconds', 300)),
                 # FASE 1C: observational-only, independent from soft_risk_baseline_fills.
                 "post_fill_sampling_start_fill": int(getattr(self.config, 'post_fill_sampling_start_fill', 3)),
             }

@@ -51,6 +51,19 @@ try:
 except ImportError:
     HAS_FILL_RISK_STORE = False
 
+# Regime telemetry (observation only; never read by trading decisions)
+try:
+    from multi_coin_grid_pro.persistence.regime_telemetry import (
+        DEFAULT_MAX_AGE_SEC as _REGIME_DEFAULT_MAX_AGE_SEC,
+        ExecutorRef as _RegimeExecutorRef,
+        get_regime_store as _get_regime_store,
+        headline as _regime_headline,
+        observe_regime as _observe_regime_snapshot,
+    )
+    HAS_REGIME_TELEMETRY = True
+except ImportError:
+    HAS_REGIME_TELEMETRY = False
+
 _fill_risk_store_singleton = None  # lazily created, one per process, shared db file across all 4 spot bots
 
 
@@ -261,6 +274,8 @@ class GridExecutor(ExecutorBase):
         self._post_fill_last_sample_ts: float = 0.0
         self._post_fill_final_snapshot_written: bool = False
         # ==============================================================================
+
+        self._ensure_regime_state()
 
     @property
     def is_perpetual(self) -> bool:
@@ -1679,6 +1694,7 @@ class GridExecutor(ExecutorBase):
         # _post_fill_final_snapshot_written makes this safe to call alongside stop().
         if self.status == RunnableStatus.TERMINATED:
             self._maybe_sample_post_fill_risk(force_final=True)
+            self._record_regime_exit()
         if self.status == RunnableStatus.RUNNING:
             # Story A1: Check timeout triggers FIRST (before triple barrier)
             if self._check_timeout_triggers():
@@ -1996,6 +2012,8 @@ class GridExecutor(ExecutorBase):
                 )
             except Exception:
                 pass
+
+        self._record_regime_exit_decision()
 
         mapped_close_type = (
             CloseType.STOP_LOSS
@@ -3991,9 +4009,12 @@ class GridExecutor(ExecutorBase):
         # Preserve entry_* fields from config.custom_info (set by controller at creation)
         initial_info = self.config.custom_info or {}
         entry_fields = {k: v for k, v in initial_info.items() if k.startswith("entry_")}
+        self._ensure_regime_state()
 
         return {
             **entry_fields,
+            **self._regime_entry,
+            **self._regime_exit,
             "side": self.config.side,
             "levels_by_state": {
                 key.name: [self._serialize_grid_level(lvl) for lvl in value]
@@ -4262,6 +4283,8 @@ class GridExecutor(ExecutorBase):
         # STORY A1: Update last_fill_timestamp (any fill = activity)
         self._last_fill_timestamp = self._strategy.current_timestamp
 
+        self._record_regime_fill(event)
+
     def process_order_completed_event(self, _, market, event: Union[BuyOrderCompletedEvent, SellOrderCompletedEvent]):
         """
         This method is responsible for processing the order completed event. Here we will check if the id is one of the
@@ -4297,6 +4320,155 @@ class GridExecutor(ExecutorBase):
         if self._close_order and self._close_order.order_id == order_id:
             return True
         return False
+
+    # Class-level defaults: executors built without __init__ (tests, subclasses) stay safe
+    _regime_buy_seq: int = 0
+    _regime_exit_decision_done: bool = False
+    _regime_exit_recorded: bool = False
+
+    def _ensure_regime_state(self) -> None:
+        if "_regime_entry" not in self.__dict__:
+            self._regime_buy_keys = set()
+            self._regime_sell_keys = set()
+            self._regime_entry = {}
+            self._regime_exit = {}
+
+    def _regime_context(self):
+        custom_info = self.config.custom_info or {}
+        bot_key = str(custom_info.get("bot_instance_id", self.config.connector_name))
+        ref = _RegimeExecutorRef(str(self.config.id), self.config.connector_name, bot_key, self.config.trading_pair)
+        max_age = float(custom_info.get("regime_telemetry_max_age_sec", _REGIME_DEFAULT_MAX_AGE_SEC))
+        return ref, bot_key, max_age
+
+    def _observe_regime(self, event_time: float):
+        ref, bot_key, max_age = self._regime_context()
+        return ref, _observe_regime_snapshot(bot_key, event_time, max_age)
+
+    @staticmethod
+    def _regime_headline(obs) -> Tuple[str, str]:
+        return _regime_headline(obs)
+
+    def _warn_regime_not_valid(self, label: str, obs) -> None:
+        if obs.status != "VALID":
+            self.logger().warning(
+                f"[REGIME_TELEMETRY] {label} executor={self.config.id} pair={self.config.trading_pair} "
+                f"regime_status={obs.status} reason={obs.reason}"
+            )
+
+    def _record_regime_fill(self, event) -> None:
+        """Regime telemetry per real fill (BUY: RegimeBuyFill row, SELL: last-sell marker). Idempotent, never raises."""
+        if not HAS_REGIME_TELEMETRY:
+            return
+        self._ensure_regime_state()
+        try:
+            if not self._order_belongs_to_this_executor(event.order_id):
+                return
+            fill_ts = float(event.timestamp)
+            fill_key = event.exchange_trade_id or f"{fill_ts}:{event.price}:{event.amount}"
+            dedup_key = (event.order_id, fill_key)
+            store = _get_regime_store()
+            if event.trade_type == TradeType.BUY:
+                if dedup_key in self._regime_buy_keys:
+                    return
+                self._regime_buy_keys.add(dedup_key)
+                self._regime_buy_seq += 1
+                ref, obs = self._observe_regime(fill_ts)
+                headline, reason = self._regime_headline(obs)
+                is_first = self._regime_buy_seq == 1
+                if is_first:
+                    self._regime_entry = {
+                        "entry_regime": headline,
+                        "entry_regime_status": obs.status,
+                        "entry_regime_source": obs.source,
+                        "entry_regime_timestamp": obs.regime_timestamp,
+                        "entry_fill_timestamp": fill_ts,
+                    }
+                if store is not None:
+                    store.record_buy_fill(
+                        ref, event.order_id, fill_key, self._regime_buy_seq, fill_ts, float(event.price),
+                        float(event.amount), obs, is_first_buy=is_first)
+                self.logger().info(
+                    f"[REGIME_AT_BUY] executor={ref.executor_id} exchange={ref.exchange} pair={ref.trading_pair} "
+                    f"order_id={event.order_id} fill_key={fill_key} seq={self._regime_buy_seq} "
+                    f"fill_ts={fill_ts} price={float(event.price):.8f} amount={float(event.amount):.8f} "
+                    f"regime={obs.regime} status={obs.status} source={obs.source} "
+                    f"regime_ts={obs.regime_timestamp} age={obs.age_sec}"
+                )
+                self._warn_regime_not_valid("buy", obs)
+            elif event.trade_type == TradeType.SELL:
+                if dedup_key in self._regime_sell_keys:
+                    return
+                self._regime_sell_keys.add(dedup_key)
+                ref, obs = self._observe_regime(fill_ts)
+                headline, _ = self._regime_headline(obs)
+                if fill_ts >= float(self._regime_exit.get("last_sell_fill_timestamp", 0.0)):
+                    self._regime_exit["last_sell_fill_timestamp"] = fill_ts
+                    self._regime_exit["last_sell_fill_regime"] = headline
+                    self._regime_exit["last_sell_fill_regime_status"] = obs.status
+                if store is not None:
+                    store.record_sell_fill(ref, fill_ts, obs)
+        except Exception as e:
+            self.logger().warning(f"[REGIME_TELEMETRY] fill registration failed (trading unaffected): {e}")
+
+    def _record_regime_exit_decision(self) -> None:
+        """Regime when the controller decided to stop this executor (first early_stop() call only)."""
+        if not HAS_REGIME_TELEMETRY or self._regime_exit_decision_done:
+            return
+        self._ensure_regime_state()
+        self._regime_exit_decision_done = True
+        try:
+            now = float(self._strategy.current_timestamp)
+            ref, obs = self._observe_regime(now)
+            headline, _ = self._regime_headline(obs)
+            reason = self._early_stop_reason.name if self._early_stop_reason else "UNKNOWN"
+            self._regime_exit.update({
+                "exit_decision_regime": headline,
+                "exit_decision_regime_status": obs.status,
+                "exit_decision_timestamp": now,
+                "exit_decision_reason": reason,
+            })
+            store = _get_regime_store()
+            if store is not None:
+                store.record_exit_decision(ref, now, obs, reason)
+        except Exception as e:
+            self.logger().warning(f"[REGIME_TELEMETRY] exit-decision registration failed (trading unaffected): {e}")
+
+    def _record_regime_exit(self) -> None:
+        """Regime at the real close of the executor (terminal state), once, with close reason and SELL evidence."""
+        if not HAS_REGIME_TELEMETRY or self._regime_exit_recorded:
+            return
+        self._ensure_regime_state()
+        self._regime_exit_recorded = True
+        try:
+            now = float(self._strategy.current_timestamp)
+            ref, obs = self._observe_regime(now)
+            headline, reason = self._regime_headline(obs)
+            close_type = self.close_type.name if self.close_type else "UNKNOWN"
+            close_reason = (self._early_stop_reason.name if self._early_stop_reason else None) \
+                or self._exit_diagnostic or ""
+            realized_sell = float(self.realized_sell_size_quote or 0)
+            had_sell = bool(self._regime_sell_keys) or realized_sell > 0
+            self._regime_exit.update({
+                "exit_regime": headline,
+                "exit_regime_status": obs.status,
+                "exit_regime_source": obs.source,
+                "exit_regime_timestamp": obs.regime_timestamp,
+                "exit_timestamp": now,
+                "exit_close_type": close_type,
+                "exit_had_sell_fill": had_sell,
+            })
+            store = _get_regime_store()
+            if store is not None:
+                store.record_exit(ref, now, obs, close_type, close_reason, had_sell, realized_sell)
+            self.logger().info(
+                f"[REGIME_AT_EXIT] executor={ref.executor_id} exchange={ref.exchange} pair={ref.trading_pair} "
+                f"exit_ts={now} close_type={close_type} close_reason={close_reason} had_sell_fill={had_sell} "
+                f"buy_fills={self._regime_buy_seq} regime={obs.regime} status={obs.status} "
+                f"source={obs.source} regime_ts={obs.regime_timestamp}"
+            )
+            self._warn_regime_not_valid("exit", obs)
+        except Exception as e:
+            self.logger().warning(f"[REGIME_TELEMETRY] exit registration failed (trading unaffected): {e}")
 
     def _log_fill_risk_shadow(self, event: BuyOrderCompletedEvent) -> None:
         """
@@ -4536,6 +4708,7 @@ class GridExecutor(ExecutorBase):
             self._maybe_sample_post_fill_risk(force_final=True)
         except Exception as e:
             self.logger().debug(f"[POST_FILL_RISK_LOG] final snapshot failed (non-critical): {e}")
+        self._record_regime_exit()
         super().stop()
 
     def process_order_canceled_event(self, _, market: ConnectorBase, event: OrderCancelledEvent):

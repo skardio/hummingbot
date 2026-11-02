@@ -1223,6 +1223,17 @@ class MultiCoinGridConfig(ControllerConfigBase):
         json_schema_extra={"is_updatable": True}
     )
 
+    # Regime telemetry (observation only): a regime detection older than this is recorded as STALE
+    regime_telemetry_max_age_seconds: int = Field(
+        default=300,
+        gt=0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Seconds after which a regime detection counts as STALE in telemetry: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True}
+    )
+
     # Item 7: Dynamic Take-Profit — adjust TP based on trend strength
     use_dynamic_take_profit: bool = Field(
         default=False,
