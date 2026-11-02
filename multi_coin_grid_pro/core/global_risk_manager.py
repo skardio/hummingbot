@@ -253,6 +253,12 @@ class GlobalRiskManager:
         self._open_allocations[symbol] = allocation
         self._total_open_notional += notional
 
+    def release_allocation(self, symbol: str) -> None:
+        """Drop the open allocation without touching P&L, streaks or cooldowns."""
+        allocation = self._open_allocations.pop(symbol, None)
+        if allocation is not None:
+            self._total_open_notional = max(DecimalZero, self._total_open_notional - allocation.notional_quote)
+
     def register_close_trade(
         self,
         *,

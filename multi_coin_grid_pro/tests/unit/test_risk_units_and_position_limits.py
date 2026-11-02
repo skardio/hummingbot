@@ -174,17 +174,25 @@ class TestDailyLossLimit:
         assert allowed is True
 
 
+def _connector_with(total, available=None):
+    connector = MagicMock()
+    connector.get_balance.return_value = Decimal(str(total))
+    connector.get_available_balance.return_value = Decimal(str(total if available is None else available))
+    connector.get_all_balances.return_value = {}
+    return connector
+
+
 class TestLiveRiskReference:
     def test_disabled_flag_keeps_configured_reference(self):
         ctrl = _make_controller(reference="50000", use_live=False)
-        ctrl._calculate_drawdown_portfolio = MagicMock(return_value=Decimal("1000"))
+        ctrl.connector = _connector_with(1000)
         assert ctrl._ensure_risk_reference() is True
         assert ctrl.config.risk_reference_balance == Decimal("50000")
-        ctrl._calculate_drawdown_portfolio.assert_not_called()
+        ctrl.connector.get_balance.assert_not_called()
 
     def test_live_balance_caps_reference_and_propagates(self):
         ctrl = _make_controller(reference="50000", use_live=True)
-        ctrl._calculate_drawdown_portfolio = MagicMock(return_value=Decimal("1000"))
+        ctrl.connector = _connector_with(1000)
         assert ctrl._ensure_risk_reference() is True
         assert ctrl.config.risk_reference_balance == Decimal("1000")
         assert ctrl.risk_manager._reference_balance_quote == Decimal("1000")
@@ -195,17 +203,16 @@ class TestLiveRiskReference:
 
     def test_live_balance_never_loosens_reference(self):
         ctrl = _make_controller(reference="300", use_live=True)
-        ctrl._calculate_drawdown_portfolio = MagicMock(return_value=Decimal("2000"))
+        ctrl.connector = _connector_with(2000)
         assert ctrl._ensure_risk_reference() is True
         assert ctrl.config.risk_reference_balance == Decimal("300")
 
     @pytest.mark.parametrize("live", [Decimal("0"), RuntimeError("no balance")])
     def test_unreadable_live_balance_blocks_entries(self, live):
         ctrl = _make_controller(reference="50000", use_live=True)
+        ctrl.connector = _connector_with(0)
         if isinstance(live, Exception):
-            ctrl._calculate_drawdown_portfolio = MagicMock(side_effect=live)
-        else:
-            ctrl._calculate_drawdown_portfolio = MagicMock(return_value=live)
+            ctrl.connector.get_balance.side_effect = live
         assert ctrl._ensure_risk_reference() is False
         assert ctrl.config.risk_reference_balance == Decimal("50000")
 

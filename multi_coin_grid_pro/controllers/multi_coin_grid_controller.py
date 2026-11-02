@@ -369,6 +369,10 @@ class MultiCoinGridController(ControllerBase):
         # Configured reference acts as a ceiling when risk_reference_use_live_balance is on
         self._risk_reference_ceiling: Decimal = Decimal(str(self.config.risk_reference_balance))
         self._live_risk_reference_resolved: bool = False
+        self._startup_reconciled: bool = False
+        self._startup_block_reason: str = ""
+        self._last_startup_check_ts: float = 0.0
+        self._exposure_absent_since: Dict[str, float] = {}
         self.meta_ranker = MetaCoinRanker()
         self.fill_monitor = FillQualityMonitor()
         self.atr_calibrator = ATRCalibrator()
@@ -4172,6 +4176,7 @@ class MultiCoinGridController(ControllerBase):
         """
         actions = []
         self._sync_risk_state()
+        self._reconcile_stale_exposure()
 
         # US-005: Check professional exit signals (ATR-based stops, time stops, profit locks)
         exit_actions = self._check_professional_exit_signals()
@@ -4194,6 +4199,10 @@ class MultiCoinGridController(ControllerBase):
                     f"⏳ GRACEFUL STOP: Waiting for {active_count} active executor(s) to finish..."
                 )
             return actions  # No new entries — flag stays True until manual 'stop'
+
+        # Fail-closed: no new entries while untracked exchange exposure exists (restart safety)
+        if not self._startup_exposure_gate():
+            return actions
 
         # Fail-closed: no new entries until the live risk reference is known (opt-in)
         if not self._ensure_risk_reference():
@@ -5649,13 +5658,6 @@ class MultiCoinGridController(ControllerBase):
                         )
                         adjusted_size = max_per_slot
 
-                # Phase 1.4: position limits are checked on the final sized notional
-                if not self._check_position_limits(best_coin, requested_allocation=adjusted_size):
-                    self.logger().warning(
-                        f"⚠️  Position limits exceeded for {best_coin} - skipping grid creation"
-                    )
-                    return actions
-
                 self.logger().info(
                     f"💰 Capital allocation: €{total_capital} / {current_max_slots} coins"
                     f" = €{per_coin_capital:.2f} per coin"
@@ -5671,14 +5673,7 @@ class MultiCoinGridController(ControllerBase):
 
                 # US-005: Professional Risk Manager check before grid creation
                 # Check daily loss limit, max positions, rolling PnL
-                portfolio_risk = self._build_portfolio_risk()
-                can_open, risk_reason = self.professional_risk_manager.can_open_new_position(
-                    symbol=best_coin,
-                    confidence=0.7,  # Default confidence for grid entries
-                    portfolio_risk=portfolio_risk
-                )
-                if not can_open:
-                    self.logger().warning(f"🛡️  Risk Manager blocked {best_coin}: {risk_reason}")
+                if not self._professional_risk_allows(best_coin):
                     return actions
 
                 # Item 4: Daily coin kill switch — block if coin lost >= 2R today
@@ -5930,7 +5925,7 @@ class MultiCoinGridController(ControllerBase):
                         self.logger().debug(f"      ❌ Order book error: {e}")
                         continue
 
-                # 5. Position limits are checked after sizing (see below)
+                # 5. Position limits are enforced on the final amount inside _create_grid_action
 
                 # All checks passed - create executor for this coin
                 self.logger().info(f"      ✅ All checks passed - creating executor for {candidate_coin}")
@@ -5985,19 +5980,8 @@ class MultiCoinGridController(ControllerBase):
                         f"      💰 Allocating €{per_coin_capital:.2f} (adjusted: €{adjusted_size:.2f})"
                     )
 
-                    if not self._check_position_limits(candidate_coin, requested_allocation=adjusted_size):
-                        self.logger().debug("      ❌ Position limits exceeded")
-                        continue
-
                     # US-005: Professional Risk Manager check before grid creation
-                    portfolio_risk = self._build_portfolio_risk()
-                    can_open, risk_reason = self.professional_risk_manager.can_open_new_position(
-                        symbol=candidate_coin,
-                        confidence=0.7,
-                        portfolio_risk=portfolio_risk
-                    )
-                    if not can_open:
-                        self.logger().warning(f"      🛡️  Risk Manager blocked {candidate_coin}: {risk_reason}")
+                    if not self._professional_risk_allows(candidate_coin):
                         continue
 
                     # US-004: Check budget availability BEFORE creating grid
@@ -7762,25 +7746,144 @@ class MultiCoinGridController(ControllerBase):
             return -1.0
         return normalized
 
+    def _asset_inventory_quote(self, asset: str) -> Optional[Decimal]:
+        """
+        Quote value of the wallet balance of `asset`: 0 when it is dust or not tradable against the
+        quote, None when it is material but cannot be valued (callers fail closed).
+        """
+        connector = self.connector
+        try:
+            amount = Decimal(str(connector.get_balance(asset)))
+            if amount <= 0:
+                return Decimal("0")
+            pair = f"{asset}-{self.config.quote_asset}"
+            rule = connector.trading_rules.get(pair)
+            if rule is None or amount < Decimal(str(rule.min_order_size)):
+                return Decimal("0")
+            mid = Decimal(str(connector.get_mid_price(pair)))
+            if not mid.is_finite() or mid <= 0:
+                return None
+            value = amount * mid
+            if value < Decimal(str(getattr(rule, "min_notional", 0) or 0)):
+                return Decimal("0")
+            return value
+        except Exception:
+            return None
+
+    def _find_untracked_exposure(self) -> List[str]:
+        """Reasons why the exchange account holds exposure that no executor of this run owns."""
+        cfg = self.config
+        ccy = self._balance_currency
+        try:
+            quote_total = Decimal(str(self.connector.get_balance(ccy)))
+            if quote_total <= 0:
+                return [f"{ccy} balance unavailable or zero"]
+            locked = quote_total - Decimal(str(self.connector.get_available_balance(ccy)))
+            balances = self.connector.get_all_balances()
+        except Exception as e:
+            return [f"balances unavailable ({e})"]
+
+        reasons: List[str] = []
+        tolerated = (Decimal(str(cfg.startup_reconcile_ack_locked_quote)) + self.budget_allocator.total_reserved
+                     + Decimal(str(cfg.min_order_amount_quote)))
+        if locked > tolerated:
+            reasons.append(f"{locked:.2f} {ccy} locked in open orders that no executor of this run owns")
+
+        acked = {a.upper() for a in cfg.startup_reconcile_ack_assets}
+        owned = {pair.split("-")[0].upper() for pair in self.active_coins}
+        for asset in balances:
+            if asset == ccy or asset.upper() in acked or asset.upper() in owned:
+                continue
+            value = self._asset_inventory_quote(asset)
+            if value is None:
+                reasons.append(f"{asset}: balance cannot be valued (no price/rules)")
+            elif value > 0:
+                reasons.append(f"{asset}: ~{value:.2f} {cfg.quote_asset} inventory not tracked by any executor")
+        return reasons
+
+    def _startup_exposure_gate(self) -> bool:
+        """
+        Restart safety: block new entries while the exchange account shows open orders or inventory
+        that this run does not track. Nothing is cancelled or sold; the operator resolves it or
+        acknowledges it in startup_reconcile_ack_assets / startup_reconcile_ack_locked_quote.
+        Re-evaluated every 30 s until clean, then sticky for the session.
+        """
+        if not getattr(self.config, "startup_reconcile_enabled", True) or self._startup_reconciled:
+            return True
+        now = self.market_data_provider.time()
+        if self._startup_block_reason and now - self._last_startup_check_ts < 30:
+            return False
+        self._last_startup_check_ts = now
+        reasons = self._find_untracked_exposure()
+        if reasons:
+            self._startup_block_reason = "; ".join(reasons)
+            if should_log("startup_reconcile_block", interval_sec=300):
+                self.logger().critical(
+                    f"🛑 RESTART SAFETY: new entries blocked - {self._startup_block_reason}. "
+                    f"Resolve manually or acknowledge via startup_reconcile_ack_* (no orders are cancelled or sold)."
+                )
+            return False
+        self._startup_block_reason = ""
+        self._startup_reconciled = True
+        self.logger().info("✅ Restart safety: no untracked exchange exposure - entries allowed")
+        return True
+
+    def _reconcile_stale_exposure(self) -> None:
+        """
+        Idempotently release tracked exposure of executors that are really gone.
+
+        An executor counts as gone only when it has been absent from executors_info (any status
+        except TERMINATED counts as present) for exposure_reconcile_grace_seconds. Exposure is held
+        instead when the wallet still shows inventory for that base or it cannot be verified.
+        """
+        grace = float(self.config.exposure_reconcile_grace_seconds)
+        now = self.market_data_provider.time()
+        present = {ei.id for ei in (self.executors_info or [])
+                   if getattr(ei, "status", None) != RunnableStatus.TERMINATED}
+        for symbol in set(self.active_coins) | set(self.current_exposure_per_coin):
+            executor_id = self.active_coins.get(symbol)
+            if executor_id in present:
+                self._exposure_absent_since.pop(symbol, None)
+                continue
+            if now - self._exposure_absent_since.setdefault(symbol, now) < grace:
+                continue
+            inventory = self._asset_inventory_quote(symbol.split("-")[0])
+            if inventory is None or inventory > 0:
+                if should_log(f"exposure_reconcile_hold_{symbol}", interval_sec=600):
+                    self.logger().warning(
+                        f"⚠️  Exposure of {symbol} kept: executor is gone but inventory is "
+                        f"{'unverifiable' if inventory is None else f'~{inventory:.2f}'} - resolve manually"
+                    )
+                continue
+            self.logger().warning(f"🧹 Exposure reconcile: {symbol} executor absent ≥{grace:.0f}s, no inventory - releasing")
+            self._clear_position_tracking_after_confirmed_close(symbol, executor_id, reason="reconciled_executor_absent")
+            self.risk_manager.release_allocation(symbol)
+            self._exposure_absent_since.pop(symbol, None)
+
     def _ensure_risk_reference(self) -> bool:
         """
-        Cap the risk reference balance at the live working capital (opt-in).
+        Cap the risk reference balance at the live equity (opt-in, an explicit operator declaration
+        that the quote balance of this account is bot capital).
 
-        The effective reference is min(configured ceiling, live working capital), so it can
-        only tighten limits. Returns False (entries blocked) while it cannot be determined.
+        Resolved once, only when nothing else can distort it: no untracked exchange exposure and
+        no executor yet. Then equity is exactly the total quote balance (free + locked), minus the
+        locked quote the operator acknowledged. Returns False (entries blocked) otherwise.
         """
         if not getattr(self.config, "risk_reference_use_live_balance", False):
             return True
         if self._live_risk_reference_resolved:
             return True
-        try:
-            live_capital = Decimal(str(self._calculate_drawdown_portfolio()))
-        except Exception as e:
-            live_capital = Decimal("0")
-            self.logger().error(f"Risk reference: live balance unavailable ({e})")
-        if live_capital <= 0:
+        if not self._startup_exposure_gate():
+            return False
+        if any(getattr(ei, "status", None) != RunnableStatus.TERMINATED for ei in (self.executors_info or [])):
+            if should_log("risk_reference_active_executors", interval_sec=300):
+                self.logger().warning("Risk reference: executors already active - cannot resolve, blocking entries")
+            return False
+        equity, reason = self._calculate_risk_equity()
+        live_capital = (equity or Decimal("0")) - Decimal(str(self.config.startup_reconcile_ack_locked_quote))
+        if equity is None or live_capital <= 0:
             if should_log("risk_reference_unresolved", interval_sec=300):
-                self.logger().warning("Risk reference: live balance unknown - blocking new entries")
+                self.logger().warning(f"Risk reference: live equity unknown ({reason}) - blocking new entries")
             return False
 
         effective = min(self._risk_reference_ceiling, live_capital)
@@ -7954,26 +8057,30 @@ class MultiCoinGridController(ControllerBase):
             metadata=metadata
         )
 
-    def _build_portfolio_risk(self) -> PortfolioRisk:
+    def _build_portfolio_risk(self) -> Optional[PortfolioRisk]:
         """
-        US-005: Build PortfolioRisk object for ProfessionalRiskManager.
+        US-005: Build PortfolioRisk object for ProfessionalRiskManager; None means "unknown".
 
-        Aggregates current portfolio state for risk checks.
+        Daily-loss definitions (intentionally different, all vs the same 3% setting):
+        - GlobalRiskManager: GROSS realised losses (wins not netted) / risk reference, percent.
+        - ProfessionalRiskManager (this method): NET realised P&L today (UTC) / risk equity, fraction.
+        - RiskGuardV2: equity drawdown incl. unrealised P&L vs the daily start equity, percent.
+        - DrawdownTracker: working-capital drawdown (quote + active positions), percent.
         """
         try:
-            # Get total equity
-            total_equity = Decimal("0")
-            if self.connector:
-                quote_asset = self.config.quote_asset
-                total_equity = Decimal(str(self.connector.get_balance(quote_asset)))
+            # Equity = total quote + valued bot positions (see _calculate_risk_equity); the
+            # daily figure is NET realised P&L of today (UTC) over that equity, as a fraction.
+            total_equity, equity_reason = self._calculate_risk_equity()
+            if total_equity is None:
+                self.logger().error(f"Risk equity unavailable - blocking entries: {equity_reason}")
+                return None
 
             # Calculate daily PnL
             daily_pnl = Decimal("0")
             daily_pnl_pct = 0.0
             if hasattr(self, 'risk_manager') and self.risk_manager:
                 daily_pnl = self.risk_manager.daily_realised_pnl
-                if total_equity > 0:
-                    daily_pnl_pct = float(daily_pnl / total_equity)
+                daily_pnl_pct = float(daily_pnl / total_equity)
 
             # Count recent wins/losses from professional risk manager
             recent_trades = self.professional_risk_manager.recent_trades
@@ -7995,21 +8102,65 @@ class MultiCoinGridController(ControllerBase):
                 correlation_risk_score=0.0,
             )
         except Exception as e:
-            self.logger().error(f"Error building portfolio risk: {e}")
-            # Return safe defaults
-            return PortfolioRisk(
-                total_equity=Decimal("0"),
-                daily_pnl=Decimal("0"),
-                daily_pnl_pct=0.0,
-                max_daily_loss_pct=0.03,
-                open_positions=len(self.active_coins),
-                max_positions=6,
-                recent_wins=0,
-                recent_losses=0,
-                win_rate=0.5,
-                highly_correlated_positions=[],
-                correlation_risk_score=0.0,
-            )
+            self.logger().error(f"Error building portfolio risk - blocking entries: {e}")
+            return None
+
+    def _professional_risk_allows(self, symbol: str) -> bool:
+        """US-005 entry check; blocks when equity is unknown or the risk manager refuses."""
+        portfolio_risk = self._build_portfolio_risk()
+        if portfolio_risk is None:
+            self.logger().warning(f"🛡️  Risk Manager blocked {symbol}: equity data unavailable")
+            return False
+        can_open, risk_reason = self.professional_risk_manager.can_open_new_position(
+            symbol=symbol,
+            confidence=0.7,  # Default confidence for grid entries
+            portfolio_risk=portfolio_risk
+        )
+        if not can_open:
+            self.logger().warning(f"🛡️  Risk Manager blocked {symbol}: {risk_reason}")
+        return can_open
+
+    def _calculate_risk_equity(self) -> Tuple[Optional[Decimal], str]:
+        """
+        Equity for risk percentages: total quote (free + locked in orders) plus the mark-to-market
+        of inventory held by RUNNING/NOT_STARTED executors. Returns (None, reason) when the
+        inputs are missing so callers fail closed.
+
+        Deliberately a safe LOWER bound: executors that are SHUTTING_DOWN, inventory outside
+        executors and partially filled open orders are not counted (they only make a loss look
+        larger), while partial fills of take-profit orders are subtracted so proceeds already in
+        the quote balance are not counted twice.
+        """
+        try:
+            quote_total = Decimal(str(self.connector.get_balance(self._balance_currency)))
+            if quote_total <= 0:
+                return None, f"{self._balance_currency} balance unavailable or zero"
+            in_flight = getattr(self.connector, "in_flight_orders", {}) or {}
+            equity = quote_total
+            for ei in self.executors_info or []:
+                if getattr(ei, "status", None) not in (RunnableStatus.RUNNING, RunnableStatus.NOT_STARTED):
+                    continue
+                ci = ei.custom_info or {}
+                size = Decimal(str(ci.get('position_size_quote', 0)))
+                value = size + Decimal(str(ci.get('position_pnl_quote', 0))) + Decimal(
+                    str(ci.get('position_fees_quote', 0)))
+                if value <= 0:
+                    continue
+                break_even = Decimal(str(ci.get('break_even_price', 0)))
+                if size > 0 and break_even > 0:
+                    mark = value / (size / break_even)
+                    for lvl in (ci.get('levels_by_state') or {}).get('CLOSE_ORDER_PLACED', []):
+                        close_id = lvl.get('active_close_order')
+                        if not close_id:
+                            continue
+                        order = in_flight.get(close_id)
+                        if order is None:
+                            return None, f"close order {close_id} of {ei.config.trading_pair} not tracked"
+                        value -= Decimal(str(order.executed_amount_base)) * mark
+                equity += max(value, Decimal("0"))
+            return equity, "ok"
+        except Exception as e:
+            return None, f"equity calculation failed: {e}"
 
     async def _run_dynamic_pair_scan(self) -> None:
         """
@@ -10698,6 +10849,16 @@ class MultiCoinGridController(ControllerBase):
         Returns:
             CreateExecutorAction with GridExecutorConfig
         """
+        # Exposure limits apply to the exact notional placed in the executor config; the amount
+        # is never increased after this point (only the grid count is reduced further down).
+        final_amount_quote = total_amount_quote if total_amount_quote is not None else Decimal(
+            str(self.config.total_amount_quote))
+        if not self._check_position_limits(symbol, requested_allocation=final_amount_quote):
+            self.logger().warning(
+                f"⚠️  Position limits exceeded for {symbol} ({final_amount_quote}) - skipping grid creation"
+            )
+            return None
+
         # Phase 4.4: Smart Refill Logic - Check if we should rebuild grid
         if self.active_coin == symbol and symbol in self.last_grid_price:
             current_trend = self.trend_calculator.get_trend(symbol)

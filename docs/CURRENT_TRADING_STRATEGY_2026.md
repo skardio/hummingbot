@@ -469,6 +469,17 @@ Drie lagen, alle ENABLED:
 2. `RegimeDetector` (`utils/regime_detector.py`; `adaptive_regime_detection.enabled = true`, `logging_only = false`): drempels BULL ≥ 5, CHOP ≥ −3, BEAR < −3; `min_confidence` 0,65; smoothing 3 (O: 1); BEAR-auto-light drempel −5,0 met grootte ×0,5; `_detect_current_regime` (≈L12133), `_apply_adaptive_filters` (≈L12240).
 3. Regime-afhankelijke timeouts (`_get_regime_timeouts`, ≈L10530): progress/no-fill-seconden voor BULL, CHOP en BEAR (U, B: 7200/5400, 5400/3600, 3600/2400; O: 3600/3600/2700 …) en slot-multipliers (7.1).
 
+### 7.8 Wijzigingen na dit document (lokaal, niet gedeployed)
+
+Hoofdstuk 7.1 en 7.3 beschrijven de toestand vóór de veiligheidsreparaties. Sindsdien in de code:
+
+- Exposurelimieten worden bij het laden genormaliseerd naar fracties (`core/risk_units.py`) en zijn op alle drie de bots bindend t.o.v. `risk_reference_balance_quote`. De toets staat in `_create_grid_action` op het exacte bedrag van de `CreateExecutorAction`; er is geen eerste-positie-bypass en fouten blokkeren (fail-closed).
+- `ProfessionalRiskManager` krijgt 0,03 (fractie) en rekent op risico-equity (`_calculate_risk_equity`): totaal quote plus gewaardeerde posities van RUNNING-executors, een bewuste ondergrens; ontbrekende data blokkeert entries.
+- Dagverlies-definities verschillen bewust: `GlobalRiskManager` bruto gerealiseerd verlies / referentie (percent); `ProfessionalRiskManager` netto gerealiseerd (UTC-dag) / risico-equity (fractie); `RiskGuardV2` equity-drawdown incl. niet-gerealiseerd (percent); `DrawdownTracker` werkkapitaal-drawdown (percent).
+- Restartveiligheid: entries blijven geblokkeerd zolang de exchange open orders (vergrendeld quote) of inventory toont die geen executor van deze run bezit (`startup_reconcile_*`). Er worden geen orders geannuleerd of verkocht.
+- Exposure van verdwenen executors wordt idempotent vrijgegeven na `exposure_reconcile_grace_seconds` zonder aanwezigheid in `executors_info`, behalve bij resterende of niet-verifieerbare inventory.
+- `risk_reference_use_live_balance` staat op alle bots uit; inschakelen is een operatorbeslissing.
+
 ---
 
 ## 8. P&L en feedback

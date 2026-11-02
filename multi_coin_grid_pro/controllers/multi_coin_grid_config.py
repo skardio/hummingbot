@@ -1447,6 +1447,38 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": True},
     )
+    startup_reconcile_enabled: bool = Field(
+        default=True,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Block entries while untracked exchange orders/inventory exist (true/false): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False},
+    )
+    startup_reconcile_ack_assets: List[str] = Field(
+        default_factory=list,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Base assets the operator confirms are NOT bot exposure: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False},
+    )
+    startup_reconcile_ack_locked_quote: Decimal = Field(
+        default=Decimal("0"),
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Quote locked in open orders the operator confirms is NOT bot exposure: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False},
+    )
+    exposure_reconcile_grace_seconds: int = Field(
+        default=120,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Seconds an executor may be absent before its tracked exposure is reconciled: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False},
+    )
     risk_bucket_limits: Optional[Dict[str, float]] = Field(
         default=None,
         client_data=ClientFieldData(
