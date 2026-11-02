@@ -129,6 +129,15 @@ class RealtimePnLTracker:
         self.monthly_start_ts = int(time.time())
         self.logger.info(f"📅 Monthly P&L reset - new baseline: €{self.monthly_start_equity:.2f}")
 
+    def rebase_reference(self, new_starting_balance: Decimal) -> None:
+        """Shift all baselines to a new reference balance, keeping accumulated P&L."""
+        shift = new_starting_balance - self.starting_balance
+        self.starting_balance = new_starting_balance
+        self.current_balance += shift
+        self.daily_start_equity += shift
+        self.weekly_start_equity += shift
+        self.monthly_start_equity += shift
+
     def on_trade_fill(self, fill: TradeFill):
         """
         Process a trade fill and update P&L

@@ -432,6 +432,11 @@ class GlobalRiskManager:
             return DecimalZero
         return (self._daily_loss_quote / self._reference_balance_quote) * DecimalHundred
 
+    def set_reference_balance(self, reference_balance_quote: Decimal) -> None:
+        if reference_balance_quote <= DecimalZero:
+            raise ValueError("reference_balance_quote must be positive")
+        self._reference_balance_quote = reference_balance_quote
+
     @property
     def total_open_notional(self) -> Decimal:
         return self._total_open_notional

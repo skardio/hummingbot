@@ -54,6 +54,7 @@ from multi_coin_grid_pro.core.performance_tracker import PerformanceTracker
 # Phase 1B: Observability
 from multi_coin_grid_pro.core.reason_codes import ReasonCode, Stage
 from multi_coin_grid_pro.core.risk_buckets import BucketExposureTracker
+from multi_coin_grid_pro.core.risk_units import exposure_pct_to_fraction, pct_to_fraction
 from multi_coin_grid_pro.core.session_edge_detector import SessionEdgeDetector
 
 # Feature 1.2: Time-Based Trading Rules
@@ -247,8 +248,9 @@ class MultiCoinGridController(ControllerBase):
 
         # US-005: Professional Risk Manager - institutional-grade risk controls
         # NOTE: Config stores these as Decimal, but ProfessionalRiskManager expects float
+        # max_daily_loss_pct is configured in percent (3.0 = 3%); ProfessionalRiskManager compares fractions.
         self.professional_risk_manager = ProfessionalRiskManager(
-            max_daily_loss_pct=float(getattr(config, 'max_daily_loss_pct', 0.03)),
+            max_daily_loss_pct=pct_to_fraction(getattr(config, 'max_daily_loss_pct', 3.0)),
             max_positions=getattr(config, 'max_simultaneous_coins', 6),
             atr_stop_multiplier=float(getattr(config, 'atr_stop_multiplier', 2.0)),
             min_stop_pct=float(getattr(config, 'min_stop_pct', 0.02)),
@@ -364,6 +366,9 @@ class MultiCoinGridController(ControllerBase):
             config=_bucket_config,
         )
         self.session_edge_detector = SessionEdgeDetector()
+        # Configured reference acts as a ceiling when risk_reference_use_live_balance is on
+        self._risk_reference_ceiling: Decimal = Decimal(str(self.config.risk_reference_balance))
+        self._live_risk_reference_resolved: bool = False
         self.meta_ranker = MetaCoinRanker()
         self.fill_monitor = FillQualityMonitor()
         self.atr_calibrator = ATRCalibrator()
@@ -668,9 +673,11 @@ class MultiCoinGridController(ControllerBase):
                 'max_monthly_loss_pct': float(getattr(config, 'max_monthly_loss_pct', 12.0)),
                 'max_daily_loss_eur': float(getattr(config, 'max_daily_loss_eur', 0)) if getattr(config,
                                                                                                  'max_daily_loss_eur', None) else None,  # noqa: E501
-                # Convert fractional percentages (0.15 = 15%) to integer form (15) for RiskGuard
-                'max_exposure_per_coin_pct': float(getattr(config, 'max_exposure_per_coin_pct', 0.40)) * 100,
-                'max_total_exposure_pct': float(getattr(config, 'max_total_exposure_pct', 0.80)) * 100,
+                # Config stores fractions (0.15 = 15%); RiskGuard expects percent (15)
+                'max_exposure_per_coin_pct': float(
+                    exposure_pct_to_fraction(getattr(config, 'max_exposure_per_coin_pct', 0.40))) * 100,
+                'max_total_exposure_pct': float(
+                    exposure_pct_to_fraction(getattr(config, 'max_total_exposure_pct', 0.80))) * 100,
             },
             pnl_tracker=self.pnl_tracker_v2,
             alerter=self.telegram_alerter,
@@ -4188,6 +4195,10 @@ class MultiCoinGridController(ControllerBase):
                 )
             return actions  # No new entries — flag stays True until manual 'stop'
 
+        # Fail-closed: no new entries until the live risk reference is known (opt-in)
+        if not self._ensure_risk_reference():
+            return actions
+
         # ===== FEATURE 1.2: TIME-BASED FILTER CHECK =====
         if self.time_based_filter:
             time_decision = self.time_based_filter.check_trading_permission()
@@ -5525,13 +5536,6 @@ class MultiCoinGridController(ControllerBase):
             else:
                 self.logger().info(f"✨ STARTING new grid on {best_coin}")
 
-            # Phase 1.4: Check position limits before creating executor
-            if not self._check_position_limits(best_coin):
-                self.logger().warning(
-                    f"⚠️  Position limits exceeded for {best_coin} - skipping grid creation"
-                )
-                return actions
-
             # Create new grid executor
             try:
                 # ============================================================
@@ -5644,6 +5648,13 @@ class MultiCoinGridController(ControllerBase):
                             f"to leave room for {self.max_simultaneous_coins - 1} other slot(s))"
                         )
                         adjusted_size = max_per_slot
+
+                # Phase 1.4: position limits are checked on the final sized notional
+                if not self._check_position_limits(best_coin, requested_allocation=adjusted_size):
+                    self.logger().warning(
+                        f"⚠️  Position limits exceeded for {best_coin} - skipping grid creation"
+                    )
+                    return actions
 
                 self.logger().info(
                     f"💰 Capital allocation: €{total_capital} / {current_max_slots} coins"
@@ -5919,10 +5930,7 @@ class MultiCoinGridController(ControllerBase):
                         self.logger().debug(f"      ❌ Order book error: {e}")
                         continue
 
-                # 5. Position limits
-                if not self._check_position_limits(candidate_coin):
-                    self.logger().debug("      ❌ Position limits exceeded")
-                    continue
+                # 5. Position limits are checked after sizing (see below)
 
                 # All checks passed - create executor for this coin
                 self.logger().info(f"      ✅ All checks passed - creating executor for {candidate_coin}")
@@ -5976,6 +5984,10 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().info(
                         f"      💰 Allocating €{per_coin_capital:.2f} (adjusted: €{adjusted_size:.2f})"
                     )
+
+                    if not self._check_position_limits(candidate_coin, requested_allocation=adjusted_size):
+                        self.logger().debug("      ❌ Position limits exceeded")
+                        continue
 
                     # US-005: Professional Risk Manager check before grid creation
                     portfolio_risk = self._build_portfolio_risk()
@@ -7750,19 +7762,53 @@ class MultiCoinGridController(ControllerBase):
             return -1.0
         return normalized
 
-    def _check_position_limits(self, symbol: str) -> bool:
+    def _ensure_risk_reference(self) -> bool:
+        """
+        Cap the risk reference balance at the live working capital (opt-in).
+
+        The effective reference is min(configured ceiling, live working capital), so it can
+        only tighten limits. Returns False (entries blocked) while it cannot be determined.
+        """
+        if not getattr(self.config, "risk_reference_use_live_balance", False):
+            return True
+        if self._live_risk_reference_resolved:
+            return True
+        try:
+            live_capital = Decimal(str(self._calculate_drawdown_portfolio()))
+        except Exception as e:
+            live_capital = Decimal("0")
+            self.logger().error(f"Risk reference: live balance unavailable ({e})")
+        if live_capital <= 0:
+            if should_log("risk_reference_unresolved", interval_sec=300):
+                self.logger().warning("Risk reference: live balance unknown - blocking new entries")
+            return False
+
+        effective = min(self._risk_reference_ceiling, live_capital)
+        self.config.risk_reference_balance_quote = effective
+        self.risk_manager.set_reference_balance(effective)
+        self.bucket_tracker.update_portfolio(float(effective))
+        self.pnl_tracker_v2.rebase_reference(effective)
+        self._live_risk_reference_resolved = True
+        self.logger().info(
+            f"Risk reference resolved: {effective:.2f} {self.config.quote_asset} "
+            f"(live={live_capital:.2f}, ceiling={self._risk_reference_ceiling:.2f})"
+        )
+        return True
+
+    def _check_position_limits(self, symbol: str, requested_allocation: Optional[Decimal] = None) -> bool:
         """
         Phase 1.4: Check if position limits allow creating executor for this coin
 
         Phase 2: Integrated with RiskGuard v2.0 + EventLogger for observability.
         Emits gate_denied events with stage=RISK when limits exceeded.
 
-        Note: Since we only have 1 active executor at a time, we mainly check:
-        - Max exposure per coin (if switching to same coin)
-        - Max total exposure (should always be <= 1 executor worth)
+        Limits are fractions of the risk reference balance and apply to every position,
+        including the first one. Any error blocks the entry (fail-closed).
 
         Args:
             symbol: Trading pair symbol
+            requested_allocation: Sized notional of the new grid; falls back to the
+                nominal per-coin request when not supplied
 
         Returns:
             True if position limits allow, False otherwise
@@ -7774,14 +7820,16 @@ class MultiCoinGridController(ControllerBase):
             correlation_id = str(uuid.uuid4())
 
             # Calculate new exposure
-            requested_allocation = self._next_allocation_quote if self._next_allocation_quote else Decimal(
-                str(self.config.total_amount_quote))
+            if requested_allocation is None:
+                requested_allocation = self._next_allocation_quote if self._next_allocation_quote else Decimal(
+                    str(self.config.total_amount_quote))
             new_exposure = requested_allocation
             current_coin_exposure = self.current_exposure_per_coin.get(symbol, Decimal("0"))
 
-            # For now, use grid amount as capital reference
-            # In future, could get actual account balance
-            total_capital = self.config.risk_reference_balance
+            total_capital = Decimal(str(self.config.risk_reference_balance))
+            if total_capital <= 0:
+                self.logger().error("Position limits: risk reference balance must be positive - blocking entry")
+                return False
 
             # Phase 2: Use RiskGuard v2.0 for exposure checks + event emission
             allowed, reason = self.risk_guard_v2.can_open_position(
@@ -7812,52 +7860,39 @@ class MultiCoinGridController(ControllerBase):
 
             # Legacy code below (kept for backward compatibility, but RiskGuard already checked this)
 
-            # Since we only have 1 executor at a time, check:
-            # 1. If switching to same coin, check max per coin limit
-            if symbol == self.active_coin and current_coin_exposure > Decimal("0"):
-                max_per_coin = total_capital * self.config.max_exposure_per_coin_pct
-                if current_coin_exposure + new_exposure > max_per_coin:
-                    self.logger().warning(
-                        f"⚠️  Max exposure per coin exceeded for {symbol}:\n"
-                        f"   Current: €{current_coin_exposure:.2f}\n"
-                        f"   New: €{new_exposure:.2f}\n"
-                        f"   Limit: €{max_per_coin:.2f} ({self.config.max_exposure_per_coin_pct * 100}%)"
-                    )
-                    return False
+            max_per_coin_frac = exposure_pct_to_fraction(self.config.max_exposure_per_coin_pct)
+            max_total_frac = exposure_pct_to_fraction(self.config.max_total_exposure_pct)
 
-            # 2. Check max total exposure
-            # Since we only have 1 active executor at a time, when switching coins:
-            # - We subtract old exposure and add new exposure
-            # - The new total should be <= max_total_exposure_pct of capital
-            # - But since we only have 1 executor, we allow up to 1 executor worth
+            # 1. Per-coin limit applies to every new position, not only to an already active coin
+            max_per_coin = total_capital * max_per_coin_frac
+            if current_coin_exposure + new_exposure > max_per_coin:
+                self.logger().warning(
+                    f"⚠️  Max exposure per coin exceeded for {symbol}:\n"
+                    f"   Current: €{current_coin_exposure:.2f}\n"
+                    f"   New: €{new_exposure:.2f}\n"
+                    f"   Limit: €{max_per_coin:.2f} ({max_per_coin_frac * 100}%)"
+                )
+                return False
+
+            # 2. Total limit applies to the first position as well
             new_total_exposure = self.total_exposure - current_coin_exposure + new_exposure
-            max_total = total_capital * self.config.max_total_exposure_pct
-
-            # Special case: If we have no active executor, allow creating one even if it exceeds the percentage
-            # This handles the case where total_amount_quote (€100) > max_total_exposure_pct (90% = €90)
-            # For single-executor strategy, we need at least 1 executor worth of capital
-            if self.total_exposure == Decimal("0") and new_exposure <= total_capital:
-                # No current exposure, and new exposure is within total capital - allow it
-                # This handles the initial case where we're creating the first executor
-                return True
-
+            max_total = total_capital * max_total_frac
             if new_total_exposure > max_total:
                 self.logger().warning(
                     f"⚠️  Max total exposure exceeded:\n"
                     f"   Current total: €{self.total_exposure:.2f}\n"
                     f"   New total: €{new_total_exposure:.2f}\n"
-                    f"   Limit: €{max_total:.2f} ({self.config.max_total_exposure_pct * 100}%)"
+                    f"   Limit: €{max_total:.2f} ({max_total_frac * 100}%)"
                 )
                 return False
 
             return True
 
         except Exception as e:
-            self.logger().error(f"❌ Error checking position limits: {e}")
+            self.logger().error(f"❌ Error checking position limits - blocking entry (fail-closed): {e}")
             import traceback
             self.logger().error(traceback.format_exc())
-            # On error, allow (fail open) - but log it
-            return True
+            return False
 
     def _emit_execution_denial(
         self,

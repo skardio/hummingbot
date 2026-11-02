@@ -14,6 +14,7 @@ from hummingbot.core.data_type.common import OrderType
 from hummingbot.core.global_risk_manager import RiskLimits
 from hummingbot.strategy_v2.controllers.controller_base import ControllerConfigBase
 from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
+from multi_coin_grid_pro.core.risk_units import exposure_pct_to_fraction
 
 
 class MultiCoinGridConfig(ControllerConfigBase):
@@ -1438,6 +1439,14 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": True},
     )
+    risk_reference_use_live_balance: bool = Field(
+        default=False,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Cap the risk reference at the live working capital (true/false): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
     risk_bucket_limits: Optional[Dict[str, float]] = Field(
         default=None,
         client_data=ClientFieldData(
@@ -1916,6 +1925,12 @@ class MultiCoinGridConfig(ControllerConfigBase):
             stop_loss_order_type=OrderType.LIMIT,  # ST-05b: was MARKET → LIMIT for lower fees and less slippage
             time_limit_order_type=OrderType.LIMIT   # ST-05b: was MARKET → LIMIT for lower fees and less slippage
         )
+
+    @field_validator('max_exposure_per_coin_pct', 'max_total_exposure_pct', mode='before')
+    @classmethod
+    def normalize_exposure_limits(cls, v):
+        """Store exposure limits as fractions (0.50 = 50%); accepts 50.0 as percent."""
+        return exposure_pct_to_fraction(v)
 
     @field_validator('trend_lookback_minutes')
     @classmethod
