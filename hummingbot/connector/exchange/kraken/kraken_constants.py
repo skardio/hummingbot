@@ -52,6 +52,7 @@ ADD_ORDER_PATH_URL = "/0/private/AddOrder"
 CANCEL_ORDER_PATH_URL = "/0/private/CancelOrder"
 BALANCE_PATH_URL = "/0/private/Balance"
 OPEN_ORDERS_PATH_URL = "/0/private/OpenOrders"
+CLOSED_ORDERS_PATH_URL = "/0/private/ClosedOrders"
 QUERY_ORDERS_PATH_URL = "/0/private/QueryOrders"
 QUERY_TRADES_PATH_URL = "/0/private/QueryTrades"
 

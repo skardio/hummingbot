@@ -1369,3 +1369,25 @@ class KrakenExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests)
 
             # Verify the result
             self.assertEqual(self.latest_prices_request_mock_response["result"], ticker_data)
+
+    @aioresponses()
+    async def test_update_order_status_when_request_fails_marks_order_as_not_found(self, mock_api):
+        """A temporary HTTP failure must not advance Kraken's not-found counter."""
+        self.exchange._set_current_timestamp(1640780000)
+        order_id = self.client_order_id_prefix + "1"
+        self.exchange.start_tracking_order(
+            order_id=order_id,
+            exchange_order_id=str(self.expected_exchange_order_id),
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            price=Decimal("10000"),
+            amount=Decimal("1"),
+        )
+        order = self.exchange.in_flight_orders[order_id]
+        self.configure_http_error_order_status_response(order=order, mock_api=mock_api)
+
+        await self.exchange._update_order_status()
+
+        self.assertTrue(order.is_open)
+        self.assertEqual(0, self.exchange._order_tracker._order_not_found_records[order_id])

@@ -101,12 +101,16 @@ class BitgetExchange(ExchangePyBase):
     def is_trading_required(self) -> bool:
         return self._trading_required
 
+    @property
+    def only_count_confirmed_order_not_found(self) -> bool:
+        return True
+
     @staticmethod
     def _formatted_error(code: int, message: str) -> str:
         return f"Error: {code} - {message}"
 
     def supported_order_types(self) -> List[OrderType]:
-        return [OrderType.LIMIT, OrderType.MARKET]
+        return [OrderType.LIMIT, OrderType.LIMIT_MAKER, OrderType.MARKET]
 
     def _is_request_exception_related_to_time_synchronizer(
         self,
@@ -186,12 +190,17 @@ class BitgetExchange(ExchangePyBase):
             step_size = Decimal(self.trading_rules[trading_pair].min_base_amount_increment)
             amount = (amount * current_price).quantize(step_size, rounding=ROUND_UP)
             self._expected_market_amounts[order_id] = amount
+        force = (
+            CONSTANTS.POST_ONLY_TIME_IN_FORCE
+            if order_type is OrderType.LIMIT_MAKER
+            else CONSTANTS.DEFAULT_TIME_IN_FORCE
+        )
         data = {
             "side": CONSTANTS.TRADE_TYPES[trade_type],
             "symbol": await self.exchange_symbol_associated_to_pair(trading_pair),
             "size": str(amount),
             "orderType": CONSTANTS.ORDER_TYPES[order_type],
-            "force": CONSTANTS.DEFAULT_TIME_IN_FORCE,
+            "force": force,
             "clientOid": order_id,
         }
         if order_type.is_limit_type():
@@ -385,7 +394,9 @@ class BitgetExchange(ExchangePyBase):
             update_timestamp=self.current_timestamp,
             new_state=new_state,
             client_order_id=order.client_order_id,
-            exchange_order_id=order.exchange_order_id,
+            # The client-order-id lookup is also the recovery path for a placement whose
+            # response timed out or was cancelled after Bitget accepted the request.
+            exchange_order_id=str(updated_info["orderId"]),
         )
 
         return order_update

@@ -278,7 +278,7 @@ Bron: `GridExecutorConfig` in `_create_grid_action`; waarden gevalideerd in `Exe
 | `max_orders_per_batch` | 2 | 2 | 2 | – |
 | `order_frequency` | 3 s | 3 s | 3 s | – |
 | `safe_extra_spread` | 0,0001 | 0,0001 | – | – |
-| Open-ordertype | LIMIT_MAKER (`use_post_only_orders` true) | LIMIT (post-only false; Bitget-`ORDER_TYPES` heeft geen LIMIT_MAKER) | LIMIT_MAKER (post-only true) | GEVERIFIEERD (DB) voor U en B |
+| Open-ordertype | LIMIT_MAKER (`use_post_only_orders` true) | LIMIT (`use_post_only_orders` blijft false); connector ondersteunt nu ook LIMIT_MAKER via `force=post_only`, maar dit is niet geactiveerd | LIMIT_MAKER (post-only true) | GEVERIFIEERD (DB) voor U en B; Bitget-capability LOKAAL |
 | `deduct_base_fees` | false | **true** | false | `_fees_in_base_token` (CTRL ≈L10478) |
 | `limit_price` | `start × 0,95` | idem | idem | – |
 | `total_amount_quote` per executor | ≈ 49–65 USD | mediaan 37,6 (28,7–158,9) USDT | – | GEVERIFIEERD (DB) |
@@ -587,7 +587,15 @@ Bruto = som verkoop-quote − som koop-quote (vóór fees). Netto = bruto − we
 | Niet getroffen | Kraken USD (`deduct_base_fees = false`), OKX (`_fees_in_base_token` is alleen true voor connectornamen met "bitget") |
 | Afgeleide inputs voor Bitget | Alle consumenten van `net_pnl` (`register_close_trade`, loss-streak, cycle-lock, coin-killswitch, rolling-P&L-pauze) kregen een licht negatief bevooroordeeld signaal. Marginale "winsten" kunnen als verlies zijn geboekt (AFGELEID). `DrawdownTracker` rekent op portfoliowaarde en is daarvoor minder gevoelig |
 
-### 8.3 Hoe resultaten toekomstige beslissingen beïnvloeden
+### 8.3 Offline research-ledger en candle-replay
+
+`multi_coin_grid_pro/backtesting` is een afzonderlijke offline onderzoekslaag en vervangt de live `GridExecutor` niet. Het ledger gebruikt FIFO per fill en houdt quote-cash, base-inventory, resterende kostprijs, werkelijk betaalde entry/exitfees en geschatte toekomstige exitkosten afzonderlijk bij. Een BUY-fee in base verlaagt de ontvangen inventory; een SELL-fee in quote verlaagt de opbrengst. Dezelfde trade-ID wordt maar eenmaal geboekt, ook als REST en WebSocket dezelfde fill leveren.
+
+`realized_net = matched_sell_proceeds - matched_buy_cost - allocated_entry_fees - exit_fees`. `unrealized_net = inventory_mark_value - remaining_cost_basis - remaining_entry_fees - estimated_exit_cost`. Werkelijke equity trekt geschatte toekomstige exitkosten niet af; `projected_total_net_pnl_quote` doet dat wel. Handmatige sells kunnen als `source=manual` worden gereconcilieerd; een sell boven de gevolgde inventory wordt niet aan bot-P&L toegerekend en geeft een datakwaliteitswaarschuwing.
+
+De candle-replay is nauwkeurigheidsniveau A: een limiet vult alleen bij prijspenetratie, ondersteunt expliciete partiële fillaannames, post-only-crossingcancels, spread, maker/takerfees, slippage, min-notional, tick size en final-tick-accounting. Candle-high/low bewijst geen makerfill of queuepositie. Niveau B vereist echte historische trade-/orderboekdata en latency; ontbrekende data worden niet gefingeerd.
+
+### 8.4 Hoe resultaten toekomstige beslissingen beïnvloeden
 
 De strategie heeft **geen lerende parameteraanpassing**: YAML-waarden en `coin_profiles` zijn statisch. Terugkoppeling loopt uitsluitend via:
 
@@ -622,7 +630,7 @@ Alle waarden zijn effectieve waarden uit het geladen model; bron = YAML (kolom "
 | Fee-model (gates) | average, 0,3 / 0,3 (P) | average, maker 0,1 / taker 0,2 (P) | best_case, maker 0,1 / taker 0,2 (P) | `fee_aware_filter` |
 | `min_net_profit_pct` | 0,3 | 0,2 | 0,4 | `fee_aware_filter` |
 | Basis-fee in base-token | Nee | **Ja** | Nee | `_fees_in_base_token` |
-| Open-ordertype | LIMIT_MAKER | LIMIT | LIMIT_MAKER | `use_post_only_orders` |
+| Open-ordertype | LIMIT_MAKER | LIMIT (connector-capability LIMIT_MAKER beschikbaar, vlag blijft uit) | LIMIT_MAKER | `use_post_only_orders` |
 | `order_refresh_time` | `ONBEKEND` | 30 s | 30 s | – |
 | `max_simultaneous_coins` | 3 | 3 | 3 | – |
 | Dynamische slots max | 3 | 12 | 12 | `dynamic_slots.max_slots` |
@@ -826,3 +834,4 @@ Nieuwste onderaan. Per wijziging in dezelfde commit bijwerken (zie onderhoudsreg
 | 2026-11-02 | Risicoreferenties Bitget/Kraken USD | `risk_reference_balance_quote` 164 (Bitget, was 50 000) en 280 (Kraken USD, was 300); `risk_reference_use_live_balance: true` op beide met de referentie als plafond; restartcheck ziet vergrendeld quote vanaf 1 (`startup_reconcile_locked_tolerance_quote`, was `min_order_amount_quote`) | Operator bevestigde accountvermogen 164 USDT / 280 USD, geen crypto; referenties moeten het werkelijke kapitaal weerspiegelen | Alle %-limieten bindend op werkelijk kapitaal (7.1a): Bitget 82 per coin / 114,8 totaal, ILLIQUID-bucket 16,4 weigert volle slots, meestal twee gelijktijdige grids; dagverlies 4,92 USDT; sizing zelf ongewijzigd | `multi_coin_grid_pro/tests/unit/test_capital_adaptive_risk.py` | LOKAAL |
 | 2026-11-02 | Kapitaaladaptief risicomodel (Bitget, Kraken USD) | Nominale `risk_reference_balance_quote` (164/280) verwijderd; referentie en `total_amount_quote` volgen per tick de live equity (drempel 1%, optionele `risk_capital_cap_quote`); saldo-versheid (`balance_max_age_seconds`) en fail-closed sizing bij onleesbaar saldo (geen terugval op nominaal bedrag); stortingen/opnames op rustmomenten verschuiven de `DrawdownTracker`-baselines; `_slot_fits_risk_budget` begrenst slots op per-coin-, totaal- en bucketruimte met `CAPITAL SKIP/CAP`-logs; parallel-slotcap alleen voor haalbare slots; onbekende coins met sterk bewijs (volume ≥ 25 M, spread ≤ 0,5%) krijgen MEME- i.p.v. ILLIQUID-caps; `max_daily_loss_quote: 9.0` uit Kraken-USD-YAML | Bots moeten met 160 tot 5000 zonder handmatige aanpassing veilig schalen | Limieten, slotgrootte en buckets schalen met de equity (tabel 7.1a); bij kleine accounts worden slots onder het minimum overgeslagen; onbekende liquide coins krijgen ruimere caps (MEME) dan voorheen (ILLIQUID); percentages, TP/SL en strategie ongewijzigd | `multi_coin_grid_pro/tests/unit/test_capital_adaptive_risk.py`, `test_risk_buckets.py`, `test_bucket_and_dpm_invariants.py` | LOKAAL |
 | 2026-11-02 | Regime-telemetrie (Bitget, Kraken USD, alle spotbots) | Nieuw `persistence/regime_telemetry.py` (snapshotregister + SQLite `data/regime_telemetry.db`); controller publiceert het gladgestreken regime per cyclus; `grid_executor.py` registreert regime bij elke BUY-fill (`RegimeBuyFill`), eerste BUY (`entry_regime`), laatste SELL, `early_stop()`-beslissing en werkelijke sluiting (`exit_regime`); scalars in `custom_info`; `regime_telemetry_max_age_seconds` = 300 | `entry_regime` werd niet meer geschreven (14/193 Bitget, 0/84 Kraken USD sinds 2026-07-02), `exit_regime` bestond niet | Alleen observability; geen wijziging van entries, exits, TP/SL, accumulatie, risk limits of allocatie; DB-fouten raken de handel niet; regime-flip-pad in `_should_bypass_grace_period` ongewijzigd (roept een niet-bestaande methode aan) | `multi_coin_grid_pro/tests/unit/test_regime_telemetry.py` | LOKAAL |
+| 2026-11-02 | Core orderveiligheid, Bitget Spot, offline backtesting | Ambigue create-cancellation/timeout blijft `PENDING_CREATE`; tijdelijke statusfouten tellen niet als not-found; Bitget herstelt via `clientOid`; Kraken via open/closed `userref`; Bitget ondersteunt `LIMIT_MAKER` met `force=post_only`; nieuw FIFO-ledger en conservatieve candle-replay | Voorkomt dat een geaccepteerd exchangeorder na lokale cancellation uit tracking verdwijnt; corrigeert base/quote-fee-eenheden en open-inventory-P&L in onderzoek | Onzekere orders blokkeren duplicaatplaatsing tot reconciliatie; Bitget-livegedrag ongewijzigd omdat `use_post_only_orders: false` blijft; backtesting is offline en wijzigt geen tradingregels | core/Bitget/Kraken connector-tests en `multi_coin_grid_pro/tests/backtest/test_{pnl_ledger,candle_replay,backtest}.py` | LOKAAL |

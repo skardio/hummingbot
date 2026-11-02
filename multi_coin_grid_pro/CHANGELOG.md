@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Offline FIFO P&L and conservative candle replay**: deterministic accounting for partial fills, base/quote fees, manual sells, open inventory, final-tick fills, post-only cancels, maker/taker fees, drawdown and data-quality warnings. This layer does not replace or call the live `GridExecutor`.
+- **Kraken uncertain-order recovery**: pending creates without a txid are reconciled by numeric `userref` against both OpenOrders and ClosedOrders.
+- **Bitget Spot LIMIT_MAKER capability**: `OrderType.LIMIT_MAKER` maps to a limit order with `force="post_only"`; the production `use_post_only_orders` flag remains disabled.
+
 - **Startup Delay Feature**: Bot now waits a configurable amount of time (default: 1 hour) before making the first trade
   - Config parameter: `min_startup_wait_seconds` (default: 3600 seconds = 1 hour)
   - Prevents immediate trading on bot startup, allowing time for market data collection
@@ -33,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Unit tests added: `test_paper_trading_init_markets_passes_common_pairs`, `test_ensure_order_book_exists_adds_to_paper_trading_connector`, `test_ensure_order_book_exists_adds_trade_listener`
 
 ### Changed
+- **Ambiguous order submissions remain tracked**: `CancelledError` and placement timeout no longer mark an order failed without exchange evidence. Temporary status/REST failures no longer advance the lost-order counter; repeated confirmed not-found responses retain the existing bounded lost-order path.
+- **Legacy backtest fee units corrected**: BUY fees are now calculated in quote currency and tests require an executed trade where the fixture expects one.
+
 - Exit conditions tightened: `exit_short_threshold` changed from -1.0% to -0.5% for faster exit on declining trends
 
 - **Rate Limiting Optimization**: Improved API rate limit handling

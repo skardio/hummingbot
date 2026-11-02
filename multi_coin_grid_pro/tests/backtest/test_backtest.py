@@ -95,7 +95,7 @@ class TestBacktestEngine:
         assert result.start_date == start_date
         assert result.end_date == end_date
         assert result.initial_capital == Decimal("120")
-        assert result.num_trades >= 0
+        assert result.num_trades > 0
 
     def test_calculate_max_drawdown(self, sample_historical_data, config):
         """Test max drawdown calculation"""

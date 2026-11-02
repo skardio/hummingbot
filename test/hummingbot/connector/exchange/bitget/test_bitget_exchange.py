@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from decimal import Decimal
@@ -309,7 +310,7 @@ class BitgetExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests)
 
     @property
     def expected_supported_order_types(self):
-        return [OrderType.LIMIT, OrderType.MARKET]
+        return [OrderType.LIMIT, OrderType.LIMIT_MAKER, OrderType.MARKET]
 
     @property
     def expected_trading_rule(self):
@@ -393,7 +394,93 @@ class BitgetExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests)
         if order.order_type.is_limit_type():
             self.assertEqual(order.price, Decimal(request_data["price"]))
         self.assertEqual(order.client_order_id, request_data["clientOid"])
-        self.assertEqual(CONSTANTS.DEFAULT_TIME_IN_FORCE.lower(), request_data["force"])
+        expected_force = (
+            CONSTANTS.POST_ONLY_TIME_IN_FORCE
+            if order.order_type is OrderType.LIMIT_MAKER
+            else CONSTANTS.DEFAULT_TIME_IN_FORCE
+        )
+        self.assertEqual(expected_force, request_data["force"])
+
+    @aioresponses()
+    def test_create_limit_maker_order_sends_post_only(self, mock_api):
+        self._simulate_trading_rules_initialized()
+        self.exchange._set_current_timestamp(1640780000)
+        request_sent_event = asyncio.Event()
+
+        url = self.order_creation_url
+        mock_api.post(
+            url,
+            body=json.dumps(self.order_creation_request_successful_mock_response),
+            callback=lambda *args, **kwargs: request_sent_event.set(),
+        )
+
+        order_id = self.place_buy_order(order_type=OrderType.LIMIT_MAKER)
+        self.async_run_with_timeout(request_sent_event.wait())
+
+        self.assertIn(order_id, self.exchange.in_flight_orders)
+        request_data = json.loads(self._all_executed_requests(mock_api, url)[0].kwargs["data"])
+        self.assertEqual("limit", request_data["orderType"])
+        self.assertEqual(CONSTANTS.POST_ONLY_TIME_IN_FORCE, request_data["force"])
+
+    @aioresponses()
+    def test_create_limit_order_keeps_gtc(self, mock_api):
+        self._simulate_trading_rules_initialized()
+        self.exchange._set_current_timestamp(1640780000)
+        request_sent_event = asyncio.Event()
+
+        url = self.order_creation_url
+        mock_api.post(
+            url,
+            body=json.dumps(self.order_creation_request_successful_mock_response),
+            callback=lambda *args, **kwargs: request_sent_event.set(),
+        )
+
+        self.place_buy_order(order_type=OrderType.LIMIT)
+        self.async_run_with_timeout(request_sent_event.wait())
+
+        request_data = json.loads(self._all_executed_requests(mock_api, url)[0].kwargs["data"])
+        self.assertEqual(CONSTANTS.DEFAULT_TIME_IN_FORCE, request_data["force"])
+
+    @aioresponses()
+    async def test_update_order_status_when_request_fails_marks_order_as_not_found(self, mock_api):
+        """A transport/HTTP failure is not proof that an exchange order is absent."""
+        self.exchange._set_current_timestamp(1640780000)
+        order_id = self.client_order_id_prefix + "1"
+        self.exchange.start_tracking_order(
+            order_id=order_id,
+            exchange_order_id=str(self.expected_exchange_order_id),
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            price=Decimal("10000"),
+            amount=Decimal("1"),
+        )
+        order = self.exchange.in_flight_orders[order_id]
+        self.configure_http_error_order_status_response(order=order, mock_api=mock_api)
+
+        await self.exchange._update_order_status()
+
+        self.assertTrue(order.is_open)
+        self.assertEqual(0, self.exchange._order_tracker._order_not_found_records[order_id])
+
+    def test_client_oid_status_lookup_recovers_missing_exchange_order_id(self):
+        order_id = self.client_order_id_prefix + "1"
+        self.exchange.start_tracking_order(
+            order_id=order_id,
+            exchange_order_id=None,
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT_MAKER,
+            trade_type=TradeType.BUY,
+            price=Decimal("10000"),
+            amount=Decimal("1"),
+        )
+        order = self.exchange.in_flight_orders[order_id]
+        response = self._order_status_request_open_mock_response(order)
+
+        update = self.exchange._create_order_update(order, response)
+
+        self.assertEqual(self.expected_exchange_order_id, update.exchange_order_id)
+        self.assertEqual(OrderState.OPEN, update.new_state)
 
     def validate_order_cancelation_request(self, order: InFlightOrder, request_call: RequestCall):
         request_data = json.loads(request_call.kwargs["data"])

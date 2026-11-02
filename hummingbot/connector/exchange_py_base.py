@@ -183,6 +183,16 @@ class ExchangePyBase(ExchangeBase, ABC):
         return all(self.status_dict.values())
 
     @property
+    def only_count_confirmed_order_not_found(self) -> bool:
+        """Whether transient status errors must preserve an active order.
+
+        Connectors opt in only when they have a deterministic client-order-id recovery
+        path. This keeps the safer Bitget/Kraken behavior from changing unreviewed
+        connectors that rely on the legacy lost-order policy.
+        """
+        return False
+
+    @property
     def name_cap(self) -> str:
         return self.name.capitalize()
 
@@ -454,22 +464,18 @@ class ExchangePyBase(ExchangeBase, ABC):
 
         except asyncio.CancelledError:
             self.logger().warning(
-                f"Order {order_id} ({trading_pair}) was cancelled before the exchange confirmed it. "
-                f"Marking as failed to avoid ghost orders."
-            )
-            self._on_order_failure(
-                order_id=order_id,
-                trading_pair=trading_pair,
-                amount=quantized_amount,
-                trade_type=trade_type,
-                order_type=order_type,
-                price=price,
-                exception=asyncio.CancelledError(
-                    f"Order placement task cancelled (network issue or shutdown) for {trading_pair}"
-                ),
-                **kwargs,
+                f"Order submission task for {order_id} ({trading_pair}) was cancelled before the exchange "
+                f"confirmed the outcome. Keeping the order in PENDING_CREATE for reconciliation."
             )
             raise
+        except asyncio.TimeoutError:
+            # A timeout does not prove that the exchange rejected the request. The order remains
+            # tracked by client order id so status polling, user-stream events, and restart
+            # restoration can reconcile a late acceptance without creating a duplicate order.
+            self.logger().warning(
+                f"Order submission for {order_id} ({trading_pair}) timed out with an unknown exchange outcome. "
+                f"Keeping the order in PENDING_CREATE for reconciliation."
+            )
         except Exception as ex:
             self._on_order_failure(
                 order_id=order_id,
@@ -988,19 +994,32 @@ class ExchangePyBase(ExchangeBase, ABC):
         try:
             raise error
         except asyncio.TimeoutError:
-            self.logger().debug(
-                f"Tracked order {order.client_order_id} does not have an exchange id. "
-                f"Attempting fetch in next polling interval."
-            )
-            await self._order_tracker.process_order_not_found(order.client_order_id)
+            if self.only_count_confirmed_order_not_found:
+                self.logger().warning(
+                    f"Tracked order {order.client_order_id} does not have an exchange id. "
+                    f"Its exchange outcome is still unknown; attempting reconciliation in the next polling interval."
+                )
+            else:
+                await self._order_tracker.process_order_not_found(order.client_order_id)
         except asyncio.CancelledError:
             raise
         except Exception as request_error:
-            self.logger().warning(
-                f"Error fetching status update for the active order {order.client_order_id}: {request_error}.",
+            is_not_found = self._is_order_not_found_during_status_update_error(
+                status_update_exception=request_error
             )
-            self.logger().debug(f"Order {order.client_order_id} not found counter: {self._order_tracker._order_not_found_records.get(order.client_order_id, 0)}")
-            await self._order_tracker.process_order_not_found(order.client_order_id)
+            if is_not_found or not self.only_count_confirmed_order_not_found:
+                await self._order_tracker.process_order_not_found(order.client_order_id)
+                self.logger().warning(
+                    f"Order {order.client_order_id} was not found during reconciliation "
+                    f"({self._order_tracker._order_not_found_records.get(order.client_order_id, 0)}/"
+                    f"{self._order_tracker.lost_order_count_limit + 1})."
+                )
+            else:
+                # Transient REST failures are not evidence that the exchange never accepted the order.
+                self.logger().warning(
+                    f"Error reconciling active order {order.client_order_id}; keeping it tracked because the "
+                    f"exchange outcome is unknown: {request_error}."
+                )
 
     async def _handle_update_error_for_lost_order(self, order: InFlightOrder, error: Exception):
         is_not_found = self._is_order_not_found_during_status_update_error(status_update_exception=error)

@@ -22,7 +22,7 @@ from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.connector.utils import get_new_numeric_client_order_id
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 from hummingbot.core.data_type.common import OrderType, TradeType
-from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, TradeUpdate
+from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, OrderUpdate, TradeUpdate
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.data_type.trade_fee import TokenAmount, TradeFeeBase
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
@@ -123,6 +123,10 @@ class KrakenExchange(ExchangePyBase):
     def is_trading_required(self) -> bool:
         return self._trading_required
 
+    @property
+    def only_count_confirmed_order_not_found(self) -> bool:
+        return True
+
     def supported_order_types(self):
         return [OrderType.LIMIT, OrderType.LIMIT_MAKER, OrderType.MARKET]
 
@@ -140,7 +144,7 @@ class KrakenExchange(ExchangePyBase):
         return False
 
     def _is_order_not_found_during_status_update_error(self, status_update_exception: Exception) -> bool:
-        return False
+        return CONSTANTS.UNKNOWN_ORDER_MESSAGE in str(status_update_exception)
 
     def _is_order_not_found_during_cancelation_error(self, cancelation_exception: Exception) -> bool:
         return CONSTANTS.UNKNOWN_ORDER_MESSAGE in str(cancelation_exception)
@@ -213,6 +217,15 @@ class KrakenExchange(ExchangePyBase):
                                                   CONSTANTS.OPEN_ORDERS_PATH_URL,
                                                   is_auth_required=True,
                                                   data=data)
+
+    async def get_closed_orders_with_userref(self, userref: int):
+        data = {"userref": userref}
+        return await self._api_request_with_retry(
+            RESTMethod.POST,
+            CONSTANTS.CLOSED_ORDERS_PATH_URL,
+            is_auth_required=True,
+            data=data,
+        )
 
     # === Orders placing ===
 
@@ -540,6 +553,11 @@ class KrakenExchange(ExchangePyBase):
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
         trade_updates = []
 
+        if order.exchange_order_id is None:
+            # Do not wait GET_EX_ORDER_ID_TIMEOUT on every status cycle. The status request
+            # below can recover Kraken's txid from the persisted numeric userref.
+            return trade_updates
+
         try:
             exchange_order_id = await order.get_exchange_order_id()
             all_fills_response = await self._api_request_with_retry(
@@ -565,15 +583,47 @@ class KrakenExchange(ExchangePyBase):
         return trade_updates
 
     async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
-        exchange_order_id = await tracked_order.get_exchange_order_id()
-        updated_order_data = await self._api_request_with_retry(
-            method=RESTMethod.POST,
-            path_url=CONSTANTS.QUERY_ORDERS_PATH_URL,
-            data={"txid": exchange_order_id},
-            is_auth_required=True)
+        exchange_order_id = tracked_order.exchange_order_id
+        update = None
 
-        update = updated_order_data.get(exchange_order_id)
+        if exchange_order_id is None:
+            # Kraken accepts the numeric client order id as `userref`. Query both open and
+            # recently closed orders so a fast fill/cancel can be recovered after a lost
+            # placement response or process restart.
+            open_orders = await self.get_open_orders_with_userref(int(tracked_order.client_order_id))
+            matching_orders = open_orders.get("open", {})
+            if not matching_orders:
+                closed_orders = await self.get_closed_orders_with_userref(int(tracked_order.client_order_id))
+                matching_orders = closed_orders.get("closed", {})
+            if not matching_orders:
+                raise IOError(
+                    f"{CONSTANTS.UNKNOWN_ORDER_MESSAGE}: no Kraken order for userref "
+                    f"{tracked_order.client_order_id}"
+                )
+            exchange_order_id, update = next(iter(matching_orders.items()))
+        else:
+            updated_order_data = await self._api_request_with_retry(
+                method=RESTMethod.POST,
+                path_url=CONSTANTS.QUERY_ORDERS_PATH_URL,
+                data={"txid": exchange_order_id},
+                is_auth_required=True)
+            update = updated_order_data.get(exchange_order_id)
+
+        if update is None:
+            raise IOError(f"{CONSTANTS.UNKNOWN_ORDER_MESSAGE}: {exchange_order_id}")
+
         new_state = CONSTANTS.ORDER_STATE[update["status"]]
+        if new_state is OrderState.OPEN and Decimal(update.get("vol_exec", "0")) > Decimal("0"):
+            new_state = OrderState.PARTIALLY_FILLED
+
+        # A recovered order can already be filled before the first status poll. Process its
+        # trade ids (and therefore exact fee data) before returning a terminal order update.
+        # ClientOrderTracker deduplicates a later WebSocket/REST copy by trade id.
+        trade_ids = update.get("trades", [])
+        if trade_ids:
+            trade_updates = await self._trade_updates_for_trade_ids(tracked_order, trade_ids)
+            for trade_update in trade_updates:
+                self._order_tracker.process_trade_update(trade_update)
 
         order_update = OrderUpdate(
             client_order_id=tracked_order.client_order_id,
@@ -584,6 +634,22 @@ class KrakenExchange(ExchangePyBase):
         )
 
         return order_update
+
+    async def _trade_updates_for_trade_ids(
+        self, tracked_order: InFlightOrder, trade_ids: List[str]
+    ) -> List[TradeUpdate]:
+        fills = await self._api_request_with_retry(
+            method=RESTMethod.POST,
+            path_url=CONSTANTS.QUERY_TRADES_PATH_URL,
+            data={"txid": ",".join(trade_ids)},
+            is_auth_required=True,
+        )
+        trade_updates = []
+        for trade_id, trade_data in fills.items():
+            trade = dict(trade_data)
+            trade["trade_id"] = trade_id
+            trade_updates.append(self._create_trade_update_with_order_fill_data(trade, tracked_order))
+        return trade_updates
 
     async def _update_balances(self):
         local_asset_names = set(self._account_balances.keys())

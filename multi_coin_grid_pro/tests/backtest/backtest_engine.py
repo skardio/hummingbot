@@ -1,7 +1,7 @@
-"""
-Backtesting Engine for Multi-Coin Grid Bot
+"""Legacy decision smoke-test adapter.
 
-Simulates bot decisions on historical data to calculate would-be P&L.
+Financial research must use :mod:`multi_coin_grid_pro.backtesting`. This class is
+kept for compatibility with older tests, with currency-safe quote fees.
 """
 
 import logging
@@ -73,6 +73,7 @@ class BacktestEngine:
 
         self.current_capital = initial_capital
         self.positions: Dict[str, Decimal] = {}  # {symbol: amount}
+        self.position_costs: Dict[str, Decimal] = {}
         self.trades: List[BacktestTrade] = []
         self.equity_curve: List[Tuple[float, Decimal]] = []
 
@@ -175,13 +176,16 @@ class BacktestEngine:
 
     def _execute_buy(self, symbol: str, price: Decimal, timestamp: datetime) -> None:
         """Execute buy order"""
-        amount = self.current_capital / price
-        fee = amount * Decimal(str(self.config.get("maker_fee_pct", 0.0016)))
-        cost = amount * price + fee
+        fee_rate = Decimal(str(self.config.get("maker_fee_pct", 0.0016)))
+        amount = self.current_capital / (price * (Decimal("1") + fee_rate))
+        notional = amount * price
+        fee = notional * fee_rate
+        cost = notional + fee
 
         if cost <= self.current_capital:
             self.current_capital -= cost
             self.positions[symbol] = amount
+            self.position_costs[symbol] = cost
 
             trade = BacktestTrade(
                 timestamp=timestamp.timestamp(),
@@ -203,6 +207,7 @@ class BacktestEngine:
         revenue = amount * price
         fee = revenue * Decimal(str(self.config.get("maker_fee_pct", 0.0016)))
         net_revenue = revenue - fee
+        pnl = net_revenue - self.position_costs.pop(symbol)
 
         self.current_capital += net_revenue
         del self.positions[symbol]
@@ -213,7 +218,8 @@ class BacktestEngine:
             side="SELL",
             price=price,
             amount=amount,
-            fee=fee
+            fee=fee,
+            pnl=pnl,
         )
         self.trades.append(trade)
         logger.debug(f"SELL {symbol} @ €{price} for €{net_revenue:.2f}")
