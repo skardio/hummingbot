@@ -7785,7 +7785,7 @@ class MultiCoinGridController(ControllerBase):
 
         reasons: List[str] = []
         tolerated = (Decimal(str(cfg.startup_reconcile_ack_locked_quote)) + self.budget_allocator.total_reserved
-                     + Decimal(str(cfg.min_order_amount_quote)))
+                     + Decimal(str(cfg.startup_reconcile_locked_tolerance_quote)))
         if locked > tolerated:
             reasons.append(f"{locked:.2f} {ccy} locked in open orders that no executor of this run owns")
 

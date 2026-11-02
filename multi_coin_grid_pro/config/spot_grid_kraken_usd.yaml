@@ -940,7 +940,8 @@ total_amount_quote: 300             # Origineel: $300 USD budget
                                     # 🔧 US9: Verlaging naar 200 zodra edge bewezen is (→$100/coin bij 2 slots)
 min_order_amount_quote: 15          # $15 minimum order
 
-risk_reference_balance_quote: 300   # Origineel: $300 referentiebalans
+risk_reference_balance_quote: 280   # Operator-confirmed account equity (2026-11-02, no crypto); ceiling for the live balance
+risk_reference_use_live_balance: true  # Effective reference = min(280, live equity at start); entries blocked until readable
 risk_bucket_limits:                 # Max % van portfolio per bucket (optioneel; weglaten = module defaults)
   L1: 10.0                          # BTC/ETH -- zelden gehandeld, klein houden
   L2: 60.0                          # Origineel

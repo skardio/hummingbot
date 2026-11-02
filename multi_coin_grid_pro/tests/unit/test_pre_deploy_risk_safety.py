@@ -323,10 +323,11 @@ class TestLiveReferencePreconditions:
         assert ctrl._ensure_risk_reference() is True
         assert ctrl.config.risk_reference_balance == D("700")
 
-    def test_bitget_yaml_does_not_assume_a_dedicated_account(self):
+    def test_bitget_yaml_uses_operator_confirmed_reference_as_ceiling(self):
         from multi_coin_grid_pro.spot_bitget.config_manager import SpotGridBitgetConfigManager
         data = SpotGridBitgetConfigManager().load_config()
-        assert data.get("risk_reference_use_live_balance", False) is False
+        assert data.get("risk_reference_balance_quote") == 164
+        assert data.get("risk_reference_use_live_balance") is True
 
 
 class TestStaleExposureReconciliation:

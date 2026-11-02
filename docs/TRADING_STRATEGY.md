@@ -49,7 +49,7 @@ De YAML's mengen fracties (`0.02` = 2%) en percentages (`2.0` = 2%). Per veld is
 | Status | Betekenis | Nu |
 |---|---|---|
 | GECOMMIT | In `HEAD` en gepusht naar `origin/branch_20251109`; alles in dit document is gecommit tenzij anders vermeld | HEAD `4d4728604` |
-| LOKAAL | Alleen in de werkmap, nog niet gecommit | Alleen documentatie, onderhoudsregel en doc-check (`.github/`); geen tradinggedrag |
+| LOKAAL | Alleen in de werkmap, nog niet gecommit | Documentatie, onderhoudsregel en doc-check (`.github/`); daarnaast de referenties en `risk_reference_use_live_balance` in de Bitget- en Kraken-USD-YAML en `startup_reconcile_locked_tolerance_quote` (7.1a, 7.8) |
 | ONDERZOCHT | Beoordeeld maar niet geïmplementeerd; staat in 7.8 en 12.4 | Zie 7.8 en 12.4 |
 
 Gecommit betekent niet dat een draaiend proces de wijziging bevat: een herstart door de operator is nodig en het procesgebruik is niet geverifieerd (12.4).
@@ -161,7 +161,7 @@ Drempels per exchange: **U / B / O**. Eenheden: P = percent, F = fractie.
 | 2 | Controller-exitsignalen | `_check_professional_exit_signals` (≈L4169) | Actieve coins | zie hoofdstuk 6 | ENABLED | – |
 | 3 | Graceful stop | CTRL ≈L4174 | Runtime-vlag (operator) | – | ENABLED | – |
 | 3a | Restartveiligheid (GECOMMIT `4d4728604`) | `_startup_exposure_gate` | Vergrendeld quote en inventory zonder executor in deze run | Blokkeert entries tot niets onverklaards meer staat of de operator het bevestigt (`startup_reconcile_*`); zie 7.8 | ENABLED (alle; `startup_reconcile_enabled` default true) | Fail-closed |
-| 3b | Live risicoreferentie (GECOMMIT `4d4728604`) | `_ensure_risk_reference` | Totaal quote bij start, geen executors, geen onverklaarde exposure | Alleen actief als `risk_reference_use_live_balance`; referentie = min(plafond, live equity) | DISABLED (alle bots; operatorbeslissing) | Fail-closed |
+| 3b | Live risicoreferentie (GECOMMIT `4d4728604`) | `_ensure_risk_reference` | Totaal quote bij start, geen executors, geen onverklaarde exposure | Alleen actief als `risk_reference_use_live_balance`; referentie = min(plafond, live equity) | ENABLED Kraken USD en Bitget (LOKAAL; plafond 280 / 164), DISABLED OKX | Fail-closed |
 | 4 | Time-based filter | `TimeBasedFilter` (CTRL ≈L4191; `filters/time_based_filter.py` ≈L115/146) | UTC-uur, weekdag | B: lage-liquiditeitsuren [17,18,19,21], hoge [13..16], weekendmult 1,0. Multipliers per uur: `ONBEKEND` | U DISABLED / B ENABLED / O DISABLED | – |
 | 5 | Daglimiet verlies | `GlobalRiskManager` (≈L4202) | Daily loss % van `risk_reference_balance` | 3 (P) van referentie: U 300, B **50 000**, O 150 | ENABLED | – |
 | 6 | Circuit breaker | CTRL ≈L4223 | Prijsrange actieve coin | ≥ 5% in 60 s (hard-coded) → alleen handmatig hervatten | ENABLED | – |
@@ -187,7 +187,7 @@ Drempels per exchange: **U / B / O**. Eenheden: P = percent, F = fractie.
 | 26 | Nieuwe-grid-check | `_should_create_new_grid` (≈L8105) | Startup, budget, risk | Startupwacht `min_startup_wait_seconds` = 60; budget ≥ `num_grids × min_order_amount_quote`; `risk_manager.can_open_trade` | ENABLED | – |
 | 27 | Spread | `_check_spread_acceptable` (≈L10138) | Live bid/ask | `max_entry_spread_pct` (P): 0,5 / 0,5 / 0,35 (SmartEntry-spread); CTRL-fallback 0,5 | ENABLED | Fail-closed |
 | 28 | Orderboekdiepte | `_check_order_book_depth` (≈L10257) | Orderboek | `orderbook_liquidity`: modus live, 0,5% range, 10 niveaus, 5× ordergrootte | ENABLED | Fail-closed |
-| 29 | Positielimieten (GECOMMIT `855a1871b`, `4d4728604`) | `_check_position_limits` aangeroepen vanuit `_create_grid_action` op het exacte executorbedrag; `RiskGuardV2` | Exposure vs `risk_reference_balance` | `max_exposure_per_coin_pct` 55 / 50 / 50 en `max_total_exposure_pct` 95 / 70 / 70 (YAML-percent) worden bij het laden genormaliseerd naar fracties (0,55/0,95; 0,50/0,70); geen eerste-positie-bypass | ENABLED (bindend; op Bitget t.o.v. referentie 50 000 zolang de live referentie uit staat, zie 7.1) | **Fail-closed** |
+| 29 | Positielimieten (GECOMMIT `855a1871b`, `4d4728604`) | `_check_position_limits` aangeroepen vanuit `_create_grid_action` op het exacte executorbedrag; `RiskGuardV2` | Exposure vs `risk_reference_balance` | `max_exposure_per_coin_pct` 55 / 50 / 50 en `max_total_exposure_pct` 95 / 70 / 70 (YAML-percent) worden bij het laden genormaliseerd naar fracties (0,55/0,95; 0,50/0,70); geen eerste-positie-bypass | ENABLED (bindend; limieten t.o.v. referentie 280 / 164 / 150, zie 7.1a) | **Fail-closed** |
 | 30 | Kapitaal-allocatie en sizing | zie 5.1 | Saldo, volatiliteit | zie 5.1 | ENABLED | – |
 | 31 | `ProfessionalRiskManager.can_open_new_position` | `risk/professional_risk_manager.py`, via `_professional_risk_allows` | Rolling P&L, win rate, posities, dagverlies / risico-equity | zie 7.3 | ENABLED | **Fail-closed** bij onbekende equity (GECOMMIT `4d4728604`) |
 | 32 | Dagelijkse coin-killswitch | CTRL ≈L5673 | Dag-P&L per coin in R | Uitgeschakeld bij < −2R, helft bij < −1R; `r_unit_quote` = 5,0 | ENABLED | – |
@@ -322,7 +322,7 @@ Levels boven de marktprijs vallen binnen `activation_bounds` en worden door `_ge
 7. Budget (gate 37) en risk-bucket (gate 35).
 8. Positielimieten (gate 29) op het uiteindelijke bedrag na alle multipliers, inclusief de kwaliteitsmultiplier tot 1,25×.
 
-`total_amount_quote` in de YAML (U 300 / B 50 000 / O 150) is niet het feitelijk gebruikte kapitaal; allocatie volgt het werkelijke saldo. Bitget-saldo ≈ 1000 USDT is afgeleid uit eerder bekeken UI-cijfers (`AFGELEID`); het exacte saldo is `ONBEKEND`.
+`total_amount_quote` in de YAML (U 300 / B 50 000 / O 150) is niet het feitelijk gebruikte kapitaal; allocatie volgt het werkelijke saldo. Operator bevestigde op 2026-11-02: Bitget 164 USDT en Kraken USD 280 USD, geen crypto en geen andere beleggingen op deze accounts.
 
 ### 5.2 Levenscyclus van een executor
 
@@ -421,11 +421,38 @@ Binnen de executor geldt de volgorde van 6.3. Tussen controller en executor is e
 
 | Limiet | Waarde (YAML) | Gebruik in code | Effect |
 |---|---|---|---|
-| `max_exposure_per_coin_pct` | 55 / 50 / 50 (percent) | `exposure_pct_to_fraction` (`core/risk_units.py`) normaliseert bij het laden: (0,1] = fractie, (1,100] = percent, daarbuiten ValueError. `_check_position_limits`: `max_per_coin = risk_reference_balance × fractie` op elke nieuwe positie; `RiskGuardV2` krijgt dezelfde limiet als percent | GECOMMIT `855a1871b`. Bindend: U 165 van 300, O 75 van 150, B 25 000 van 50 000 (Bitget zie hieronder). Voor `855a1871b` werd 55 als fractie gelezen (55× kapitaal) |
+| `max_exposure_per_coin_pct` | 55 / 50 / 50 (percent) | `exposure_pct_to_fraction` (`core/risk_units.py`) normaliseert bij het laden: (0,1] = fractie, (1,100] = percent, daarbuiten ValueError. `_check_position_limits`: `max_per_coin = risk_reference_balance × fractie` op elke nieuwe positie; `RiskGuardV2` krijgt dezelfde limiet als percent | GECOMMIT `855a1871b`. Bindend: U 154 van 280, B 82 van 164, O 75 van 150 (referenties LOKAAL, zie 7.1a). Voor `855a1871b` werd 55 als fractie gelezen (55× kapitaal) |
 | `max_total_exposure_pct` | 95 / 70 / 70 (percent) | idem; `total_exposure − huidig + nieuw` mag het totaal niet overschrijden, ook niet voor de eerste positie | GECOMMIT `855a1871b`; eerste-positie-bypass verwijderd |
-| `risk_reference_balance_quote` | 300 / **50 000** / 150 | Basis voor alle %-limieten in `GlobalRiskManager`, `BucketExposureTracker`, `RealtimePnLTracker`/`RiskGuardV2` en `_check_position_limits`. Optioneel (`risk_reference_use_live_balance`, default false) begrensd door live equity bij opstart, zie 7.8 | Bitget: de referentie is nog 50 000 (niet het werkelijke saldo; ≈ 1000 is afgeleid uit UI-cijfers), dus de percentagelimieten zijn daar nog ruim. Operatorbeslissing open |
+| `risk_reference_balance_quote` | 280 / 164 / 150 (LOKAAL; was 300 / 50 000 / 150) | Basis voor alle %-limieten in `GlobalRiskManager`, `BucketExposureTracker`, `RealtimePnLTracker`/`RiskGuardV2` en `_check_position_limits`. Met `risk_reference_use_live_balance` (U en B: true, O: false) is dit een plafond: effectief `min(plafond, live equity bij opstart)`, zie 7.8 | Kraken USD 280 en Bitget 164 zijn door de operator bevestigd als totaal accountvermogen (2026-11-02, geen crypto, geen andere beleggingen). OKX blijft 150, onbevestigd |
 | Eindbedrag | – | De check staat in `_create_grid_action` (GECOMMIT `4d4728604`) en toetst het bedrag dat in `CreateExecutorAction.total_amount_quote` komt, na kwaliteitsmultiplier (≤ 1,25×) en parallel-slot-cap | Primair en secundair entrypad delen dezelfde bescherming |
 | Foutafhandeling | – | `_check_position_limits` retourneert `False` bij exception, ongeldige limiet of referentie ≤ 0 | Fail-closed (voorheen fail-open) |
+
+### 7.1a Effectieve limieten en gevolgen voor position sizing bij bevestigd kapitaal (LOKAAL)
+
+Berekend uit de YAML's met referentie = bevestigd accountvermogen (percentages ongewijzigd). Gedrag is vastgelegd in `multi_coin_grid_pro/tests/unit/test_capital_references_bitget_kraken.py`.
+
+| Grens | Bitget (164 USDT) | Kraken USD (280 USD) |
+|---|---|---|
+| Exposure per coin (50% / 55%) | 82 | 154 |
+| Exposure totaal (70% / 95%) | 114,8 | 266 |
+| Per trade / totaal open risico (`GlobalRiskManager`) | 164 / 164 | 154 / 266 |
+| Dagverlies 3% (bruto `GlobalRiskManager`, `RiskGuardV2`-killswitch; `DrawdownTracker` op live werkkapitaal) | 4,92 | 8,40 |
+| Weekverlies / maandverlies | 8% = 13,12 / 12% = 19,68 | 7% = 19,60 / 10% = 28,00 |
+| Risk buckets ILLIQUID / L1 / L2 / MEME | 16,4 / 24,6 / 65,6 / 32,8 | 168 / 28 / 168 / 84 |
+| Parallel-slotcap (0,9 / 3 × vrij saldo) | 49,2 | 84 |
+| Minimale order (`min_order_amount_quote`) | 10 | 15 |
+| `DynamicSlotManager` bij volledig saldo | 1 coin × 7 grids, 22,26 per level | 3 coins × 3 grids, 29,56 per level |
+
+Gevolgen:
+
+- **Sizing zelf is ongewijzigd:** allocatie, parallel-slotcap en multipliers rekenen met het werkelijke vrije saldo, niet met de referentie. De referentie bepaalt alleen limieten en blokkades.
+- **Bitget, minimumorder:** een slot van 49,2 geeft bij 7 grids 7,0 per level (< 10); de grid wordt automatisch teruggebracht tot circa 4 levels van 12,3. Dit komt uit het echte saldo en bestond al vóór de referentiewijziging.
+- **Bitget, gelijktijdige grids:** twee volle slots (98,4) passen binnen 114,8; een derde volle slot niet (resterend 16,4). Drie gelijktijdige grids kunnen alleen als elk slot ≤ 38,3 blijft. In de praktijk loopt Bitget daarmee meestal op twee grids.
+- **Bitget, risk buckets:** `RiskBucketClassifier` classificeert elke niet-handmatig ingedeelde coin als ILLIQUID (cap 16,4): een volle slot (49,2) wordt geweigerd. Alleen handmatige L2-coins (cap 65,6: één slot plus hoogstens 16,4), MEME (32,8) en L1 (24,6) kunnen. Voor de referentiewijziging waren deze caps niet bindend (referentie 50 000).
+- **Kraken USD:** drie slots van 84 (252) passen binnen 266 en 154 per coin; ILLIQUID (168) laat twee slots toe, MEME (84) één, L1 (28) geen volle slot (was 30 bij referentie 300).
+- **Verlieslimieten:** 3% dagverlies is 4,92 USDT (Bitget; circa vijf stop-losses van 2% op een slot van 49,2) en 8,40 USD (Kraken). De `RiskGuardV2`-killswitch blijft na activering aan tot een handmatige reset.
+- **Dalend saldo:** de referentie wordt bij opstart eenmalig bepaald als `min(plafond, live equity)`; een lager saldo bij start verlaagt alle limieten evenredig, een hoger saldo verruimt nooit boven het plafond. Verandert het saldo tijdens de run, dan blijft de referentie gelijk tot de volgende herstart.
+- **Onleesbaar saldo:** nieuwe entries blijven geblokkeerd; exits en bestaande executors lopen door.
 
 ### 7.2 `GlobalRiskManager` (`core/global_risk_manager.py` ≈L54)
 
@@ -497,9 +524,9 @@ Drie lagen, alle ENABLED:
 | `RiskGuardV2` | Equity-drawdown incl. niet-gerealiseerd | Start-equity van de dag (reset via referentie) | percent |
 | `DrawdownTracker` | Werkkapitaal-drawdown (quote + actieve posities) | Live werkkapitaal | percent |
 
-**Restartveiligheid** (`_startup_exposure_gate`, `_find_untracked_exposure`): zolang het account vergrendeld quote (boven `startup_reconcile_ack_locked_quote` + gereserveerd budget + `min_order_amount_quote`) of inventory (waarde ≥ min-notional en hoeveelheid ≥ min-order-size) toont die geen executor van deze run bezit, worden nieuwe entries geblokkeerd (CRITICAL-log met reden, elke 30 s herhaald; daarna sticky). Niet waardeerbare materiële balansen blokkeren ook. Er worden geen orders geannuleerd of verkocht. Config: `startup_reconcile_enabled` (default true), `startup_reconcile_ack_assets`, `startup_reconcile_ack_locked_quote`; open orders worden alleen via vergrendeld quote gezien (geen REST-query).
+**Restartveiligheid** (`_startup_exposure_gate`, `_find_untracked_exposure`): zolang het account vergrendeld quote (boven `startup_reconcile_ack_locked_quote` + gereserveerd budget + `startup_reconcile_locked_tolerance_quote`, default 1; LOKAAL, voorheen `min_order_amount_quote`) of inventory (waarde ≥ min-notional en hoeveelheid ≥ min-order-size) toont die geen executor van deze run bezit, worden nieuwe entries geblokkeerd (CRITICAL-log met reden, elke 30 s herhaald; daarna sticky). Niet waardeerbare materiële balansen blokkeren ook. Er worden geen orders geannuleerd of verkocht. Config: `startup_reconcile_enabled` (default true), `startup_reconcile_ack_assets`, `startup_reconcile_ack_locked_quote`, `startup_reconcile_locked_tolerance_quote`; open buy-orders uit een eerdere run worden gezien als vergrendeld quote (totaal − beschikbaar), open sell-orders als base-balans zonder executor; er is geen REST-query naar open orders. Dit geldt voor Bitget en Kraken USD; zulke orders blijven op de exchange staan en kunnen alsnog vullen.
 
-**Live risicoreferentie** (`_ensure_risk_reference`, `risk_reference_use_live_balance`, default false op alle bots): alleen te bepalen zonder onverklaarde exposure en zonder actieve executors; dan is de referentie `min(plafond, totaal quote − bevestigd vergrendeld quote)` en wordt die doorgegeven aan `GlobalRiskManager`, `BucketExposureTracker` en `RealtimePnLTracker`. Inschakelen is een operatorbeslissing: de code kan niet vaststellen of het quote-saldo van het account volledig botkapitaal is.
+**Live risicoreferentie** (`_ensure_risk_reference`, `risk_reference_use_live_balance`: default false; LOKAAL true voor Bitget (plafond 164) en Kraken USD (plafond 280), OKX false): alleen te bepalen zonder onverklaarde exposure en zonder actieve executors; dan is de referentie `min(plafond, totaal quote − bevestigd vergrendeld quote)` en wordt die doorgegeven aan `GlobalRiskManager`, `BucketExposureTracker` en `RealtimePnLTracker`. Inschakelen steunt op een operatorverklaring (2026-11-02: alleen botkapitaal, geen crypto): de code kan zelf niet vaststellen of het quote-saldo van het account volledig botkapitaal is.
 
 **Exposure-reconciliatie** (`_reconcile_stale_exposure`, `exposure_reconcile_grace_seconds` = 120): getrackte exposure van een executor die zo lang ontbreekt in `executors_info` (SHUTTING_DOWN telt als aanwezig) wordt idempotent vrijgegeven via de bestaande cleanup plus `GlobalRiskManager.release_allocation`. Bij resterende of niet-verifieerbare inventory blijft de exposure staan. Een gemiste P&L-hand-over wordt hiermee niet alsnog geboekt.
 
@@ -560,7 +587,8 @@ Alle waarden zijn effectieve waarden uit het geladen model; bron = YAML (kolom "
 | Quote / account | USD | USDT | USDC | `quote_asset` |
 | Bot-status | Actief | Actief | Inactief sinds 2026-08-22 | DB |
 | `total_amount_quote` | 300 | 50 000 (niet gebruikt voor sizing) | 150 | `total_amount_quote` |
-| `risk_reference_balance_quote` | 300 | 50 000 | 150 | idem |
+| `risk_reference_balance_quote` | 280 (LOKAAL; was 300) | 164 (LOKAAL; was 50 000) | 150 | idem |
+| `risk_reference_use_live_balance` | true (LOKAAL) | true (LOKAAL) | false | idem |
 | Fee-model (gates) | average, 0,3 / 0,3 (P) | average, maker 0,1 / taker 0,2 (P) | best_case, maker 0,1 / taker 0,2 (P) | `fee_aware_filter` |
 | `min_net_profit_pct` | 0,3 | 0,2 | 0,4 | `fee_aware_filter` |
 | Basis-fee in base-token | Nee | **Ja** | Nee | `_fees_in_base_token` |
@@ -716,7 +744,7 @@ flowchart TD
 | Levels boven markt | Worden near-market buys |
 | Controller-exits gebruiken `entry_prices` | Creatieprijs, niet gemiddelde fillprijs |
 | PRO EXIT-laag beperkt tot `active_coin` | Secundaire coins hebben alleen de executor-routes en `_check_professional_exit_signals` |
-| Bitget `risk_reference_balance` 50 000 | Nog niet het werkelijke saldo; %-limieten zijn daar ruim tot de operator de live referentie inschakelt of een expliciete waarde kiest (7.8) |
+| Bitget `risk_reference_balance` | LOKAAL 164 als plafond met live cap (was 50 000, niet het werkelijke saldo); de caps in 7.1a zijn daardoor bindend, ook de risk buckets |
 | Fail-open/fail-closed mix | Fail-open: MTF-condities, edge gate, hourly profit. Fail-closed: SmartEntry, MTF-buy, drawdown, spread, diepte, positielimieten, `ProfessionalRiskManager`-equity, restartveiligheid |
 
 ### 12.3 Verschillen met oudere documentatie
@@ -735,10 +763,10 @@ flowchart TD
 |---|---|
 | Of de Bitget-fix al in een draaiend proces zit | Geen draaiend proces gevonden bij controle; operator beslist over herstart |
 | Of de risicofixes (`855a1871b`, `4d4728604`) in een draaiend proces zitten | Gecommit en gepusht, maar activering vereist een herstart door de operator |
-| Of het Bitget-, Kraken- en OKX-account uitsluitend botkapitaal bevat | Niet vast te stellen uit code; bepaalt of `risk_reference_use_live_balance` veilig aan kan |
+| Of het OKX-account uitsluitend botkapitaal bevat | Niet vast te stellen uit code; OKX is inactief en heeft de live referentie uit |
 | Waardering van gedeeltelijke fills van open buy-orders in de risico-equity | Niet geïmplementeerd; worden niet meegeteld (veilige richting) |
 | Exacte tarieven per exchange en per fill (tier-niveau) | Alleen in `TradeFill.trade_fee`; niet in repo |
-| Werkelijk saldo Bitget en Kraken USD | Saldi niet opgevraagd (geen API-acties); Bitget ≈ 1000 afgeleid uit UI-cijfers |
+| Werkelijk saldo Bitget en Kraken USD | Operator: 164 en 280 (2026-11-02); het live saldo wordt bij opstart gelezen en kan afwijken |
 | `market_exhaustion` (SmartEntry), `max_correlation`, `session_edge_detector`, kwaliteitsscorer-details | Niet getraceerd |
 | Handling van BLOCKED risk-bucket | Niet getraceerd |
 | Blokkerend gedrag en drempel van V2-04 hourly profit check | Niet getraceerd |
@@ -764,3 +792,4 @@ Nieuwste onderaan. Per wijziging in dezelfde commit bijwerken (zie onderhoudsreg
 | 2026-11-02 | Exposurelimieten, dagverlies | `max_exposure_per_coin_pct`/`max_total_exposure_pct` genormaliseerd naar fracties (`core/risk_units.py`); `ProfessionalRiskManager` krijgt 0,03; positielimiet zonder eerste-positie-bypass en fail-closed; opt-in `risk_reference_use_live_balance` (default uit) | YAML-percentages werden als fractie gelezen (limiet 50× kapitaal); dagverliescheck vergeleek 3,0 met een fractie | Limieten zijn bindend op Kraken USD, Bitget (t.o.v. referentie 50 000) en OKX; dagverlies blokkeert entries bij −3% | `multi_coin_grid_pro/tests/unit/test_risk_units_and_position_limits.py` | `855a1871b` |
 | 2026-11-02 | Controller-risico | Positielimiet op het uiteindelijke executorbedrag (`_create_grid_action`); dagverlies op risico-equity, fail-closed; restartveiligheid (`startup_reconcile_*`); live referentie alleen zonder onverklaarde exposure; idempotente exposure-reconciliatie | Review R1–R5: 1,25×-multiplier kon limiet omzeilen, quote-only noemer, onzichtbare exposure na herstart, vastgelopen exposure | Entries blokkeren bij onverklaard vergrendeld quote/inventory, onbekende equity of overschreden limiet; verdwenen executors geven exposure vrij na 120 s | `multi_coin_grid_pro/tests/unit/test_pre_deploy_risk_safety.py` | `4d4728604` |
 | 2026-11-02 | Documentatie-als-code | Document hernoemd naar `docs/TRADING_STRATEGY.md`; onderhoudsregel in `.github/copilot-instructions.md`; check `.github/scripts/check_trading_strategy_docs.py` (pre-commit `commit-msg` en CI) | Documentatie blijft gelijk met de code | Geen tradinggedrag; commits en PR's die strategiebestanden raken zonder doc-update worden afgekeurd (uitzondering via `Strategy-Docs: not-needed - <reden>`) | `multi_coin_grid_pro/tests/unit/test_check_trading_strategy_docs.py` | LOKAAL |
+| 2026-11-02 | Risicoreferenties Bitget/Kraken USD | `risk_reference_balance_quote` 164 (Bitget, was 50 000) en 280 (Kraken USD, was 300); `risk_reference_use_live_balance: true` op beide met de referentie als plafond; restartcheck ziet vergrendeld quote vanaf 1 (`startup_reconcile_locked_tolerance_quote`, was `min_order_amount_quote`) | Operator bevestigde accountvermogen 164 USDT / 280 USD, geen crypto; referenties moeten het werkelijke kapitaal weerspiegelen | Alle %-limieten bindend op werkelijk kapitaal (7.1a): Bitget 82 per coin / 114,8 totaal, ILLIQUID-bucket 16,4 weigert volle slots, meestal twee gelijktijdige grids; dagverlies 4,92 USDT; sizing zelf ongewijzigd | `multi_coin_grid_pro/tests/unit/test_capital_references_bitget_kraken.py` | LOKAAL |

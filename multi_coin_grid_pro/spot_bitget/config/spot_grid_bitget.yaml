@@ -1480,8 +1480,8 @@ coin_discovery_refresh_interval_seconds: 3600  # 1 hour (3600s), set to 0 to dis
 max_simultaneous_coins: 3         # 🔧 TUNED 2026-04-03: 6→3 (fee-heavy venue, edge te klein voor 6 coins tegelijk)
 
 total_amount_quote: 50000         # 🚀 MAX capital (uses actual balance if lower)
-risk_reference_balance_quote: 50000  # Explicit reference; with risk_reference_use_live_balance=true it is only a ceiling
-risk_reference_use_live_balance: false  # Operator decision: set true only if the Bitget quote balance is dedicated bot capital
+risk_reference_balance_quote: 164  # Operator-confirmed account equity (2026-11-02, no crypto); ceiling for the live balance
+risk_reference_use_live_balance: true  # Effective reference = min(164, live equity at start); entries blocked until readable
 risk_bucket_limits:                 # Max % van portfolio per bucket (optioneel; weglaten = module defaults)
   L1: 15.0                          # BTC/ETH
   L2: 40.0                          # Established alts -- primaire bucket

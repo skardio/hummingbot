@@ -87,7 +87,8 @@ class TestUnitNormalisation:
         cfg = MultiCoinGridConfig(**ConfigManager().load_config("spot_grid_kraken_usd"))
         assert cfg.max_exposure_per_coin_pct == Decimal("0.55")
         assert cfg.max_total_exposure_pct == Decimal("0.95")
-        assert cfg.risk_reference_use_live_balance is False
+        assert cfg.risk_reference_use_live_balance is True
+        assert cfg.risk_reference_balance == Decimal("280")
 
 
 class TestPositionLimits:

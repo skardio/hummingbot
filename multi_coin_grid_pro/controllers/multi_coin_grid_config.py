@@ -1471,6 +1471,14 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": False},
     )
+    startup_reconcile_locked_tolerance_quote: Decimal = Field(
+        default=Decimal("1"),
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Locked quote below this amount is ignored by the restart check: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False},
+    )
     exposure_reconcile_grace_seconds: int = Field(
         default=120,
         client_data=ClientFieldData(
