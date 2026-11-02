@@ -36,3 +36,12 @@ repos:
       - id: isort
         files: "\\.(py)$"
         args: [--settings-path=pyproject.toml]
+-   repo: local
+    hooks:
+    -   id: trading-strategy-docs
+        name: docs/TRADING_STRATEGY.md updated with strategy changes
+        entry: python3 .github/scripts/check_trading_strategy_docs.py --staged
+        language: system
+        stages: [commit-msg]
+        always_run: true
+        pass_filenames: true

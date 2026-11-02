@@ -1,0 +1,30 @@
+name: strategy-docs
+
+on:
+  pull_request:
+  push:
+    branches: ['**']
+
+jobs:
+  docs-check:
+    name: Strategy docs updated with strategy changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify docs/TRADING_STRATEGY.md is updated
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASE="origin/$BASE_REF"
+          elif git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            BASE="$BEFORE_SHA"
+          else
+            BASE="HEAD~1"
+          fi
+          python3 .github/scripts/check_trading_strategy_docs.py --base "$BASE" --head HEAD

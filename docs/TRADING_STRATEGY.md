@@ -1,9 +1,10 @@
-# Huidige tradingstrategie — Multi Coin Grid Pro (geïmplementeerde werkelijkheid)
+# Tradingstrategie — Multi Coin Grid Pro (geïmplementeerde werkelijkheid)
 
 | | |
 |---|---|
 | Repository / branch | `/home/mo/repos/hummingbot` / `branch_20251109` |
-| Code-stand | HEAD `7d1d060d4` (2026-11-01 23:20 +01:00), gelijk aan `origin/branch_20251109` |
+| Code-stand | Bijgewerkt op HEAD `4d4728604` (2026-11-02), gelijk aan `origin/branch_20251109`. Hoofdstuk 1–6 en 8–11 zijn opgesteld op `7d1d060d4`; regelnummers (`≈L…`) komen uit die stand (controller sindsdien ca. +330 regels) en zijn alleen als functienaam leidend |
+| Onderhoud | Permanent onderhouden document. Elke wijziging die tradinggedrag, risicobeheer, fees, P&L of strategie-YAML raakt, werkt dit bestand in dezelfde wijziging bij (regel in `.github/copilot-instructions.md`, check in `.github/scripts/check_trading_strategy_docs.py`). Wijzigingen staan onderaan onder `Strategiewijzigingen` |
 | Doel van dit document | Feitelijke beschrijving van wat de code en configuratie nu doen, voor onafhankelijke review |
 | Wat dit document niet is | Geen verbetervoorstellen, geen nieuwe strategie, geen winstclaims |
 | Methode | Code gelezen (controller, executor, risicomodules), effectieve configuratie berekend door de drie YAML's in de Pydantic-modellen te laden (alleen lezen, geen bot gestart), executor-configs gevalideerd in de SQLite-databases (`Executors.config`, sinds 2026-10-18) |
@@ -41,7 +42,17 @@ Alle regelnummers verwijzen naar de bestanden op HEAD en zijn indicatief (±20 r
 
 ### 0.3 Eenheden (cruciaal voor lezen van YAML)
 
-De YAML's mengen fracties (`0.02` = 2%) en percentages (`2.0` = 2%). Per veld is in dit document de eenheid benoemd zoals de code het leest, niet zoals de YAML-opmerking het bedoelt. Afwijkingen staan in hoofdstuk 12.2.
+De YAML's mengen fracties (`0.02` = 2%) en percentages (`2.0` = 2%). Per veld is in dit document de eenheid benoemd zoals de code het leest, niet zoals de YAML-opmerking het bedoelt. Afwijkingen staan in hoofdstuk 12.2. Uitzondering: `max_exposure_per_coin_pct` en `max_total_exposure_pct` worden sinds `855a1871b` bij het laden genormaliseerd naar fracties (7.1).
+
+### 0.4 Implementatiestatus
+
+| Status | Betekenis | Nu |
+|---|---|---|
+| GECOMMIT | In `HEAD` en gepusht naar `origin/branch_20251109`; alles in dit document is gecommit tenzij anders vermeld | HEAD `4d4728604` |
+| LOKAAL | Alleen in de werkmap, nog niet gecommit | Alleen documentatie, onderhoudsregel en doc-check (`.github/`); geen tradinggedrag |
+| ONDERZOCHT | Beoordeeld maar niet geïmplementeerd; staat in 7.8 en 12.4 | Zie 7.8 en 12.4 |
+
+Gecommit betekent niet dat een draaiend proces de wijziging bevat: een herstart door de operator is nodig en het procesgebruik is niet geverifieerd (12.4).
 
 ---
 
@@ -149,6 +160,8 @@ Drempels per exchange: **U / B / O**. Eenheden: P = percent, F = fractie.
 | 1 | Risicostatus synchroniseren | `_sync_risk_state` (≈L4163) | Risk-manager state | – | ENABLED | – |
 | 2 | Controller-exitsignalen | `_check_professional_exit_signals` (≈L4169) | Actieve coins | zie hoofdstuk 6 | ENABLED | – |
 | 3 | Graceful stop | CTRL ≈L4174 | Runtime-vlag (operator) | – | ENABLED | – |
+| 3a | Restartveiligheid (GECOMMIT `4d4728604`) | `_startup_exposure_gate` | Vergrendeld quote en inventory zonder executor in deze run | Blokkeert entries tot niets onverklaards meer staat of de operator het bevestigt (`startup_reconcile_*`); zie 7.8 | ENABLED (alle; `startup_reconcile_enabled` default true) | Fail-closed |
+| 3b | Live risicoreferentie (GECOMMIT `4d4728604`) | `_ensure_risk_reference` | Totaal quote bij start, geen executors, geen onverklaarde exposure | Alleen actief als `risk_reference_use_live_balance`; referentie = min(plafond, live equity) | DISABLED (alle bots; operatorbeslissing) | Fail-closed |
 | 4 | Time-based filter | `TimeBasedFilter` (CTRL ≈L4191; `filters/time_based_filter.py` ≈L115/146) | UTC-uur, weekdag | B: lage-liquiditeitsuren [17,18,19,21], hoge [13..16], weekendmult 1,0. Multipliers per uur: `ONBEKEND` | U DISABLED / B ENABLED / O DISABLED | – |
 | 5 | Daglimiet verlies | `GlobalRiskManager` (≈L4202) | Daily loss % van `risk_reference_balance` | 3 (P) van referentie: U 300, B **50 000**, O 150 | ENABLED | – |
 | 6 | Circuit breaker | CTRL ≈L4223 | Prijsrange actieve coin | ≥ 5% in 60 s (hard-coded) → alleen handmatig hervatten | ENABLED | – |
@@ -174,9 +187,9 @@ Drempels per exchange: **U / B / O**. Eenheden: P = percent, F = fractie.
 | 26 | Nieuwe-grid-check | `_should_create_new_grid` (≈L8105) | Startup, budget, risk | Startupwacht `min_startup_wait_seconds` = 60; budget ≥ `num_grids × min_order_amount_quote`; `risk_manager.can_open_trade` | ENABLED | – |
 | 27 | Spread | `_check_spread_acceptable` (≈L10138) | Live bid/ask | `max_entry_spread_pct` (P): 0,5 / 0,5 / 0,35 (SmartEntry-spread); CTRL-fallback 0,5 | ENABLED | Fail-closed |
 | 28 | Orderboekdiepte | `_check_order_book_depth` (≈L10257) | Orderboek | `orderbook_liquidity`: modus live, 0,5% range, 10 niveaus, 5× ordergrootte | ENABLED | Fail-closed |
-| 29 | Positielimieten | `_check_position_limits` (≈L7753) + `RiskGuardV2` | Exposure vs `risk_reference_balance` | YAML `max_exposure_per_coin_pct` 55 / 50 / 50, `max_total_exposure_pct` 95 / 70 / 70, gelezen als **fractie** | ENABLED (praktisch niet-bindend, zie 7.1) | **Fail-open** |
+| 29 | Positielimieten (GECOMMIT `855a1871b`, `4d4728604`) | `_check_position_limits` aangeroepen vanuit `_create_grid_action` op het exacte executorbedrag; `RiskGuardV2` | Exposure vs `risk_reference_balance` | `max_exposure_per_coin_pct` 55 / 50 / 50 en `max_total_exposure_pct` 95 / 70 / 70 (YAML-percent) worden bij het laden genormaliseerd naar fracties (0,55/0,95; 0,50/0,70); geen eerste-positie-bypass | ENABLED (bindend; op Bitget t.o.v. referentie 50 000 zolang de live referentie uit staat, zie 7.1) | **Fail-closed** |
 | 30 | Kapitaal-allocatie en sizing | zie 5.1 | Saldo, volatiliteit | zie 5.1 | ENABLED | – |
-| 31 | `ProfessionalRiskManager.can_open_new_position` | `risk/professional_risk_manager.py` | Rolling P&L, win rate, posities | zie 7.3 | ENABLED | – |
+| 31 | `ProfessionalRiskManager.can_open_new_position` | `risk/professional_risk_manager.py`, via `_professional_risk_allows` | Rolling P&L, win rate, posities, dagverlies / risico-equity | zie 7.3 | ENABLED | **Fail-closed** bij onbekende equity (GECOMMIT `4d4728604`) |
 | 32 | Dagelijkse coin-killswitch | CTRL ≈L5673 | Dag-P&L per coin in R | Uitgeschakeld bij < −2R, helft bij < −1R; `r_unit_quote` = 5,0 | ENABLED | – |
 | 33 | Session edge detector | CTRL ≈L5706 | Sessie | Details `ONBEKEND` | ENABLED | `ONBEKEND` |
 | 34 | Entry gateway | `core/entry_gateway.py` (CTRL ≈L5746) | `GlobalRiskManager.can_open_trade` | zie 7.2 | ENABLED | – |
@@ -307,6 +320,7 @@ Levels boven de marktprijs vallen binnen `activation_bounds` en worden door `_ge
 5. Tijdgebonden multiplier (Bitget: gate 4) en BEAR-light ×0,5.
 6. Kwaliteitsmultiplier (gate 36).
 7. Budget (gate 37) en risk-bucket (gate 35).
+8. Positielimieten (gate 29) op het uiteindelijke bedrag na alle multipliers, inclusief de kwaliteitsmultiplier tot 1,25×.
 
 `total_amount_quote` in de YAML (U 300 / B 50 000 / O 150) is niet het feitelijk gebruikte kapitaal; allocatie volgt het werkelijke saldo. Bitget-saldo ≈ 1000 USDT is afgeleid uit eerder bekeken UI-cijfers (`AFGELEID`); het exacte saldo is `ONBEKEND`.
 
@@ -407,10 +421,11 @@ Binnen de executor geldt de volgorde van 6.3. Tussen controller en executor is e
 
 | Limiet | Waarde (YAML) | Gebruik in code | Effect |
 |---|---|---|---|
-| `max_exposure_per_coin_pct` | 55 / 50 / 50 | `_check_position_limits` (CTRL ≈L7753): `max_per_coin = risk_reference_balance × waarde`; `RiskGuardV2`: `waarde × 100` als percentage | Veld is in de code een **fractie** (default 0,15). Bij 55 is de limiet 55 × kapitaal → **niet-bindend** (AFGELEID uit code, de logregel zou dit als "5500%" tonen) |
-| `max_total_exposure_pct` | 95 / 70 / 70 | idem | Idem niet-bindend |
-| `risk_reference_balance_quote` | 300 / **50 000** / 150 | Basis voor alle %-limieten in `GlobalRiskManager` en `_check_position_limits` | Bitget: referentie ≈ 50× het vermoedelijke saldo (≈ 1000), dus % -limieten zijn daar ver losser dan de YAML-opmerking suggereert |
-| Foutafhandeling | – | `_check_position_limits` retourneert `True` bij exception | Fail-open |
+| `max_exposure_per_coin_pct` | 55 / 50 / 50 (percent) | `exposure_pct_to_fraction` (`core/risk_units.py`) normaliseert bij het laden: (0,1] = fractie, (1,100] = percent, daarbuiten ValueError. `_check_position_limits`: `max_per_coin = risk_reference_balance × fractie` op elke nieuwe positie; `RiskGuardV2` krijgt dezelfde limiet als percent | GECOMMIT `855a1871b`. Bindend: U 165 van 300, O 75 van 150, B 25 000 van 50 000 (Bitget zie hieronder). Voor `855a1871b` werd 55 als fractie gelezen (55× kapitaal) |
+| `max_total_exposure_pct` | 95 / 70 / 70 (percent) | idem; `total_exposure − huidig + nieuw` mag het totaal niet overschrijden, ook niet voor de eerste positie | GECOMMIT `855a1871b`; eerste-positie-bypass verwijderd |
+| `risk_reference_balance_quote` | 300 / **50 000** / 150 | Basis voor alle %-limieten in `GlobalRiskManager`, `BucketExposureTracker`, `RealtimePnLTracker`/`RiskGuardV2` en `_check_position_limits`. Optioneel (`risk_reference_use_live_balance`, default false) begrensd door live equity bij opstart, zie 7.8 | Bitget: de referentie is nog 50 000 (niet het werkelijke saldo; ≈ 1000 is afgeleid uit UI-cijfers), dus de percentagelimieten zijn daar nog ruim. Operatorbeslissing open |
+| Eindbedrag | – | De check staat in `_create_grid_action` (GECOMMIT `4d4728604`) en toetst het bedrag dat in `CreateExecutorAction.total_amount_quote` komt, na kwaliteitsmultiplier (≤ 1,25×) en parallel-slot-cap | Primair en secundair entrypad delen dezelfde bescherming |
+| Foutafhandeling | – | `_check_position_limits` retourneert `False` bij exception, ongeldige limiet of referentie ≤ 0 | Fail-closed (voorheen fail-open) |
 
 ### 7.2 `GlobalRiskManager` (`core/global_risk_manager.py` ≈L54)
 
@@ -423,7 +438,7 @@ Volgorde in `can_open_trade`: notional > 0 → dagverlies% ≥ limiet → per-co
 | Onderdeel | Waarde | Status |
 |---|---|---|
 | Max posities | `max_simultaneous_coins` (3) | ENABLED |
-| Dagelijkse verliesgrens | `max_daily_loss_pct` default 0,03 (F), maar de controller geeft `getattr(config, 'max_daily_loss_pct', 0.03)` en de effectieve configwaarde is 3,0 (P) → de controle vergelijkt met een fractie en is daardoor praktisch dood | AFGELEID: **effectief niet-bindend** |
+| Dagelijkse verliesgrens | `max_daily_loss_pct` (YAML 3,0 = percent) wordt als `pct_to_fraction` = 0,03 aan de manager gegeven (GECOMMIT `855a1871b`; voorheen 3,0 tegen een fractie, dus dood). Vergelijking: netto gerealiseerde P&L van vandaag (UTC) / risico-equity (`_calculate_risk_equity`, GECOMMIT `4d4728604`) ≤ −0,03 blokkeert. Onbekende equity (saldo ≤ 0, fout, niet gevolgde close-order) blokkeert entries | ENABLED, fail-closed |
 | Rolling P&L-pauze | Gemiddeld rendement laatste 20 trades < −2% (`min_rolling_pnl_pct` −0,02) → pauze 120 min; `resume_min_pnl_pct` 0; max 1 verlenging; 30 min immuniteit na force-resume | ENABLED |
 | Win-rate | < 35% (`min_win_rate`) in combinatie met rolling P&L | ENABLED |
 | Correlatie | `max_correlation` 0,7 | Gebruik `ONBEKEND` (niet getraceerd) |
@@ -469,16 +484,26 @@ Drie lagen, alle ENABLED:
 2. `RegimeDetector` (`utils/regime_detector.py`; `adaptive_regime_detection.enabled = true`, `logging_only = false`): drempels BULL ≥ 5, CHOP ≥ −3, BEAR < −3; `min_confidence` 0,65; smoothing 3 (O: 1); BEAR-auto-light drempel −5,0 met grootte ×0,5; `_detect_current_regime` (≈L12133), `_apply_adaptive_filters` (≈L12240).
 3. Regime-afhankelijke timeouts (`_get_regime_timeouts`, ≈L10530): progress/no-fill-seconden voor BULL, CHOP en BEAR (U, B: 7200/5400, 5400/3600, 3600/2400; O: 3600/3600/2700 …) en slot-multipliers (7.1).
 
-### 7.8 Wijzigingen na dit document (lokaal, niet gedeployed)
+### 7.8 Restartveiligheid, risico-equity en exposure-reconciliatie (GECOMMIT `4d4728604`)
 
-Hoofdstuk 7.1 en 7.3 beschrijven de toestand vóór de veiligheidsreparaties. Sindsdien in de code:
+**Risico-equity** (`_calculate_risk_equity`): totaal quote (vrij + vergrendeld in orders) plus de mark-to-market van gevulde levels van RUNNING/NOT_STARTED-executors, minus het al ontvangen deel van gedeeltelijk gevulde take-profit-orders. Bewust een veilige ondergrens: SHUTTING_DOWN-executors, gedeeltelijke fills van open buy-orders en inventory buiten executors tellen niet mee. Ontbrekende data geeft `None` en blokkeert entries.
 
-- Exposurelimieten worden bij het laden genormaliseerd naar fracties (`core/risk_units.py`) en zijn op alle drie de bots bindend t.o.v. `risk_reference_balance_quote`. De toets staat in `_create_grid_action` op het exacte bedrag van de `CreateExecutorAction`; er is geen eerste-positie-bypass en fouten blokkeren (fail-closed).
-- `ProfessionalRiskManager` krijgt 0,03 (fractie) en rekent op risico-equity (`_calculate_risk_equity`): totaal quote plus gewaardeerde posities van RUNNING-executors, een bewuste ondergrens; ontbrekende data blokkeert entries.
-- Dagverlies-definities verschillen bewust: `GlobalRiskManager` bruto gerealiseerd verlies / referentie (percent); `ProfessionalRiskManager` netto gerealiseerd (UTC-dag) / risico-equity (fractie); `RiskGuardV2` equity-drawdown incl. niet-gerealiseerd (percent); `DrawdownTracker` werkkapitaal-drawdown (percent).
-- Restartveiligheid: entries blijven geblokkeerd zolang de exchange open orders (vergrendeld quote) of inventory toont die geen executor van deze run bezit (`startup_reconcile_*`). Er worden geen orders geannuleerd of verkocht.
-- Exposure van verdwenen executors wordt idempotent vrijgegeven na `exposure_reconcile_grace_seconds` zonder aanwezigheid in `executors_info`, behalve bij resterende of niet-verifieerbare inventory.
-- `risk_reference_use_live_balance` staat op alle bots uit; inschakelen is een operatorbeslissing.
+**Dagverlies-definities** (alle tegen de 3%-instelling, bewust verschillend):
+
+| Component | Teller | Noemer | Eenheid |
+|---|---|---|---|
+| `GlobalRiskManager` | Bruto gerealiseerd verlies (wins niet verrekend) | Risicoreferentie | percent |
+| `ProfessionalRiskManager` | Netto gerealiseerd (UTC-dag) | Risico-equity | fractie |
+| `RiskGuardV2` | Equity-drawdown incl. niet-gerealiseerd | Start-equity van de dag (reset via referentie) | percent |
+| `DrawdownTracker` | Werkkapitaal-drawdown (quote + actieve posities) | Live werkkapitaal | percent |
+
+**Restartveiligheid** (`_startup_exposure_gate`, `_find_untracked_exposure`): zolang het account vergrendeld quote (boven `startup_reconcile_ack_locked_quote` + gereserveerd budget + `min_order_amount_quote`) of inventory (waarde ≥ min-notional en hoeveelheid ≥ min-order-size) toont die geen executor van deze run bezit, worden nieuwe entries geblokkeerd (CRITICAL-log met reden, elke 30 s herhaald; daarna sticky). Niet waardeerbare materiële balansen blokkeren ook. Er worden geen orders geannuleerd of verkocht. Config: `startup_reconcile_enabled` (default true), `startup_reconcile_ack_assets`, `startup_reconcile_ack_locked_quote`; open orders worden alleen via vergrendeld quote gezien (geen REST-query).
+
+**Live risicoreferentie** (`_ensure_risk_reference`, `risk_reference_use_live_balance`, default false op alle bots): alleen te bepalen zonder onverklaarde exposure en zonder actieve executors; dan is de referentie `min(plafond, totaal quote − bevestigd vergrendeld quote)` en wordt die doorgegeven aan `GlobalRiskManager`, `BucketExposureTracker` en `RealtimePnLTracker`. Inschakelen is een operatorbeslissing: de code kan niet vaststellen of het quote-saldo van het account volledig botkapitaal is.
+
+**Exposure-reconciliatie** (`_reconcile_stale_exposure`, `exposure_reconcile_grace_seconds` = 120): getrackte exposure van een executor die zo lang ontbreekt in `executors_info` (SHUTTING_DOWN telt als aanwezig) wordt idempotent vrijgegeven via de bestaande cleanup plus `GlobalRiskManager.release_allocation`. Bij resterende of niet-verifieerbare inventory blijft de exposure staan. Een gemiste P&L-hand-over wordt hiermee niet alsnog geboekt.
+
+**Onderzocht, niet geïmplementeerd:** waardering van gedeeltelijke fills van open buy-orders; REST-query naar open orders; herberekening van historische P&L; aanvulling van de live referentie voor stortingen/opnames tijdens een run.
 
 ---
 
@@ -501,7 +526,7 @@ Bruto = som verkoop-quote − som koop-quote (vóór fees). Netto = bruto − we
 | Aspect | Feit |
 |---|---|
 | Oorzaak | Bitget rekent de buy-fee in basisvaluta. `deduct_base_fees = true` verlaagt het verkoopbare bedrag al, en `update_realized_pnl_metrics` telde dezelfde buy-fee daarna nogmaals in quote bij de kosten |
-| Fix | Commit `7d1d060d4` "Enhance GridExecutor to correctly handle base-token buy fees and add regression tests for fee calculations" (`_buy_base_fee_deducted`, EXE ≈L4981). Aanwezig op `origin/branch_20251109` |
+| Fix | GECOMMIT `7d1d060d4` (2026-11-01) "Enhance GridExecutor to correctly handle base-token buy fees and add regression tests for fee calculations" (`_buy_base_fee_deducted`, EXE ≈L4981). Aanwezig op `origin/branch_20251109`. Test: `test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_base_fee_realized_pnl.py` |
 | Draait de fix? | `ONBEKEND`: bij controle op 2026-11-01 werd geen draaiend botproces gevonden; een herstart door de operator is nodig om de fix in een draaiend proces actief te maken |
 | Getroffen historie | Alle Bitget-executors met base-fee-buys vóór de fix. Grootteorde ≈ 0,1% van het buy-notional per volledig round-trip (AFGELEID). `Executors.net_pnl_quote` is voor die rijen te laag; de database is niet herschreven |
 | Niet getroffen | Kraken USD (`deduct_base_fees = false`), OKX (`_fees_in_base_token` is alleen true voor connectornamen met "bitget") |
@@ -582,7 +607,7 @@ Alle waarden zijn effectieve waarden uit het geladen model; bron = YAML (kolom "
 | Marktregime BTC 4u-minimum (P) | 0,0 | −1,5 | −1,5 | `market_regime` |
 | Regime-smoothing | 3 | 3 | 1 | – |
 | Grid-suitability min score | 0,5 | 0,5 | 0,4 | – |
-| Exposure per coin / totaal (YAML-waarde) | 55 / 95 | 50 / 70 | 50 / 70 | zie 7.1 (fractie) |
+| Exposure per coin / totaal (YAML-waarde) | 55 / 95 (→ 0,55 / 0,95) | 50 / 70 (→ 0,50 / 0,70) | 50 / 70 (→ 0,50 / 0,70) | zie 7.1 (genormaliseerd naar fractie) |
 | Daglimiet verlies (P) | 3 | 3 | 3 | – |
 | Week- / maandlimiet (P) | 7 / 10 | 8 / 12 | 8 / 12 | – |
 | `max_daily_loss_eur` | 9,0 | niet gezet | niet gezet | – |
@@ -672,8 +697,8 @@ flowchart TD
 | `smart_refill_threshold_pct` | Verwijdert alleen het `last_grid_price`-item; geen functionele rebuild |
 | `min_24h_volume_quote` Bitget (2 000 000) voor pool-refresh | Alias van `min_24h_volume_eur`; pool-refresh en `CoinSelector` lezen `min_24h_volume_usdt` (1 000 000). Alleen DPM gebruikt 2 000 000 |
 | `max_daily_loss_quote` (U) | Alias van `max_daily_loss_eur` (9,0); wel werkend (via `RiskGuardV2`) |
-| `max_exposure_per_coin_pct`, `max_total_exposure_pct` | Waarden 55/95 en 50/70 worden als fractie gelezen (7.1) |
-| `ProfessionalRiskManager.max_daily_loss_pct` | 3,0 versus fractie-vergelijking → effectief dood (7.3) |
+| `max_exposure_per_coin_pct`, `max_total_exposure_pct` | OPGELOST in `855a1871b`: genormaliseerd naar fracties en bindend (7.1) |
+| `ProfessionalRiskManager.max_daily_loss_pct` | OPGELOST in `855a1871b`: 3,0 percent → 0,03 fractie (7.3) |
 | `stop_loss_pct` (U 0,015; B en O 0,05) | Alleen fallback; effectieve SL is 2% (4.3) |
 | `max_active_grids` (regime-secties) | Zie hierboven |
 
@@ -691,8 +716,8 @@ flowchart TD
 | Levels boven markt | Worden near-market buys |
 | Controller-exits gebruiken `entry_prices` | Creatieprijs, niet gemiddelde fillprijs |
 | PRO EXIT-laag beperkt tot `active_coin` | Secundaire coins hebben alleen de executor-routes en `_check_professional_exit_signals` |
-| Bitget `risk_reference_balance` 50 000 | % -limieten niet bindend |
-| Fail-open/fail-closed mix | Fail-open: MTF-condities, edge gate, hourly profit, positielimieten. Fail-closed: SmartEntry, MTF-buy, drawdown, spread, diepte |
+| Bitget `risk_reference_balance` 50 000 | Nog niet het werkelijke saldo; %-limieten zijn daar ruim tot de operator de live referentie inschakelt of een expliciete waarde kiest (7.8) |
+| Fail-open/fail-closed mix | Fail-open: MTF-condities, edge gate, hourly profit. Fail-closed: SmartEntry, MTF-buy, drawdown, spread, diepte, positielimieten, `ProfessionalRiskManager`-equity, restartveiligheid |
 
 ### 12.3 Verschillen met oudere documentatie
 
@@ -709,6 +734,9 @@ flowchart TD
 | Onderwerp | Reden |
 |---|---|
 | Of de Bitget-fix al in een draaiend proces zit | Geen draaiend proces gevonden bij controle; operator beslist over herstart |
+| Of de risicofixes (`855a1871b`, `4d4728604`) in een draaiend proces zitten | Gecommit en gepusht, maar activering vereist een herstart door de operator |
+| Of het Bitget-, Kraken- en OKX-account uitsluitend botkapitaal bevat | Niet vast te stellen uit code; bepaalt of `risk_reference_use_live_balance` veilig aan kan |
+| Waardering van gedeeltelijke fills van open buy-orders in de risico-equity | Niet geïmplementeerd; worden niet meegeteld (veilige richting) |
 | Exacte tarieven per exchange en per fill (tier-niveau) | Alleen in `TradeFill.trade_fee`; niet in repo |
 | Werkelijk saldo Bitget en Kraken USD | Saldi niet opgevraagd (geen API-acties); Bitget ≈ 1000 afgeleid uit UI-cijfers |
 | `market_exhaustion` (SmartEntry), `max_correlation`, `session_edge_detector`, kwaliteitsscorer-details | Niet getraceerd |
@@ -722,3 +750,17 @@ flowchart TD
 | Per-level effectieve TP in fills | Afgeleid uit code, niet uit fill-data bevestigd |
 | Samenstelling van de grid-suitability score en saldotrappen `DynamicSlotManager` | Niet uitgewerkt |
 | OKX en Kraken EUR gedrag in de huidige code-stand | Geen recente executors; effectieve waarden komen uit het model, niet uit DB-validatie |
+
+---
+
+## Strategiewijzigingen
+
+Nieuwste onderaan. Per wijziging in dezelfde commit bijwerken (zie onderhoudsregel). Commitreferentie `LOKAAL` = nog niet gecommit.
+
+| Datum | Component | Wijziging | Waarom | Impact op handel/risico | Tests | Commit |
+|---|---|---|---|---|---|---|
+| 2026-11-02 | Documentatie | Eerste volledige beschrijving van de geïmplementeerde strategie (`CURRENT_TRADING_STRATEGY_2026.md`) | Strategie niet telkens opnieuw reconstrueren | Geen | – | `fee6560c8` |
+| 2026-11-01 | `GridExecutor.update_realized_pnl_metrics` | Bitget buy-fee in base-token niet meer dubbel verrekend in P&L | Bitget-P&L was ca. 0,1% van buy-notional te laag | Alleen P&L en daarvan afgeleide risicosignalen (streaks, rolling P&L, coin-killswitch) op Bitget; geen ordergedrag; historische DB niet herschreven | `test/hummingbot/strategy_v2/executors/grid_executor/test_grid_executor_base_fee_realized_pnl.py` | `7d1d060d4` |
+| 2026-11-02 | Exposurelimieten, dagverlies | `max_exposure_per_coin_pct`/`max_total_exposure_pct` genormaliseerd naar fracties (`core/risk_units.py`); `ProfessionalRiskManager` krijgt 0,03; positielimiet zonder eerste-positie-bypass en fail-closed; opt-in `risk_reference_use_live_balance` (default uit) | YAML-percentages werden als fractie gelezen (limiet 50× kapitaal); dagverliescheck vergeleek 3,0 met een fractie | Limieten zijn bindend op Kraken USD, Bitget (t.o.v. referentie 50 000) en OKX; dagverlies blokkeert entries bij −3% | `multi_coin_grid_pro/tests/unit/test_risk_units_and_position_limits.py` | `855a1871b` |
+| 2026-11-02 | Controller-risico | Positielimiet op het uiteindelijke executorbedrag (`_create_grid_action`); dagverlies op risico-equity, fail-closed; restartveiligheid (`startup_reconcile_*`); live referentie alleen zonder onverklaarde exposure; idempotente exposure-reconciliatie | Review R1–R5: 1,25×-multiplier kon limiet omzeilen, quote-only noemer, onzichtbare exposure na herstart, vastgelopen exposure | Entries blokkeren bij onverklaard vergrendeld quote/inventory, onbekende equity of overschreden limiet; verdwenen executors geven exposure vrij na 120 s | `multi_coin_grid_pro/tests/unit/test_pre_deploy_risk_safety.py` | `4d4728604` |
+| 2026-11-02 | Documentatie-als-code | Document hernoemd naar `docs/TRADING_STRATEGY.md`; onderhoudsregel in `.github/copilot-instructions.md`; check `.github/scripts/check_trading_strategy_docs.py` (pre-commit `commit-msg` en CI) | Documentatie blijft gelijk met de code | Geen tradinggedrag; commits en PR's die strategiebestanden raken zonder doc-update worden afgekeurd (uitzondering via `Strategy-Docs: not-needed - <reden>`) | `multi_coin_grid_pro/tests/unit/test_check_trading_strategy_docs.py` | LOKAAL |

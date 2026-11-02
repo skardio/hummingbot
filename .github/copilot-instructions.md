@@ -188,3 +188,10 @@ Controleer vóór ieder eindantwoord intern:
 - Help ik de gebruiker vooruit, of produceer ik alleen meer AI-werk?
 
 **Fundamentele regel: help de gebruiker betere beslissingen te nemen. De gebruiker hoeft je token-efficiëntie niet handmatig te beheren.**
+
+## 9. Strategiedocumentatie (onderhoudsregel)
+
+Bij elke wijziging die tradinggedrag, entry/exit, grids, sizing, risicobeheer, fees, P&L of relevante YAML-configuratie beïnvloedt, moet docs/TRADING_STRATEGY.md in dezelfde wijziging worden bijgewerkt. Documenteer de geïmplementeerde werking, gebruikte eenheden en relevante tests. Bij uitsluitend interne wijzigingen zonder gedragsimpact mag de documentatie ongewijzigd blijven, mits dit wordt gemotiveerd.
+
+- Voeg een regel toe aan de sectie `Strategiewijzigingen` onderaan het document (datum, component, wat, waarom, impact, tests, commit).
+- Een motivering zonder doc-wijziging legt je vast met de commit-trailer `Strategy-Docs: not-needed - <reden>` (minimaal 15 tekens). De controle `python3 .github/scripts/check_trading_strategy_docs.py --staged` draait lokaal als pre-commit `commit-msg`-hook en in CI; de lijst van strategierelevante paden staat bovenin dat script.
