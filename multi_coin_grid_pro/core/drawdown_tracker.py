@@ -95,6 +95,17 @@ class DrawdownTracker:
         else:
             logger.warning("⚠️ Using QUOTE ONLY for drawdown - may trigger false positives!")
 
+    def apply_external_flow(self, flow: Decimal) -> None:
+        """
+        Shift the period baselines by a deposit (+) or withdrawal (-) so that
+        capital movements are never booked as trading profit or loss.
+        """
+        for name in ("daily_start_balance", "weekly_start_balance", "monthly_start_balance"):
+            baseline = getattr(self, name)
+            if baseline is not None:
+                setattr(self, name, baseline + flow)
+        logger.info(f"💱 DrawdownTracker baselines shifted by external flow {flow:+} {self.quote_asset}")
+
     def set_portfolio_value_calculator(self, calculator: Callable[[], Decimal]) -> None:
         """
         Set the portfolio value calculator callback

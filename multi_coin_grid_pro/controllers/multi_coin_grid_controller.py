@@ -61,7 +61,7 @@ from multi_coin_grid_pro.core.session_edge_detector import SessionEdgeDetector
 from multi_coin_grid_pro.core.time_based_integration import TimeBasedIntegration
 
 # Task 3.1: Dynamic Slot Manager
-from multi_coin_grid_pro.execution.dynamic_slot_manager import DynamicSlotManager
+from multi_coin_grid_pro.execution.dynamic_slot_manager import MIN_VIABLE_LEVELS, DynamicSlotManager
 
 # Momentum sleeve paper trading
 from multi_coin_grid_pro.execution.momentum_sleeve_manager import MomentumSleeveManager, build_momentum_sleeve_manager
@@ -355,7 +355,9 @@ class MultiCoinGridController(ControllerBase):
             from multi_coin_grid_pro.core.risk_buckets import CoinBucket, RiskBucketConfig
             try:
                 _bucket_config = RiskBucketConfig(
-                    limits={CoinBucket(k): float(v) for k, v in _raw_limits.items()}
+                    limits={CoinBucket(k): float(v) for k, v in _raw_limits.items()},
+                    evidence_min_volume_usd=float(self.config.bucket_evidence_min_volume_usd),
+                    evidence_max_spread_pct=float(self.config.bucket_evidence_max_spread_pct),
                 )
             except Exception as _e:
                 self.logger().warning(
@@ -366,9 +368,12 @@ class MultiCoinGridController(ControllerBase):
             config=_bucket_config,
         )
         self.session_edge_detector = SessionEdgeDetector()
-        # Configured reference acts as a ceiling when risk_reference_use_live_balance is on
-        self._risk_reference_ceiling: Decimal = Decimal(str(self.config.risk_reference_balance))
+        # Live mode: reference = account equity, optionally capped by the operator
+        _cap = getattr(self.config, "risk_capital_cap_quote", None)
+        self._risk_capital_cap: Optional[Decimal] = Decimal(str(_cap)) if _cap else None
         self._live_risk_reference_resolved: bool = False
+        self._flat_capital_snapshot: Optional[Decimal] = None
+        self._realised_since_flat: Decimal = Decimal("0")
         self._startup_reconciled: bool = False
         self._startup_block_reason: str = ""
         self._last_startup_check_ts: float = 0.0
@@ -944,13 +949,18 @@ class MultiCoinGridController(ControllerBase):
             if connector is None:
                 connector = self.connectors.get(self.config.connector_name)
             balance_ccy = self._balance_currency
+            fresh, fresh_reason = self._balance_data_fresh()
+            if not fresh:
+                raise RuntimeError(fresh_reason)
             raw_available_balance = Decimal(str(connector.get_available_balance(balance_ccy)))
             self.logger().debug(
                 f"📊 Available balance for grid: {raw_available_balance} {balance_ccy}"
             )
         except Exception as e:
-            self.logger().warning(f"Could not get available balance: {e}, using config")
-            raw_available_balance = Decimal(str(self.config.total_amount_quote))
+            # Fail closed: never size from a nominal config amount when the real balance is unknown
+            if should_log("balance_unavailable_for_sizing", interval_sec=300):
+                self.logger().warning(f"Available balance unavailable ({e}) - no new entries sized")
+            raw_available_balance = Decimal("0")
 
         budget_reserved = self.budget_allocator.total_reserved
         effective_available_balance = max(Decimal("0"), raw_available_balance - budget_reserved)
@@ -5645,18 +5655,25 @@ class MultiCoinGridController(ControllerBase):
                 # PARALLEL SLOT GUARD: Cap per-slot allocation to leave room for other slots.
                 # Without this, the first slot can take 48-60% of capital, starving the 2nd slot.
                 # Use total balance (available + reserved) as baseline for fair split.
-                if self.max_simultaneous_coins > 1:
+                # Capital-adaptive: only reserve room for slots the balance can actually fund
+                # (allocation.num_coins), so a small account is not split over phantom slots.
+                parallel_slots = min(self.max_simultaneous_coins, max(1, current_max_slots))
+                if parallel_slots > 1:
                     total_balance_for_cap = raw_available_balance
                     # 90% of fair share: e.g., 2 coins → 45% each, 3 coins → 30% each
-                    max_per_slot_pct = Decimal("0.90") / Decimal(str(self.max_simultaneous_coins))
+                    max_per_slot_pct = Decimal("0.90") / Decimal(str(parallel_slots))
                     max_per_slot = total_balance_for_cap * max_per_slot_pct
                     if adjusted_size > max_per_slot:
                         self.logger().info(
                             f"📊 PARALLEL SLOT CAP: {adjusted_size:.2f} → {max_per_slot:.2f} "
                             f"(max {float(max_per_slot_pct) * 100:.0f}% of {total_balance_for_cap:.2f} "
-                            f"to leave room for {self.max_simultaneous_coins - 1} other slot(s))"
+                            f"to leave room for {parallel_slots - 1} other slot(s))"
                         )
                         adjusted_size = max_per_slot
+
+                _fits, adjusted_size = self._slot_fits_risk_budget(best_coin, adjusted_size)
+                if not _fits:
+                    return actions
 
                 self.logger().info(
                     f"💰 Capital allocation: €{total_capital} / {current_max_slots} coins"
@@ -5803,6 +5820,11 @@ class MultiCoinGridController(ControllerBase):
                 except Exception as _e:
                     self.logger().warning(f"⚠️  Quality sizing failed: {_e}")
                 # ─────────────────────────────────────────────────────────
+
+                # Definitive size after all multipliers must still fit the risk budget
+                _fits, adjusted_size = self._slot_fits_risk_budget(best_coin, adjusted_size)
+                if not _fits:
+                    return actions
 
                 grid_action = self._create_grid_action(best_coin, adjusted_size)
                 if grid_action:
@@ -5975,6 +5997,10 @@ class MultiCoinGridController(ControllerBase):
                             f"⚠️  Adjusted size (€{adjusted_size:.2f}) exceeds available capital (€{per_coin_capital:.2f}) - capping to available"
                         )
                         adjusted_size = per_coin_capital
+
+                    _fits, adjusted_size = self._slot_fits_risk_budget(candidate_coin, adjusted_size)
+                    if not _fits:
+                        continue
 
                     self.logger().info(
                         f"      💰 Allocating €{per_coin_capital:.2f} (adjusted: €{adjusted_size:.2f})"
@@ -7438,6 +7464,7 @@ class MultiCoinGridController(ControllerBase):
                         )
 
                     self._realised_executors_tracked[executor.id] = realised_pnl
+                    self._realised_since_flat += realised_pnl
 
                     # Phase 1 fee-diagnostic: update per-symbol loss streak + log roundtrip summary
                     try:
@@ -7860,43 +7887,149 @@ class MultiCoinGridController(ControllerBase):
             self.risk_manager.release_allocation(symbol)
             self._exposure_absent_since.pop(symbol, None)
 
+    def _balance_data_fresh(self) -> Tuple[bool, str]:
+        """
+        Whether exchange balance data may be trusted: the connector is ready and its last successful
+        account poll is younger than ``balance_max_age_seconds``. Connectors without a poll
+        timestamp (no signal) are accepted; unreadable balances still fail closed in the callers.
+        """
+        connector = getattr(self, "connector", None) or self.connectors.get(self.config.connector_name)
+        if connector is None:
+            return False, "no connector"
+        if getattr(connector, "ready", True) is False:
+            return False, "connector not ready"
+        last_poll = getattr(connector, "_last_poll_timestamp", None)
+        now = getattr(connector, "current_timestamp", None)
+        if isinstance(last_poll, (int, float)) and isinstance(now, (int, float)):
+            if last_poll <= 0:
+                return False, "balances never refreshed"
+            age = now - last_poll
+            if age > float(self.config.balance_max_age_seconds):
+                return False, f"balance data {age:.0f}s old (max {self.config.balance_max_age_seconds}s)"
+        return True, "ok"
+
+    def _apply_risk_reference(self, new_reference: Decimal) -> None:
+        """Propagate a new capital base to every component that scales with it."""
+        old = Decimal(str(self.config.risk_reference_balance))
+        self.config.risk_reference_balance_quote = new_reference
+        # total_amount_quote is the nominal per-grid capital request; in live mode it follows the equity
+        self.config.total_amount_quote = new_reference
+        self.risk_manager.set_reference_balance(new_reference)
+        self.bucket_tracker.update_portfolio(float(new_reference))
+        self.pnl_tracker_v2.rebase_reference(new_reference)
+        self.logger().info(
+            f"Risk reference {'resolved' if not self._live_risk_reference_resolved else 'updated'}: "
+            f"{old:.2f} -> {new_reference:.2f} {self.config.quote_asset}"
+        )
+        self._live_risk_reference_resolved = True
+
+    def _track_capital_flow(self, capital: Decimal, flat: bool) -> None:
+        """
+        Detect deposits/withdrawals. Only possible while no executor is active (equity is then
+        exactly the quote balance): any change since the last flat snapshot that realised P&L does
+        not explain is an external flow and shifts the drawdown baselines instead of counting as P&L.
+        """
+        if not flat:
+            return
+        snapshot = self._flat_capital_snapshot
+        if snapshot is not None:
+            flow = capital - snapshot - self._realised_since_flat
+            tolerance = Decimal(str(self.config.min_order_amount_quote))
+            if abs(flow) >= tolerance:
+                self.drawdown_tracker.apply_external_flow(flow)
+                self.logger().info(
+                    f"Capital flow detected: {flow:+.2f} {self.config.quote_asset} "
+                    f"(deposit/withdrawal, not booked as P&L)"
+                )
+        self._flat_capital_snapshot = capital
+        self._realised_since_flat = Decimal("0")
+
     def _ensure_risk_reference(self) -> bool:
         """
-        Cap the risk reference balance at the live equity (opt-in, an explicit operator declaration
-        that the quote balance of this account is bot capital).
+        Capital-adaptive risk reference (opt-in per bot via risk_reference_use_live_balance, an
+        explicit operator declaration that the quote balance of this account is bot capital).
 
-        Resolved once, only when nothing else can distort it: no untracked exchange exposure and
-        no executor yet. Then equity is exactly the total quote balance (free + locked), minus the
-        locked quote the operator acknowledged. Returns False (entries blocked) otherwise.
+        The reference follows the live equity (total quote incl. locked + mark-to-market of
+        executor inventory, minus operator-acknowledged locked quote), optionally capped by
+        ``risk_capital_cap_quote``. First resolution needs a clean startup gate and no active
+        executors; later updates apply once equity moved by ``risk_reference_refresh_threshold_pct``.
+        Returns False (entries blocked) whenever the equity cannot be established reliably.
         """
         if not getattr(self.config, "risk_reference_use_live_balance", False):
             return True
-        if self._live_risk_reference_resolved:
-            return True
         if not self._startup_exposure_gate():
             return False
-        if any(getattr(ei, "status", None) != RunnableStatus.TERMINATED for ei in (self.executors_info or [])):
+        active = any(getattr(ei, "status", None) != RunnableStatus.TERMINATED for ei in (self.executors_info or []))
+        if active and not self._live_risk_reference_resolved:
             if should_log("risk_reference_active_executors", interval_sec=300):
                 self.logger().warning("Risk reference: executors already active - cannot resolve, blocking entries")
             return False
-        equity, reason = self._calculate_risk_equity()
-        live_capital = (equity or Decimal("0")) - Decimal(str(self.config.startup_reconcile_ack_locked_quote))
-        if equity is None or live_capital <= 0:
+        fresh, fresh_reason = self._balance_data_fresh()
+        equity, reason = self._calculate_risk_equity() if fresh else (None, fresh_reason)
+        capital = (equity or Decimal("0")) - Decimal(str(self.config.startup_reconcile_ack_locked_quote))
+        if equity is None or capital <= 0:
             if should_log("risk_reference_unresolved", interval_sec=300):
                 self.logger().warning(f"Risk reference: live equity unknown ({reason}) - blocking new entries")
             return False
 
-        effective = min(self._risk_reference_ceiling, live_capital)
-        self.config.risk_reference_balance_quote = effective
-        self.risk_manager.set_reference_balance(effective)
-        self.bucket_tracker.update_portfolio(float(effective))
-        self.pnl_tracker_v2.rebase_reference(effective)
-        self._live_risk_reference_resolved = True
-        self.logger().info(
-            f"Risk reference resolved: {effective:.2f} {self.config.quote_asset} "
-            f"(live={live_capital:.2f}, ceiling={self._risk_reference_ceiling:.2f})"
-        )
+        self._track_capital_flow(capital, flat=not active)
+        cap = self._risk_capital_cap
+        target = min(cap, capital) if cap is not None else capital
+        current = Decimal(str(self.config.risk_reference_balance))
+        threshold = Decimal(str(self.config.risk_reference_refresh_threshold_pct))
+        if not self._live_risk_reference_resolved or (
+            current > 0 and abs(target - current) / current * Decimal("100") >= threshold
+        ):
+            self._apply_risk_reference(target)
         return True
+
+    def _limit_slot_to_risk_budget(self, symbol: str, size: Decimal) -> Tuple[Decimal, str]:
+        """
+        Shrink a slot size to what the risk limits still allow for this coin: per-coin limit,
+        remaining total exposure and the headroom of its risk bucket (all relative to the current
+        risk reference). Returns (allowed size >= 0, name of the binding limit or "").
+        """
+        reference = Decimal(str(self.config.risk_reference_balance))
+        coin_exposure = self.current_exposure_per_coin.get(symbol, Decimal("0"))
+        limits = {
+            "max_exposure_per_coin": reference * exposure_pct_to_fraction(
+                self.config.max_exposure_per_coin_pct) - coin_exposure,
+            "max_total_exposure": reference * exposure_pct_to_fraction(
+                self.config.max_total_exposure_pct) - (self.total_exposure - coin_exposure),
+        }
+        try:
+            from multi_coin_grid_pro.core.risk_buckets import MarketMetrics
+            vol = getattr(self, 'pair_volumes', {}).get(symbol)
+            spr = getattr(self, 'pair_spreads', {}).get(symbol)
+            metrics = MarketMetrics(float(vol), float(spr) * 100.0) if vol is not None and spr is not None else None
+            limits["risk_bucket"] = Decimal(str(self.bucket_tracker.remaining_capacity(symbol, metrics)))
+        except Exception as e:
+            self.logger().warning(f"Bucket headroom unavailable for {symbol} ({e}) - entry blocked")
+            return Decimal("0"), "risk_bucket_unavailable"
+        name, headroom = min(limits.items(), key=lambda item: item[1])
+        if headroom >= size:
+            return size, ""
+        return max(headroom, Decimal("0")), name
+
+    def _slot_fits_risk_budget(self, symbol: str, size: Decimal) -> Tuple[bool, Decimal]:
+        """
+        Clamp *size* to the risk budget and check the result is still a viable slot
+        (>= MIN_VIABLE_LEVELS x min order). Logs why when it is not.
+        """
+        limited, binding = self._limit_slot_to_risk_budget(symbol, size)
+        minimum = Decimal(str(self.config.min_order_amount_quote)) * MIN_VIABLE_LEVELS
+        if limited < minimum:
+            if should_log(f"slot_below_minimum_{symbol}", interval_sec=300):
+                self.logger().info(
+                    f"CAPITAL SKIP {symbol}: slot {size:.2f} limited to {limited:.2f} by "
+                    f"{binding or 'sizing'} < minimum viable {minimum:.2f} {self.config.quote_asset}"
+                )
+            return False, limited
+        if binding:
+            self.logger().info(
+                f"CAPITAL CAP {symbol}: slot {size:.2f} -> {limited:.2f} {self.config.quote_asset} ({binding})"
+            )
+        return True, limited
 
     def _check_position_limits(self, symbol: str, requested_allocation: Optional[Decimal] = None) -> bool:
         """
@@ -8131,6 +8264,9 @@ class MultiCoinGridController(ControllerBase):
         larger), while partial fills of take-profit orders are subtracted so proceeds already in
         the quote balance are not counted twice.
         """
+        fresh, fresh_reason = self._balance_data_fresh()
+        if not fresh:
+            return None, fresh_reason
         try:
             quote_total = Decimal(str(self.connector.get_balance(self._balance_currency)))
             if quote_total <= 0:

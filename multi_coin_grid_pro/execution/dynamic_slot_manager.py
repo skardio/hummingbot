@@ -17,6 +17,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
+# Minimum grid levels a slot must be able to fund; shared with the controller's slot caps.
+MIN_VIABLE_LEVELS = Decimal("3")
+
 
 @dataclass
 class DynamicAllocation:
@@ -317,7 +320,7 @@ class DynamicSlotManager:
 
         # Check if trading is even possible
         # Minimum viable: 1 coin × 3 grids × min_order
-        min_viable_capital = min_order * Decimal("3")  # At least 3 grid levels
+        min_viable_capital = min_order * MIN_VIABLE_LEVELS  # At least 3 grid levels
         if usable_capital < min_viable_capital:
             return DynamicAllocation(
                 available_capital=usable_capital,

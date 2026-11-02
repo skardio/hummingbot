@@ -129,11 +129,26 @@ class TestIlliquidDetection:
         profile = self.clf.classify("NEWTOKEN-USD", metrics)
         assert profile.bucket == CoinBucket.ILLIQUID
 
-    def test_sufficient_quality_is_illiquid_conservative(self):
-        # Good volume + tight spread but unknown coin → ILLIQUID (conservative)
-        metrics = MarketMetrics(volume_24h_usd=100_000_000, spread_pct=0.05)
+    def test_moderate_quality_stays_illiquid_conservative(self):
+        # Liquid enough, but without strong evidence an unlisted coin stays ILLIQUID
+        metrics = MarketMetrics(volume_24h_usd=10_000_000, spread_pct=0.05)
         profile = self.clf.classify("NEWTOKEN-USD", metrics)
         assert profile.bucket == CoinBucket.ILLIQUID
+        assert "policy fallback" in profile.reason.lower()
+
+    def test_strong_evidence_gives_meme_caps_never_l1_l2(self):
+        metrics = MarketMetrics(volume_24h_usd=100_000_000, spread_pct=0.05)
+        profile = self.clf.classify("NEWTOKEN-USD", metrics)
+        assert profile.bucket == CoinBucket.MEME
+
+    def test_strong_volume_but_wide_spread_stays_illiquid(self):
+        metrics = MarketMetrics(volume_24h_usd=100_000_000, spread_pct=1.0)
+        assert self.clf.classify("NEWTOKEN-USD", metrics).bucket == CoinBucket.ILLIQUID
+
+    def test_evidence_thresholds_are_configurable(self):
+        clf = RiskBucketClassifier(RiskBucketConfig(evidence_min_volume_usd=8_000_000))
+        metrics = MarketMetrics(volume_24h_usd=10_000_000, spread_pct=0.05)
+        assert clf.classify("NEWTOKEN-USD", metrics).bucket == CoinBucket.MEME
 
     def test_reason_mentions_volume(self):
         metrics = MarketMetrics(volume_24h_usd=500_000, spread_pct=0.1)
@@ -360,7 +375,7 @@ class TestRiskBucketExposureTracker:
         must remain ILLIQUID in get_bucket_total(), not re-classify to BLOCKED.
         """
         tracker = RiskBucketExposureTracker(portfolio_value=1000.0)
-        metrics = MarketMetrics(volume_24h_usd=50_000_000, spread_pct=0.1)
+        metrics = MarketMetrics(volume_24h_usd=10_000_000, spread_pct=0.1)
         tracker.set_pending("NEWTOKEN-USD", 30.0, metrics)
 
         # Bucket total must use stored ILLIQUID profile, not reclassify to BLOCKED
@@ -369,7 +384,7 @@ class TestRiskBucketExposureTracker:
 
     def test_set_filled_with_metrics_stores_profile(self):
         tracker = RiskBucketExposureTracker(portfolio_value=1000.0)
-        metrics = MarketMetrics(volume_24h_usd=50_000_000, spread_pct=0.1)
+        metrics = MarketMetrics(volume_24h_usd=10_000_000, spread_pct=0.1)
         tracker.set_filled("NEWTOKEN-USD", 20.0, metrics)
         assert "NEWTOKEN" in tracker._profiles
         assert tracker._profiles["NEWTOKEN"].bucket == CoinBucket.ILLIQUID
@@ -514,7 +529,7 @@ class TestRiskBucketExposureTracker:
     def test_restore_nonmanual_coin_with_metrics_works(self):
         """Restart: restoring a non-manual position with metrics works correctly."""
         tracker = RiskBucketExposureTracker(portfolio_value=1000.0)
-        metrics = MarketMetrics(volume_24h_usd=50_000_000, spread_pct=0.1)
+        metrics = MarketMetrics(volume_24h_usd=10_000_000, spread_pct=0.1)
         tracker.set_filled("NEWTOKEN-USD", 20.0, metrics)
         assert tracker.get_bucket_total(CoinBucket.ILLIQUID) == pytest.approx(20.0)
 
@@ -582,7 +597,7 @@ class TestRiskBucketExposureTracker:
         After restore the coin must trade in the correct bucket and obey the cap.
         """
         tracker = RiskBucketExposureTracker(portfolio_value=1000.0)
-        metrics = MarketMetrics(volume_24h_usd=50_000_000, spread_pct=0.1)
+        metrics = MarketMetrics(volume_24h_usd=10_000_000, spread_pct=0.1)
 
         # Restore from DB: filled position that existed before restart
         tracker.set_filled("NEWTOKEN-USD", 20.0, metrics)

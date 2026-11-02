@@ -1442,10 +1442,55 @@ class MultiCoinGridConfig(ControllerConfigBase):
     risk_reference_use_live_balance: bool = Field(
         default=False,
         client_data=ClientFieldData(
-            prompt=lambda mi: "Cap the risk reference at the live working capital (true/false): ",
+            prompt=lambda mi: "Derive the risk reference from live account equity (true/false): ",
             prompt_on_new=False,
         ),
         json_schema_extra={"is_updatable": True},
+    )
+    risk_capital_cap_quote: Optional[Decimal] = Field(
+        default=None,
+        gt=0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Optional operator cap on the bot capital in quote asset (empty = no cap): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    risk_reference_refresh_threshold_pct: Decimal = Field(
+        default=Decimal("1"),
+        ge=0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Minimum equity change in % before the risk reference is updated: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    balance_max_age_seconds: int = Field(
+        default=300,
+        gt=0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Seconds after which exchange balance data counts as stale (no new entries): ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": True},
+    )
+    bucket_evidence_min_volume_usd: float = Field(
+        default=25_000_000.0,
+        gt=0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "24h volume (USD) above which an unlisted coin gets MEME instead of ILLIQUID caps: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False},
+    )
+    bucket_evidence_max_spread_pct: float = Field(
+        default=0.5,
+        ge=0,
+        client_data=ClientFieldData(
+            prompt=lambda mi: "Max spread % for an unlisted coin to get MEME instead of ILLIQUID caps: ",
+            prompt_on_new=False,
+        ),
+        json_schema_extra={"is_updatable": False},
     )
     startup_reconcile_enabled: bool = Field(
         default=True,

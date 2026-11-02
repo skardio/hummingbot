@@ -323,10 +323,10 @@ class TestLiveReferencePreconditions:
         assert ctrl._ensure_risk_reference() is True
         assert ctrl.config.risk_reference_balance == D("700")
 
-    def test_bitget_yaml_uses_operator_confirmed_reference_as_ceiling(self):
+    def test_bitget_yaml_is_capital_adaptive_without_a_nominal_reference(self):
         from multi_coin_grid_pro.spot_bitget.config_manager import SpotGridBitgetConfigManager
         data = SpotGridBitgetConfigManager().load_config()
-        assert data.get("risk_reference_balance_quote") == 164
+        assert "risk_reference_balance_quote" not in data
         assert data.get("risk_reference_use_live_balance") is True
 
 

@@ -88,7 +88,7 @@ class TestUnitNormalisation:
         assert cfg.max_exposure_per_coin_pct == Decimal("0.55")
         assert cfg.max_total_exposure_pct == Decimal("0.95")
         assert cfg.risk_reference_use_live_balance is True
-        assert cfg.risk_reference_balance == Decimal("280")
+        assert "risk_reference_balance_quote" not in cfg.model_fields_set
 
 
 class TestPositionLimits:
@@ -202,11 +202,16 @@ class TestLiveRiskReference:
         assert ctrl._check_position_limits("AAA-USD", requested_allocation=Decimal("500")) is True
         assert ctrl._check_position_limits("AAA-USD", requested_allocation=Decimal("501")) is False
 
-    def test_live_balance_never_loosens_reference(self):
+    def test_live_balance_raises_reference_and_operator_cap_limits_it(self):
         ctrl = _make_controller(reference="300", use_live=True)
         ctrl.connector = _connector_with(2000)
         assert ctrl._ensure_risk_reference() is True
-        assert ctrl.config.risk_reference_balance == Decimal("300")
+        assert ctrl.config.risk_reference_balance == Decimal("2000")
+        capped = _make_controller(reference="300", use_live=True)
+        capped._risk_capital_cap = Decimal("300")
+        capped.connector = _connector_with(2000)
+        assert capped._ensure_risk_reference() is True
+        assert capped.config.risk_reference_balance == Decimal("300")
 
     @pytest.mark.parametrize("live", [Decimal("0"), RuntimeError("no balance")])
     def test_unreadable_live_balance_blocks_entries(self, live):

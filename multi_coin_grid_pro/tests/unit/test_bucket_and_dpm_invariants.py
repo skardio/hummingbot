@@ -519,12 +519,20 @@ class TestFailClosedForUnknownCoins:
 class TestDataDrivenClassificationNeverProducesL1L2:
     """
     T5 — A coin without manual override can NEVER be auto-classified as L1/L2.
-    Even with vol=$1B and spread=0.001%, unknown coins get ILLIQUID.
+    Even with vol=$1B and spread=0.001%, unknown coins only get the (conservative)
+    MEME caps; without strong evidence they stay ILLIQUID.
     """
 
-    def test_excellent_metrics_still_yields_illiquid(self):
+    def test_excellent_metrics_yield_meme_caps_not_l1_l2(self):
         clf = RiskBucketClassifier()
         m = MarketMetrics(volume_24h_usd=1_000_000_000, spread_pct=0.001)
+        result = clf.classify("ALLO-USDC", metrics=m)
+        assert result.bucket == CoinBucket.MEME
+        assert "evidence" in result.reason.lower()
+
+    def test_moderate_metrics_stay_illiquid(self):
+        clf = RiskBucketClassifier()
+        m = MarketMetrics(volume_24h_usd=10_000_000, spread_pct=0.1)
         result = clf.classify("ALLO-USDC", metrics=m)
         assert result.bucket == CoinBucket.ILLIQUID
         assert "policy fallback" in result.reason.lower()
@@ -546,7 +554,7 @@ class TestDataDrivenClassificationNeverProducesL1L2:
     def test_illiquid_cap_blocks_standard_notional(self):
         """ILLIQUID cap (3%) = $9 for portfolio=$300; any notional >$9 is blocked."""
         tracker = RiskBucketExposureTracker(portfolio_value=300.0)
-        m = MarketMetrics(volume_24h_usd=100_000_000, spread_pct=0.001)
+        m = MarketMetrics(volume_24h_usd=10_000_000, spread_pct=0.1)
         ok, reason = tracker.can_add("ALLO-USDC", 51.26, metrics=m)
         assert not ok
         assert "ILLIQUID" in reason

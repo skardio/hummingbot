@@ -81,6 +81,10 @@ class RiskBucketConfig:
     # Data-driven classification thresholds
     illiquid_min_volume_usd: float = 5_000_000.0   # below -> ILLIQUID
     illiquid_max_spread_pct: float = 2.0            # above -> ILLIQUID
+    # Unlisted coins are never L1/L2. Only with strong market evidence (both thresholds met)
+    # they get the conservative MEME caps instead of the ILLIQUID caps.
+    evidence_min_volume_usd: float = 25_000_000.0
+    evidence_max_spread_pct: float = 0.5
 
     def __post_init__(self) -> None:
         for bucket in CoinBucket:
@@ -101,6 +105,10 @@ class RiskBucketConfig:
             raise ValueError(
                 f"illiquid_max_spread_pct must be >= 0, got {self.illiquid_max_spread_pct}"
             )
+        if self.evidence_min_volume_usd < self.illiquid_min_volume_usd:
+            raise ValueError("evidence_min_volume_usd must be >= illiquid_min_volume_usd")
+        if not 0 <= self.evidence_max_spread_pct <= self.illiquid_max_spread_pct:
+            raise ValueError("evidence_max_spread_pct must be within [0, illiquid_max_spread_pct]")
 
 
 # -- Data models ---------------------------------------------------------------
@@ -234,12 +242,25 @@ class RiskBucketClassifier:
                 ),
             )
 
-        # 5. Sufficient liquidity but bucket unknown -> conservative policy fallback
+        # 5. Liquid by evidence: unlisted assets never reach L1/L2. With strong evidence they get
+        #    the MEME caps (conservative but usable); otherwise they stay ILLIQUID.
+        if (metrics.volume_24h_usd >= cfg.evidence_min_volume_usd
+                and metrics.spread_pct <= cfg.evidence_max_spread_pct):
+            return TradabilityProfile(
+                symbol=symbol,
+                base=base,
+                bucket=CoinBucket.MEME,
+                reason=(
+                    f"MEME-tier -- unlisted asset with market evidence (24h volume "
+                    f"${metrics.volume_24h_usd:,.0f} >= ${cfg.evidence_min_volume_usd:,.0f}, spread "
+                    f"{metrics.spread_pct:.2f}% <= {cfg.evidence_max_spread_pct:.2f}%)"
+                ),
+            )
         return TradabilityProfile(
             symbol=symbol,
             base=base,
             bucket=CoinBucket.ILLIQUID,
-            reason="ILLIQUID policy fallback -- unclassified asset, conservative downgrade",
+            reason="ILLIQUID policy fallback -- unclassified asset without strong liquidity evidence",
         )
 
 
@@ -384,6 +405,19 @@ class RiskBucketExposureTracker:
         return (self.get_bucket_total(bucket) / self._portfolio) * 100.0
 
     # -- Pre-trade check -------------------------------------------------------
+
+    def remaining_capacity(
+        self,
+        symbol: str,
+        metrics: Optional[MarketMetrics] = None,
+    ) -> float:
+        """Notional still allowed for *symbol* in its bucket (0 when blocked or full). Read-only."""
+        base = _normalize_base(symbol)
+        profile = self._profiles[base] if base in self._profiles else self._classifier.classify(symbol, metrics)
+        if profile.is_blocked:
+            return 0.0
+        max_value = self._config.limits.get(profile.bucket, 0.0) / 100.0 * self._portfolio
+        return max(0.0, max_value - self.get_bucket_total(profile.bucket))
 
     def can_add(
         self,
