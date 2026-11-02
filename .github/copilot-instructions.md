@@ -195,3 +195,47 @@ Bij elke wijziging die tradinggedrag, entry/exit, grids, sizing, risicobeheer, f
 
 - Voeg een regel toe aan de sectie `Strategiewijzigingen` onderaan het document (datum, component, wat, waarom, impact, tests, commit).
 - Een motivering zonder doc-wijziging legt je vast met de commit-trailer `Strategy-Docs: not-needed - <reden>` (minimaal 15 tekens). De controle `python3 .github/scripts/check_trading_strategy_docs.py --staged` draait lokaal als pre-commit `commit-msg`-hook en in CI; de lijst van strategierelevante paden staat bovenin dat script.
+
+## 10. AI Cost & Model Efficiency Policy
+
+Aanvulling op §5; verzwakt §3, §4, §6 en §9 niet. Veiligheid gaat vóór kosten.
+
+### Modelniveaus (adviserend)
+
+Een agent kan het gekozen chatmodel niet zelf wisselen. Adviseer het niveau en claim nooit een modelwissel die niet is uitgevoerd. Namen en prijzen (per 1M input/output-tokens) zijn gecontroleerd in de Copilot-documentatie op 2026-11-02 en veranderen; beschikbaarheid hangt af van het plan.
+
+| Niveau | Taken | Geschikte modellen |
+|---|---|---|
+| L1 goedkoop | Bestanden/config zoeken, git-controles, logregels lezen, documentatie, kleine unit tests, triviale wijzigingen | Claude Haiku 5.5 ($0.10/$0.50, ≤100K context), GPT-6 Luna ($0.10/$0.50) |
+| L2 gebalanceerd | Normale Python-ontwikkeling, gerichte debugging, tests schrijven, kleine refactors, reviews, enkele samenhangende modules | Claude Sonnet 5.5 of 5 ($2/$10), GPT-6.1 Terra ($1/$5) |
+| L3 krachtig | Tradinglogica, risk-architectuur, P&L en fees, concurrency, bugs over meerdere modules, strategische audits, veiligheidskritieke wijzigingen | Claude Opus 5.5 ($4/$20), Opus 5 ($5/$25), GPT-6.1 Sol ($2/$10) |
+
+- Lokale Ollama-modellen (4–7B) alleen voor triviale tekst, nooit voor tradingcode of financiële berekeningen.
+- Vermijd Fable-modellen en fast mode ($10/$50) zonder expliciete opdracht.
+- Standaard: reguliere contextgrootte en gemiddelde reasoning. Hoge reasoning en het 1M-contextvenster alleen voor L3; ze verhogen het verbruik.
+- Wissel van model alleen op een taakgrens of in een nieuwe chat; mid-taak wisselen verliest de prompt-cache.
+- Delegatie die wél kan: `model:` in de frontmatter van een `.agent.md` (string of voorkeurslijst), het `model`-veld van een handoff en de `model`-parameter van een subagent. Geef bij een subagent voor L1-werk expliciet een L1-model mee; zonder opgave bepaalt de tooling het model.
+
+### Context en toolgebruik
+
+1. Begin met de kleinste relevante scope; zoek (symbool, bestandsnaam, regex) vóór je bestanden opent.
+2. Lees alleen de nodige functies, klassen of configblokken; geen volledige grote bestanden.
+3. Geen herhaalde repo-brede zoekopdrachten; hergebruik eerdere resultaten, memory en documentatie.
+4. Lees `docs/TRADING_STRATEGY.md` alleen per relevante sectie (zoek eerst de kop).
+5. Gebruik `fetch_webpage` alleen met één URL en een smalle query; webpagina's leveren veel tokens op.
+6. Geen subagents voor wat één agent eenvoudig zelf doet; een subagent alleen voor ruim afgebakend, uitvoer-intensief werk.
+7. Houd antwoorden kort en zonder herhaling; stop zodra de taak aantoonbaar is opgelost en getest.
+8. Vraag toestemming vóór een uitzonderlijk brede analyse (zie kostenescalatie in §5).
+
+### Teststrategie
+
+1. Eerst de bestaande tests van de geraakte module.
+2. Daarna nieuwe of gewijzigde regressietests.
+3. Dan het betrokken subsysteem.
+4. De volledige suite bij brede of veiligheidskritieke wijzigingen en op expliciet verzoek.
+
+Wijzigingen aan orders, risicobeheer, fees, P&L, databases of financiële logica slaan nooit tests over om tokens te besparen. Gebruik waar mogelijk deterministische terminalcontroles (grep, git, pytest, flake8) in plaats van redeneren.
+
+### Escalatie
+
+L1: gerichte inspectie en concrete hypothese. L2: alleen relevante afhankelijkheden en gerichte tests. L3: brede analyse alleen bij tegenstrijdig bewijs, onverklaarde testfouten, veiligheidsrisico's, wijzigingen over meerdere kritieke subsystemen of expliciete opdracht; geef dan eerst kort aan wat wordt onderzocht en waarom. Vermijd eindeloze analyse-, fix- en testcycli.
