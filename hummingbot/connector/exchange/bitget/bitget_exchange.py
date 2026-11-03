@@ -1,5 +1,8 @@
 import asyncio
+import time
+from datetime import datetime, timezone
 from decimal import ROUND_UP, Decimal
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 from bidict import bidict
@@ -19,9 +22,20 @@ from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTr
 from hummingbot.core.data_type.trade_fee import TokenAmount, TradeFeeBase, TradeFeeSchema
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
 from hummingbot.core.utils.estimate_fee import build_trade_fee
+from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 
 s_decimal_NaN = Decimal("nan")
+
+
+class BitgetRateLimitError(IOError):
+    """HTTP 429 with the server-provided recovery delay, when Bitget supplies one."""
+
+    status_code = 429
+
+    def __init__(self, message: str, retry_after: Optional[float] = None):
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class BitgetExchange(ExchangePyBase):
@@ -45,6 +59,9 @@ class BitgetExchange(ExchangePyBase):
         self._trading_pairs = trading_pairs
 
         self._expected_market_amounts: Dict[str, Decimal] = {}
+        self._last_traded_prices_cache: Dict[str, Tuple[float, float]] = {}
+        self._last_traded_prices_cache_ttl = 3.0
+        self._last_traded_prices_lock = asyncio.Lock()
 
         super().__init__(balance_asset_limit, rate_limits_share_pct)
 
@@ -411,6 +428,129 @@ class BitgetExchange(ExchangePyBase):
         )
 
         return order_info_response
+
+    @staticmethod
+    def _retry_after_seconds(headers: Optional[Dict[str, Any]]) -> Optional[float]:
+        """Parse Retry-After as delay-seconds or an HTTP date."""
+        if not headers:
+            return None
+        raw_value = headers.get("Retry-After") or headers.get("retry-after")
+        if raw_value is None:
+            return None
+        try:
+            return max(0.0, float(raw_value))
+        except (TypeError, ValueError):
+            try:
+                retry_at = parsedate_to_datetime(str(raw_value))
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+            except (TypeError, ValueError, OverflowError):
+                return None
+
+    async def _request_all_tickers(self) -> Dict[str, Any]:
+        """Fetch all spot tickers in one throttled Bitget request, preserving 429 headers."""
+        rest_assistant = await self._web_assistants_factory.get_rest_assistant()
+        url = await self._api_request_url(path_url=CONSTANTS.PUBLIC_TICKERS_ENDPOINT)
+        response = await rest_assistant.execute_request_and_get_response(
+            url=url,
+            method=RESTMethod.GET,
+            is_auth_required=False,
+            return_err=True,
+            throttler_limit_id=CONSTANTS.PUBLIC_TICKERS_ENDPOINT,
+        )
+        try:
+            payload = await response.json()
+        except Exception:
+            payload = {"raw": await response.text()}
+
+        response_code = str(payload.get("code", "")) if isinstance(payload, dict) else ""
+        if response.status == 429 or response_code == "429":
+            retry_after = self._retry_after_seconds(response.headers)
+            raise BitgetRateLimitError(
+                f"Bitget ticker request rate limited (HTTP {response.status}): {payload}",
+                retry_after=retry_after,
+            )
+        if response.status >= 400:
+            raise IOError(f"Bitget ticker request failed (HTTP {response.status}): {payload}")
+        if not isinstance(payload, dict) or response_code != CONSTANTS.RET_CODE_OK:
+            raise IOError(f"Bitget ticker request returned an error: {payload}")
+        return payload
+
+    async def get_last_traded_prices(self, trading_pairs: List[str] = None) -> Dict[str, float]:
+        """
+        Return requested prices from Bitget's all-tickers response.
+
+        The official v2 endpoint returns every spot ticker when ``symbol`` is omitted, so a refresh
+        for N pairs costs one outbound request. A short cache coalesces overlapping refreshes.
+        Missing symbols stay absent from the result and are handled explicitly by the caller.
+        """
+        requested_pairs = list(dict.fromkeys(trading_pairs or []))
+        if not requested_pairs:
+            return {}
+
+        now = time.monotonic()
+        cached = {
+            pair: self._last_traded_prices_cache[pair][0]
+            for pair in requested_pairs
+            if pair in self._last_traded_prices_cache
+            and now - self._last_traded_prices_cache[pair][1] <= self._last_traded_prices_cache_ttl
+        }
+        if len(cached) == len(requested_pairs):
+            return cached
+
+        async with self._last_traded_prices_lock:
+            now = time.monotonic()
+            cached = {
+                pair: self._last_traded_prices_cache[pair][0]
+                for pair in requested_pairs
+                if pair in self._last_traded_prices_cache
+                and now - self._last_traded_prices_cache[pair][1] <= self._last_traded_prices_cache_ttl
+            }
+            if len(cached) == len(requested_pairs):
+                return cached
+
+            exchange_symbols = await asyncio.gather(*(
+                self.exchange_symbol_associated_to_pair(pair) for pair in requested_pairs
+            ))
+            exchange_to_pair = dict(zip(exchange_symbols, requested_pairs))
+            payload = await self._request_all_tickers()
+            tickers = {
+                record.get("symbol"): record
+                for record in (payload.get("data") or [])
+                if isinstance(record, dict) and record.get("symbol") in exchange_to_pair
+            }
+
+            fetched_at = time.monotonic()
+            prices: Dict[str, float] = {}
+            for exchange_symbol, pair in exchange_to_pair.items():
+                record = tickers.get(exchange_symbol)
+                if record is None:
+                    continue
+                try:
+                    price = float(record["lastPr"])
+                except (KeyError, TypeError, ValueError):
+                    self.logger().warning(
+                        "Invalid Bitget ticker price pair=%s exchange_symbol=%s record=%s",
+                        pair, exchange_symbol, record,
+                    )
+                    continue
+                if price <= 0:
+                    self.logger().warning(
+                        "Non-positive Bitget ticker price pair=%s exchange_symbol=%s price=%s",
+                        pair, exchange_symbol, price,
+                    )
+                    continue
+                prices[pair] = price
+                self._last_traded_prices_cache[pair] = (price, fetched_at)
+
+            missing = sorted(set(requested_pairs) - set(prices))
+            if missing:
+                self.logger().warning(
+                    "Bitget all-tickers response missing %s/%s requested pairs: %s",
+                    len(missing), len(requested_pairs), ", ".join(missing[:10]),
+                )
+            return prices
 
     async def _get_last_traded_price(self, trading_pair: str) -> float:
         resp_json = await self._api_get(

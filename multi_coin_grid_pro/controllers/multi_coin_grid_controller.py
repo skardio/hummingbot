@@ -6471,9 +6471,7 @@ class MultiCoinGridController(ControllerBase):
                     return False, f"No trading rules found for {trading_pair}"
 
                 min_order_size = trading_rule.min_order_size
-                min_notional = getattr(trading_rule, "min_notional", None)
-                if min_notional is None:
-                    min_notional = getattr(trading_rule, "min_notional_size", Decimal("0"))
+                min_notional = getattr(trading_rule, "min_notional_size", Decimal("0"))
                 try:
                     min_order_size = Decimal(str(min_order_size))
                     min_notional = Decimal(str(min_notional))
@@ -7815,28 +7813,120 @@ class MultiCoinGridController(ControllerBase):
             return -1.0
         return normalized
 
+    def _log_startup_inventory_classification(
+        self,
+        asset: str,
+        amount: Decimal,
+        value: Optional[Decimal],
+        min_notional: Optional[Decimal],
+        min_order_size: Optional[Decimal],
+        reason: str,
+        is_material: bool,
+    ) -> None:
+        """Log the rule evidence used to classify startup inventory without flooding the log."""
+        if not should_log(f"startup_inventory_{asset}_{reason}", interval_sec=300):
+            return
+        message = (
+            "Startup inventory classification asset=%s amount=%s value_quote=%s "
+            "min_notional_size=%s min_order_size=%s material=%s reason=%s"
+        )
+        args = (
+            asset,
+            amount,
+            value if value is not None else "unknown",
+            min_notional if min_notional is not None else "unknown",
+            min_order_size if min_order_size is not None else "unknown",
+            is_material,
+            reason,
+        )
+        if is_material:
+            self.logger().warning(message, *args)
+        else:
+            self.logger().info(message, *args)
+
     def _asset_inventory_quote(self, asset: str) -> Optional[Decimal]:
         """
-        Quote value of the wallet balance of `asset`: 0 when it is dust or not tradable against the
-        quote, None when it is material but cannot be valued (callers fail closed).
+        Quote value of the wallet balance of `asset`: 0 only when exchange rules prove it is dust,
+        and None when it cannot be classified safely (callers fail closed).
         """
         connector = self.connector
+        amount = Decimal("0")
+        value: Optional[Decimal] = None
+        min_order_size: Optional[Decimal] = None
+        min_notional: Optional[Decimal] = None
         try:
             amount = Decimal(str(connector.get_balance(asset)))
             if amount <= 0:
                 return Decimal("0")
             pair = f"{asset}-{self.config.quote_asset}"
             rule = connector.trading_rules.get(pair)
-            if rule is None or amount < Decimal(str(rule.min_order_size)):
+            if rule is None:
+                self._log_startup_inventory_classification(
+                    asset, amount, value, min_notional, min_order_size,
+                    reason="missing_trading_rule", is_material=True,
+                )
+                return None
+
+            raw_min_order_size = getattr(rule, "min_order_size", None)
+            if raw_min_order_size is None:
+                self._log_startup_inventory_classification(
+                    asset, amount, value, min_notional, min_order_size,
+                    reason="missing_min_order_size", is_material=True,
+                )
+                return None
+            min_order_size = Decimal(str(raw_min_order_size))
+            if not min_order_size.is_finite() or min_order_size < 0:
+                self._log_startup_inventory_classification(
+                    asset, amount, value, min_notional, min_order_size,
+                    reason="invalid_min_order_size", is_material=True,
+                )
+                return None
+            if amount < min_order_size:
+                self._log_startup_inventory_classification(
+                    asset, amount, value, min_notional, min_order_size,
+                    reason="below_min_order_size", is_material=False,
+                )
                 return Decimal("0")
+
+            raw_min_notional = getattr(rule, "min_notional_size", None)
+            if raw_min_notional is None:
+                self._log_startup_inventory_classification(
+                    asset, amount, value, min_notional, min_order_size,
+                    reason="missing_min_notional_size", is_material=True,
+                )
+                return None
+            min_notional = Decimal(str(raw_min_notional))
+            if not min_notional.is_finite() or min_notional <= 0:
+                self._log_startup_inventory_classification(
+                    asset, amount, value, min_notional, min_order_size,
+                    reason="invalid_min_notional_size", is_material=True,
+                )
+                return None
+
             mid = Decimal(str(connector.get_mid_price(pair)))
             if not mid.is_finite() or mid <= 0:
+                self._log_startup_inventory_classification(
+                    asset, amount, value, min_notional, min_order_size,
+                    reason="invalid_mid_price", is_material=True,
+                )
                 return None
             value = amount * mid
-            if value < Decimal(str(getattr(rule, "min_notional", 0) or 0)):
+            if value < min_notional:
+                self._log_startup_inventory_classification(
+                    asset, amount, value, min_notional, min_order_size,
+                    reason="below_min_notional_size", is_material=False,
+                )
                 return Decimal("0")
+            self._log_startup_inventory_classification(
+                asset, amount, value, min_notional, min_order_size,
+                reason="tradable_inventory", is_material=True,
+            )
             return value
-        except Exception:
+        except Exception as exc:
+            self._log_startup_inventory_classification(
+                asset, amount, value, min_notional, min_order_size,
+                reason=f"classification_error_{type(exc).__name__}", is_material=True,
+            )
             return None
 
     def _find_untracked_exposure(self) -> List[str]:

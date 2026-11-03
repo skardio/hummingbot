@@ -2,6 +2,7 @@
 Unit tests for TrendCalculator module
 """
 
+import asyncio
 import sys
 import time
 from decimal import Decimal
@@ -417,6 +418,114 @@ class TestTrendCalculator:
         # Verify trends were updated using base connector prices
         assert calculator.get_trend("XRP-EUR") is not None
         assert calculator.get_trend("ADA-EUR") is not None
+
+    async def test_bitget_29_symbols_use_one_multi_price_call(self):
+        from unittest.mock import MagicMock
+
+        symbols = [f"COIN{i}-USDT" for i in range(29)]
+        connector = MagicMock()
+        connector.name = "bitget"
+        connector.get_last_traded_prices = AsyncMock(
+            return_value={symbol: float(index + 1) for index, symbol in enumerate(symbols)}
+        )
+        calculator = TrendCalculator(connector=connector, lookback_minutes=30)
+        calculator._last_volume_refresh = time.time()
+
+        await calculator.update_all_trends_v2(symbols)
+
+        connector.get_last_traded_prices.assert_awaited_once_with(symbols)
+        assert all(calculator.get_trend(symbol) is not None for symbol in symbols)
+
+    async def test_bitget_partial_prices_do_not_trigger_individual_fallback(self):
+        from unittest.mock import MagicMock
+
+        symbols = [f"COIN{i}-USDT" for i in range(29)]
+        connector = MagicMock()
+        connector.name = "bitget"
+        connector.get_last_traded_prices = AsyncMock(return_value={symbols[0]: 1.0, symbols[1]: 2.0})
+        calculator = TrendCalculator(connector=connector, lookback_minutes=30)
+        calculator._last_volume_refresh = time.time()
+
+        await calculator.update_all_trends_v2(symbols)
+
+        assert connector.get_last_traded_prices.await_count == 1
+        assert calculator.get_trend(symbols[0]) is not None
+        assert calculator.get_trend(symbols[2]) is None
+
+    async def test_bitget_429_starts_backoff_without_request_fanout(self):
+        from unittest.mock import MagicMock
+
+        class RateLimitError(IOError):
+            status_code = 429
+            retry_after = 7.0
+
+        symbols = [f"COIN{i}-USDT" for i in range(29)]
+        connector = MagicMock()
+        connector.name = "bitget"
+        connector.get_last_traded_prices = AsyncMock(side_effect=RateLimitError("429 Too Many Requests"))
+        calculator = TrendCalculator(connector=connector, lookback_minutes=30)
+        calculator._last_volume_refresh = time.time()
+
+        await calculator.update_all_trends_v2(symbols)
+        first_backoff = calculator._price_fetch_backoff_until - time.time()
+        await calculator.update_all_trends_v2(symbols)
+
+        assert connector.get_last_traded_prices.await_count == 1
+        assert 5.0 < first_backoff <= 7.0
+        assert all(calculator.get_trend(symbol) is None for symbol in symbols)
+
+    async def test_bitget_timeout_reuses_fresh_cache_without_fanout(self):
+        from unittest.mock import MagicMock
+
+        connector = MagicMock()
+        connector.name = "bitget"
+        connector.get_last_traded_prices = AsyncMock(side_effect=asyncio.TimeoutError())
+        calculator = TrendCalculator(connector=connector, lookback_minutes=30)
+        calculator._last_volume_refresh = time.time()
+        calculator._last_price_cache["BTC-USDT"] = (50000.0, time.time())
+
+        await calculator.update_all_trends_v2(["BTC-USDT"])
+
+        assert connector.get_last_traded_prices.await_count == 1
+        assert calculator.get_trend("BTC-USDT").current_price == Decimal("50000.0")
+
+    async def test_bitget_429_does_not_reuse_stale_cache(self):
+        from unittest.mock import MagicMock
+
+        class RateLimitError(IOError):
+            status_code = 429
+            retry_after = 1.0
+
+        connector = MagicMock()
+        connector.name = "bitget"
+        connector.get_last_traded_prices = AsyncMock(side_effect=RateLimitError("429"))
+        calculator = TrendCalculator(connector=connector, lookback_minutes=30)
+        calculator._last_volume_refresh = time.time()
+        calculator._last_price_cache["BTC-USDT"] = (
+            50000.0,
+            time.time() - calculator._last_price_cache_max_age_seconds - 1,
+        )
+
+        await calculator.update_all_trends_v2(["BTC-USDT"])
+
+        assert connector.get_last_traded_prices.await_count == 1
+        assert calculator.get_trend("BTC-USDT") is None
+
+    async def test_kraken_multi_price_path_remains_one_call(self):
+        from unittest.mock import MagicMock
+
+        symbols = [f"COIN{i}-EUR" for i in range(29)]
+        connector = MagicMock()
+        connector.name = "kraken"
+        connector.get_last_traded_prices = AsyncMock(
+            return_value={symbol: float(index + 1) for index, symbol in enumerate(symbols)}
+        )
+        calculator = TrendCalculator(connector=connector, lookback_minutes=30)
+        calculator._last_volume_refresh = time.time()
+
+        await calculator.update_all_trends_v2(symbols)
+
+        connector.get_last_traded_prices.assert_awaited_once_with(symbols)
 
 
 class TestCoinTrend:

@@ -8,12 +8,13 @@ Phase 3: Production-ready validation with OHLCV candles and output contract.
 
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 from statistics import stdev
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -263,6 +264,63 @@ class TrendCalculator:
         # Periodic volume refresh — see refresh_candle_volumes()
         self._last_volume_refresh: float = 0.0
         self._volume_refresh_interval_seconds: int = 3600  # 60 minutes
+
+        # Last-price resilience. The cache is deliberately short-lived: it may bridge a transient
+        # timeout/rate limit, but it must not disguise stale market data.
+        self._last_price_cache: Dict[str, Tuple[float, float]] = {}
+        self._last_price_cache_max_age_seconds = 90.0
+        self._price_fetch_backoff_until = 0.0
+        self._rate_limit_failure_count = 0
+
+    @staticmethod
+    def _is_bitget_connector(connector: Optional[ConnectorBase]) -> bool:
+        name = getattr(connector, "name", "")
+        return isinstance(name, str) and name.replace("_paper_trade", "") == "bitget"
+
+    @staticmethod
+    def _is_rate_limit_error(error: Exception) -> bool:
+        return getattr(error, "status_code", None) == 429 or "429" in str(error)
+
+    def _fresh_cached_prices(self, symbols: List[str]) -> Tuple[Dict[str, float], List[str]]:
+        now = time.time()
+        fresh: Dict[str, float] = {}
+        stale: List[str] = []
+        for symbol in symbols:
+            cached = self._last_price_cache.get(symbol)
+            if cached is None:
+                stale.append(symbol)
+                continue
+            price, fetched_at = cached
+            if now - fetched_at <= self._last_price_cache_max_age_seconds:
+                fresh[symbol] = price
+            else:
+                stale.append(symbol)
+        return fresh, stale
+
+    def _cache_prices(self, prices: Dict[str, float]) -> None:
+        fetched_at = time.time()
+        for symbol, price in prices.items():
+            try:
+                numeric_price = float(price)
+            except (TypeError, ValueError):
+                continue
+            if numeric_price > 0:
+                self._last_price_cache[symbol] = (numeric_price, fetched_at)
+
+    def _start_rate_limit_backoff(self, error: Exception) -> float:
+        self._rate_limit_failure_count += 1
+        retry_after = getattr(error, "retry_after", None)
+        try:
+            retry_after = float(retry_after) if retry_after is not None else None
+        except (TypeError, ValueError):
+            retry_after = None
+        if retry_after is not None:
+            delay = min(300.0, max(0.0, retry_after))
+        else:
+            exponential = min(60.0, 5.0 * (2 ** (self._rate_limit_failure_count - 1)))
+            delay = exponential + random.uniform(0.0, 1.0)
+        self._price_fetch_backoff_until = time.time() + delay
+        return delay
 
     async def load_historical_data(self, symbols: List[str]) -> None:
         """
@@ -1088,75 +1146,118 @@ class TrendCalculator:
             logger.warning("No symbols to update")
             return
 
-        # CRITICAL RATE LIMITING: Ensure we don't call this too frequently
-        # Kraken allows 1 ticker call per second, so we enforce 2 seconds minimum between calls
-        current_time = time.time()
-        if not hasattr(self, '_last_batch_call_time'):
-            self._last_batch_call_time = 0
-
-        time_since_last_call = current_time - self._last_batch_call_time
-        MIN_CALL_INTERVAL = 2.0  # Minimum 2 seconds between batch calls (Kraken: 1 call/second)
-
-        if time_since_last_call < MIN_CALL_INTERVAL:
-            wait_time = MIN_CALL_INTERVAL - time_since_last_call
-            logger.debug(
-                f"⏳ Rate limiting: Waiting {
-                    wait_time:.2f}s before batch API call (last call was {
-                    time_since_last_call:.2f}s ago)")
-            await asyncio.sleep(wait_time)
-
-        # Try batch API call first (much faster - 1 call instead of N calls)
-        # Kraken's get_last_traded_prices() supports batch calls - much faster!
+        # Kraken and Bitget both implement a true multi-price request. Bitget's override uses the
+        # official all-tickers endpoint; the base ExchangeBase implementation is not a batch API.
         prices_dict = {}
         batch_call_attempted = False
         batch_call_success = False
+        suppress_individual_fallback = False
+        price_connector = self.connector
+        is_bitget = self._is_bitget_connector(self.connector) or self._is_bitget_connector(self.base_connector)
 
-        try:
-            # Try batch call first (for live connectors)
-            # IMPORTANT: Kraken's get_last_traded_prices() with multiple pairs makes ONE API call
-            # to get ALL tickers, then filters. This is much faster than individual calls.
-            batch_call_attempted = True
-            self._last_batch_call_time = time.time()  # Update timestamp BEFORE making the call
-            logger.info(f"🔄 Attempting batch API call for {len(converted_symbols)} symbols (1 API call for all)...")
-            start_time = time.time()
-            prices_dict = await self.connector.get_last_traded_prices(converted_symbols)
-            elapsed = time.time() - start_time
-            if prices_dict and len(prices_dict) > 0:
-                batch_call_success = True
-                success_rate = len(prices_dict) / len(converted_symbols) * 100
-                logger.info(
-                    f"✅ Batch API call successful: {len(prices_dict)}/{len(converted_symbols)} prices retrieved "
-                    f"({success_rate:.1f}% success) in {elapsed:.2f}s - 1 API call instead of {len(converted_symbols)}"
+        current_time = time.time()
+        if current_time < self._price_fetch_backoff_until:
+            prices_dict, stale_symbols = self._fresh_cached_prices(converted_symbols)
+            suppress_individual_fallback = True
+            batch_call_success = bool(prices_dict)
+            logger.warning(
+                "price_refresh_degraded reason=rate_limit_backoff remaining=%.2fs "
+                "fresh_cache=%s/%s stale_or_missing=%s",
+                self._price_fetch_backoff_until - current_time,
+                len(prices_dict), len(converted_symbols), len(stale_symbols),
+            )
+        else:
+            # Keep the existing cross-connector guard; Bitget's own throttler remains authoritative.
+            if not hasattr(self, '_last_batch_call_time'):
+                self._last_batch_call_time = 0
+            time_since_last_call = current_time - self._last_batch_call_time
+            min_call_interval = 2.0
+            if time_since_last_call < min_call_interval:
+                wait_time = min_call_interval - time_since_last_call
+                logger.debug(
+                    "⏳ Rate limiting: Waiting %.2fs before batch API call (last call was %.2fs ago)",
+                    wait_time, time_since_last_call,
                 )
-            else:
-                logger.warning(
-                    f"⚠️  Batch API call returned empty dict ({len(prices_dict) if prices_dict else 0} prices) - "
-                    f"falling back to individual calls (this will be slow: ~{len(converted_symbols) * 1.5:.1f}s)"
-                )
-        except NotImplementedError:
-            # Paper trading connector - try base connector for batch call
-            logger.debug("Paper trading connector - trying base connector for batch call...")
-            if self.base_connector:
+                await asyncio.sleep(wait_time)
+
+            try:
+                batch_call_attempted = True
+                self._last_batch_call_time = time.time()
+                logger.info("🔄 Attempting multi-price API call for %s symbols", len(converted_symbols))
+                start_time = time.time()
                 try:
-                    batch_call_attempted = True
-                    logger.info(
-                        f"🔄 Attempting batch API call via base connector for {
-                            len(converted_symbols)} symbols...")
-                    prices_dict = await self.base_connector.get_last_traded_prices(converted_symbols)
+                    prices_dict = await price_connector.get_last_traded_prices(converted_symbols)
+                except NotImplementedError:
+                    if self.base_connector is None:
+                        raise
+                    logger.debug("Paper trading connector - using base connector for multi-price fetch")
+                    price_connector = self.base_connector
+                    prices_dict = await price_connector.get_last_traded_prices(converted_symbols)
+
+                if is_bitget:
+                    # Bitget already used its one-request all-tickers endpoint. Never turn a partial
+                    # or empty response into N immediate requests to the same endpoint.
+                    suppress_individual_fallback = True
+
+                elapsed = time.time() - start_time
+                if prices_dict:
+                    self._cache_prices(prices_dict)
+                    cached_missing, stale_symbols = self._fresh_cached_prices([
+                        symbol for symbol in converted_symbols if symbol not in prices_dict
+                    ])
+                    if cached_missing:
+                        prices_dict.update(cached_missing)
+                        logger.warning(
+                            "price_refresh_partial reused_fresh_cache=%s stale_or_missing=%s",
+                            len(cached_missing), len(stale_symbols),
+                        )
                     batch_call_success = True
+                    self._rate_limit_failure_count = 0
+                    self._price_fetch_backoff_until = 0.0
+                    success_rate = len(prices_dict) / len(converted_symbols) * 100
                     logger.info(
-                        f"✅ Base connector batch API call successful: {len(prices_dict)}/{len(converted_symbols)} prices retrieved")  # noqa: E501
-                except Exception as e:
-                    logger.warning(f"⚠️  Base connector batch fetch failed: {e}")
-                    prices_dict = {}
-        except Exception as e:
-            # Catch any other exceptions (e.g., rate limit errors, network errors)
-            logger.warning(f"⚠️  Batch API call failed with exception: {type(e).__name__}: {e}")
-            prices_dict = {}
+                        "✅ Multi-price API call returned %s/%s prices (%.1f%%) in %.2fs",
+                        len(prices_dict), len(converted_symbols), success_rate, elapsed,
+                    )
+                    missing = sorted(set(converted_symbols) - set(prices_dict))
+                    if missing:
+                        logger.warning(
+                            "price_refresh_missing count=%s symbols=%s",
+                            len(missing), ",".join(missing[:10]),
+                        )
+                else:
+                    logger.warning("Multi-price API call returned no prices")
+            except Exception as e:
+                rate_limited = self._is_rate_limit_error(e)
+                if rate_limited:
+                    delay = self._start_rate_limit_backoff(e)
+                    suppress_individual_fallback = True
+                    logger.warning(
+                        "price_refresh_rate_limited backoff=%.2fs retry_after=%s error=%s",
+                        delay, getattr(e, "retry_after", None), e,
+                    )
+                elif is_bitget:
+                    # Repeating the all-tickers request once per symbol would amplify a timeout or outage.
+                    suppress_individual_fallback = True
+                    logger.warning("Bitget multi-price request failed; per-symbol fan-out suppressed: %s", e)
+                else:
+                    logger.warning(f"⚠️  Batch API call failed with exception: {type(e).__name__}: {e}")
+
+                prices_dict, stale_symbols = self._fresh_cached_prices(converted_symbols)
+                if prices_dict:
+                    batch_call_success = True
+                    logger.warning(
+                        "price_refresh_degraded source=fresh_cache prices=%s/%s stale_or_missing=%s",
+                        len(prices_dict), len(converted_symbols), len(stale_symbols),
+                    )
 
         # If batch call failed or returned empty, fall back to individual calls with rate limiting
-        if not batch_call_success or not prices_dict or len(prices_dict) < len(
-                converted_symbols) * 0.5:  # If less than 50% success
+        needs_fallback = (
+            not batch_call_success
+            or not prices_dict
+            or len(prices_dict) < len(converted_symbols) * 0.5
+        )
+        if needs_fallback and not suppress_individual_fallback:
             # Fallback: individual calls with rate limiting
             # IMPORTANT: Use direct price fetching instead of update_coin_trend to avoid nested API calls
             # Increased from 1.1 to 1.5 seconds between API calls to be safer (Kraken allows 1 call per second)
@@ -1275,7 +1376,12 @@ class TrendCalculator:
                         f"⚠️ Minor batch update misses ({len(failed_updates)}): {', '.join(failed_updates[:5])}"
                         + (f" (+{len(failed_updates) - 5} more)" if len(failed_updates) > 5 else "")
                     )
-                if retry_on_failure and failure_rate > 0.5 and successful_updates < 5:
+                if (
+                    retry_on_failure
+                    and not suppress_individual_fallback
+                    and failure_rate > 0.5
+                    and successful_updates < 5
+                ):
                     logger.warning(f"⚠️ High failure rate ({failure_rate:.0%}), retrying after 2s delay...")
                     await asyncio.sleep(2.0)
                     # Retry only the failed symbols (without retry flag to prevent infinite loop)

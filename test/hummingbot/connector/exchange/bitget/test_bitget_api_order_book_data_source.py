@@ -111,7 +111,7 @@ class BitgetAPIOrderBookDataSourceUnitTests(IsolatedAsyncioWrapperTestCase):
             "msg": "success",
             "data": [
                 {
-                    "instId": self.exchange_trading_pair,
+                    "symbol": self.exchange_trading_pair,
                     "lastPr": "2200.10",
                     "open24h": "0.00",
                     "high24h": "0.00",

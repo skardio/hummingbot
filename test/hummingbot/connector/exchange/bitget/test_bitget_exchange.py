@@ -6,10 +6,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aioresponses import aioresponses
 from aioresponses.core import RequestCall
+from bidict import bidict
 
 import hummingbot.connector.exchange.bitget.bitget_constants as CONSTANTS
 import hummingbot.connector.exchange.bitget.bitget_web_utils as web_utils
-from hummingbot.connector.exchange.bitget.bitget_exchange import BitgetExchange
+from hummingbot.connector.exchange.bitget.bitget_exchange import BitgetExchange, BitgetRateLimitError
 from hummingbot.connector.test_support.exchange_connector_test import AbstractExchangeConnectorTests
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.core.data_type.common import OrderType, TradeType
@@ -25,9 +26,7 @@ class BitgetExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests)
 
     @property
     def latest_prices_url(self):
-        url = web_utils.public_rest_url(path_url=CONSTANTS.PUBLIC_TICKERS_ENDPOINT)
-        url = f"{url}?symbol={self.exchange_trading_pair}"
-        return url
+        return web_utils.public_rest_url(path_url=CONSTANTS.PUBLIC_TICKERS_ENDPOINT)
 
     @property
     def network_status_url(self):
@@ -369,6 +368,60 @@ class BitgetExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests)
             bitget_passphrase="test_passphrase",
             trading_pairs=[self.trading_pair],
         )
+
+    @aioresponses()
+    async def test_get_last_traded_prices_uses_one_request_for_29_symbols_and_cache(self, mock_api):
+        pairs = [f"COIN{i}-USDT" for i in range(29)]
+        exchange_symbols = [pair.replace("-", "") for pair in pairs]
+        self.exchange._set_trading_pair_symbol_map(bidict(dict(zip(exchange_symbols, pairs))))
+        response = {
+            "code": "00000",
+            "msg": "success",
+            "data": [
+                {"symbol": symbol, "lastPr": str(index + 1)}
+                for index, symbol in enumerate(exchange_symbols)
+            ],
+        }
+        url = web_utils.public_rest_url(CONSTANTS.PUBLIC_TICKERS_ENDPOINT)
+        mock_api.get(url, body=json.dumps(response))
+
+        prices = await self.exchange.get_last_traded_prices(pairs)
+        cached_subset = await self.exchange.get_last_traded_prices(pairs[:2])
+
+        self.assertEqual(29, len(prices))
+        self.assertEqual({pairs[0]: 1.0, pairs[1]: 2.0}, cached_subset)
+        self.assertEqual(1, len(self._all_executed_requests(mock_api, url)))
+
+    @aioresponses()
+    async def test_get_last_traded_prices_returns_partial_response_without_fanout(self, mock_api):
+        pairs = ["AAA-USDT", "BBB-USDT"]
+        self.exchange._set_trading_pair_symbol_map(bidict({"AAAUSDT": pairs[0], "BBBUSDT": pairs[1]}))
+        url = web_utils.public_rest_url(CONSTANTS.PUBLIC_TICKERS_ENDPOINT)
+        mock_api.get(url, body=json.dumps({
+            "code": "00000", "msg": "success", "data": [{"symbol": "AAAUSDT", "lastPr": "1.25"}],
+        }))
+
+        prices = await self.exchange.get_last_traded_prices(pairs)
+
+        self.assertEqual({"AAA-USDT": 1.25}, prices)
+        self.assertEqual(1, len(self._all_executed_requests(mock_api, url)))
+
+    @aioresponses()
+    async def test_get_last_traded_prices_preserves_retry_after_on_429(self, mock_api):
+        self.exchange._set_trading_pair_symbol_map(bidict({"AAAUSDT": "AAA-USDT"}))
+        url = web_utils.public_rest_url(CONSTANTS.PUBLIC_TICKERS_ENDPOINT)
+        mock_api.get(
+            url,
+            status=429,
+            headers={"Retry-After": "7"},
+            body=json.dumps({"code": "429", "msg": "Too Many Requests"}),
+        )
+
+        with self.assertRaises(BitgetRateLimitError) as context:
+            await self.exchange.get_last_traded_prices(["AAA-USDT"])
+
+        self.assertEqual(7.0, context.exception.retry_after)
+        self.assertEqual(1, len(self._all_executed_requests(mock_api, url)))
 
     # validate functions (auth, order creation, order cancellation, order status, trades)
     def validate_auth_credentials_present(self, request_call: RequestCall):

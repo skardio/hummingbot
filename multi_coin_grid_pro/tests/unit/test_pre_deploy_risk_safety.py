@@ -38,7 +38,7 @@ class FakeConnector:
 
 
 def rule(min_size="0.0001", min_notional="5"):
-    return SimpleNamespace(min_order_size=D(min_size), min_notional=D(min_notional))
+    return SimpleNamespace(min_order_size=D(min_size), min_notional_size=D(min_notional))
 
 
 def make_controller(reference="1000", per_coin="50.0", total="70.0", use_live=False, **extra):
@@ -261,16 +261,56 @@ class TestStartupReconciliation:
                                        rules={"AAA-USD": rule(min_notional="5")})
         assert ctrl._startup_exposure_gate() is True
 
+    @pytest.mark.parametrize(
+        "asset,amount,mid,min_size,min_notional",
+        [
+            ("BGB", "1", "0.71", "0.0001", "1"),
+            ("NEAR", "0.02", "5", "0.001", "1"),
+            ("ONDO", "0.001", "0.50", "0.0001", "1"),
+        ],
+    )
+    def test_bitget_dust_balances_do_not_block(self, asset, amount, mid, min_size, min_notional):
+        ctrl = make_controller()
+        pair = f"{asset}-USD"
+        ctrl.connector = FakeConnector(
+            balances={"USD": 900, asset: amount},
+            mids={pair: mid},
+            rules={pair: rule(min_size=min_size, min_notional=min_notional)},
+        )
+        assert ctrl._startup_exposure_gate() is True
+
+    def test_material_bitget_inventory_still_blocks(self):
+        ctrl = make_controller()
+        ctrl.connector = FakeConnector(
+            balances={"USD": 900, "BGB": 2},
+            mids={"BGB-USD": "0.71"},
+            rules={"BGB-USD": rule(min_size="0.0001", min_notional="1")},
+        )
+        assert ctrl._startup_exposure_gate() is False
+        assert "BGB" in ctrl._startup_block_reason
+
     def test_unpriceable_inventory_fails_closed(self):
         ctrl = make_controller()
         ctrl.connector = FakeConnector(balances={"USD": 900, "AAA": 5}, rules={"AAA-USD": rule()})
         assert ctrl._startup_exposure_gate() is False
         assert "AAA" in ctrl._startup_block_reason
 
-    def test_asset_without_quote_pair_is_ignored(self):
+    def test_asset_without_quote_pair_fails_closed(self):
         ctrl = make_controller()
         ctrl.connector = FakeConnector(balances={"USD": 900, "XYZ": 5})
-        assert ctrl._startup_exposure_gate() is True
+        assert ctrl._startup_exposure_gate() is False
+        assert "XYZ" in ctrl._startup_block_reason
+
+    def test_missing_min_notional_rule_fails_closed(self):
+        ctrl = make_controller()
+        incomplete_rule = SimpleNamespace(min_order_size=D("0.001"))
+        ctrl.connector = FakeConnector(
+            balances={"USD": 900, "AAA": 1},
+            mids={"AAA-USD": 2},
+            rules={"AAA-USD": incomplete_rule},
+        )
+        assert ctrl._startup_exposure_gate() is False
+        assert "AAA" in ctrl._startup_block_reason
 
     def test_missing_balances_block(self):
         ctrl = make_controller()
