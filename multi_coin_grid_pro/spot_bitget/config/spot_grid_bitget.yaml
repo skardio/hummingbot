@@ -179,6 +179,13 @@ paper_trading: false              # Set to true for testing
 connector_name: bitget            # Bitget SPOT connector
 quote_asset: USDT                 # Quote currency
 
+# Operator-confirmed non-bot dust (2026-11-04). These balances are ignored only
+# by startup reconciliation; they are not sold, converted, or removed.
+startup_reconcile_ack_assets:
+  - EUR
+  - ELON
+  - THQ
+
 # ==============================================================================
 # BITGET SPOT GRID — LIQUID UNIVERSE PRESET
 # Purpose: Stable, high-liquidity trading universe for Bitget

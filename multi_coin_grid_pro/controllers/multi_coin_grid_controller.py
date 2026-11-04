@@ -6471,7 +6471,11 @@ class MultiCoinGridController(ControllerBase):
                     return False, f"No trading rules found for {trading_pair}"
 
                 min_order_size = trading_rule.min_order_size
-                min_notional = getattr(trading_rule, "min_notional_size", Decimal("0"))
+                # Keep compatibility with legacy rule adapters used by pre-close validation;
+                # current Hummingbot TradingRule instances expose min_notional_size.
+                min_notional = getattr(trading_rule, "min_notional", None)
+                if min_notional is None:
+                    min_notional = getattr(trading_rule, "min_notional_size", Decimal("0"))
                 try:
                     min_order_size = Decimal(str(min_order_size))
                     min_notional = Decimal(str(min_notional))
