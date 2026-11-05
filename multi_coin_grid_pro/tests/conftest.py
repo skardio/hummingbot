@@ -74,6 +74,19 @@ def pytest_configure(config):
     )
 
 
+def _resolved_path(path: Path) -> Path:
+    """Resolve a test path relative to the repository without creating it."""
+    return path.resolve() if path.is_absolute() else (project_root / path).resolve()
+
+
+def _is_below(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -132,4 +145,55 @@ def isolate_realised_pnl_ledger(tmp_path, monkeypatch):
         original_init(self, db_path, logger)
 
     monkeypatch.setattr(ledger_module.RealisedPnlLedger, "__init__", isolated_init)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def isolate_operational_test_artifacts(tmp_path, monkeypatch):
+    """Redirect production-default persistence and event paths during tests.
+
+    Controller tests construct real persistence helpers. Without this guard,
+    ``_create_grid_action`` writes synthetic entry prices to ``data/`` and
+    enabled observability creates empty JSONL files under ``logs/``. Explicit
+    temporary paths supplied by a test remain unchanged.
+    """
+    import multi_coin_grid_pro.observability.event_logger as event_logger_module
+    import multi_coin_grid_pro.persistence.entry_price_store as entry_price_module
+
+    production_data_dir = (project_root / "data").resolve()
+    production_logs_dir = (project_root / "logs").resolve()
+
+    original_entry_init = entry_price_module.EntryPriceStore.__init__
+
+    def isolated_entry_init(self, db_path=None, logger=None):
+        requested = Path(db_path or entry_price_module.EntryPriceStore.DEFAULT_DB_PATH)
+        resolved = _resolved_path(requested)
+        if _is_below(resolved, production_data_dir):
+            db_path = str(tmp_path / "operational-data" / resolved.name)
+        original_entry_init(self, db_path, logger)
+
+    original_event_init = event_logger_module.EventLogger.__init__
+
+    def isolated_event_init(
+        self,
+        enabled=False,
+        output_dir="logs/events",
+        buffer_size=100,
+        config_hash=None,
+    ):
+        requested = Path(output_dir)
+        resolved = _resolved_path(requested)
+        if _is_below(resolved, production_logs_dir):
+            relative = resolved.relative_to(production_logs_dir)
+            output_dir = str(tmp_path / "operational-logs" / relative)
+        original_event_init(
+            self,
+            enabled=enabled,
+            output_dir=output_dir,
+            buffer_size=buffer_size,
+            config_hash=config_hash,
+        )
+
+    monkeypatch.setattr(entry_price_module.EntryPriceStore, "__init__", isolated_entry_init)
+    monkeypatch.setattr(event_logger_module.EventLogger, "__init__", isolated_event_init)
     yield
