@@ -329,6 +329,33 @@ class GridExecutor(ExecutorBase):
             self.logger().warning("Decision telemetry initialization failed (trading unaffected): %s", exc)
             self._decision_telemetry = None
 
+    def _ensure_buy_cap_state(self) -> None:
+        """Initialize additive cap/telemetry state for legacy reconstructed stubs.
+
+        Normal executors receive these fields in ``__init__``. A few diagnostic
+        paths and unit tests intentionally construct an executor with
+        ``__new__`` to exercise isolated lifecycle methods. Keep those objects
+        backward compatible without starting a telemetry writer implicitly.
+        """
+        if "_executed_open_order_ids" not in self.__dict__:
+            custom_info = getattr(getattr(self, "config", None), "custom_info", None)
+            initial = custom_info.get("executed_open_order_ids", []) if isinstance(custom_info, dict) else []
+            self._executed_open_order_ids = {str(order_id) for order_id in initial if order_id}
+        if "_buy_cap_cancel_requested_ids" not in self.__dict__:
+            self._buy_cap_cancel_requested_ids = set()
+        if "_buy_cap_reached_emitted" not in self.__dict__:
+            self._buy_cap_reached_emitted = False
+        if "_decision_last_block_signature" not in self.__dict__:
+            self._decision_last_block_signature = None
+        if "_decision_exit_emitted" not in self.__dict__:
+            self._decision_exit_emitted = False
+        if "_decision_telemetry" not in self.__dict__:
+            self._decision_telemetry = None
+
+    def _configured_open_order_cap(self) -> Optional[int]:
+        value = getattr(getattr(self, "config", None), "max_executed_open_orders", None)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
     @staticmethod
     def _safe_float(value):
         try:
@@ -339,7 +366,7 @@ class GridExecutor(ExecutorBase):
     def _active_open_orders(self):
         return [
             level.active_open_order
-            for level in self.grid_levels
+            for level in getattr(self, "grid_levels", [])
             if level.active_open_order is not None
         ]
 
@@ -354,6 +381,7 @@ class GridExecutor(ExecutorBase):
             return False
 
     def _sync_executed_open_order_ids(self) -> None:
+        self._ensure_buy_cap_state()
         for tracked_order in self._active_open_orders():
             if self._tracked_order_has_execution(tracked_order):
                 self._executed_open_order_ids.add(tracked_order.order_id)
@@ -381,6 +409,7 @@ class GridExecutor(ExecutorBase):
         order_id: Optional[str] = None,
         order_state: Optional[str] = None,
     ) -> None:
+        self._ensure_buy_cap_state()
         writer = self._decision_telemetry
         if writer is None:
             return
@@ -416,7 +445,7 @@ class GridExecutor(ExecutorBase):
                 side=self.config.side.name,
                 order_state=order_state,
                 config_version=custom_info.get("buy_cap_config_version"),
-                configured_cap=self.config.max_executed_open_orders,
+                configured_cap=self._configured_open_order_cap(),
                 executed_order_count=executed_count,
                 open_order_count=open_count,
                 reserved_order_count=reserved_count,
@@ -2623,7 +2652,7 @@ class GridExecutor(ExecutorBase):
                 self.logger().debug(f"Executor ID: {self.config.id} - Placing open order {order_id}")
                 self._emit_decision_telemetry(
                     "BUY_ORDER_SUBMITTED",
-                    reason_code="CAPACITY_RESERVED" if self.config.max_executed_open_orders else "CAP_DISABLED",
+                    reason_code="CAPACITY_RESERVED" if self._configured_open_order_cap() else "CAP_DISABLED",
                     order_id=order_id,
                     order_state="SUBMITTED",
                 )
@@ -3297,7 +3326,7 @@ class GridExecutor(ExecutorBase):
             return []
         levels_allowed = self._filter_levels_by_activation_bounds()
         sorted_levels_by_proximity = self._sort_levels_by_proximity(levels_allowed)
-        configured_cap = self.config.max_executed_open_orders
+        configured_cap = self._configured_open_order_cap()
         if configured_cap is None:
             return sorted_levels_by_proximity[:self.config.max_orders_per_batch]
 
@@ -3329,7 +3358,7 @@ class GridExecutor(ExecutorBase):
         is a recovery/race safeguard for delayed exchange state and restored
         order tracking.
         """
-        configured_cap = self.config.max_executed_open_orders
+        configured_cap = self._configured_open_order_cap()
         if configured_cap is None:
             return []
         executed_count, _, _ = self._buy_cap_counts()
@@ -4203,6 +4232,7 @@ class GridExecutor(ExecutorBase):
         }
 
     def get_custom_info(self) -> Dict:
+        self._ensure_buy_cap_state()
         held_position_value = sum([
             Decimal(order["executed_amount_quote"])
             for order in self._held_position_orders
@@ -4254,7 +4284,7 @@ class GridExecutor(ExecutorBase):
             "executed_open_order_ids": sorted(self._executed_open_order_ids),
             "executed_open_order_count": len(self._executed_open_order_ids),
             "reserved_open_order_count": self._buy_cap_counts()[2],
-            "configured_buy_cap": self.config.max_executed_open_orders,
+            "configured_buy_cap": self._configured_open_order_cap(),
             "buy_cap_config_version": initial_info.get("buy_cap_config_version"),
         }
 
@@ -4488,6 +4518,7 @@ class GridExecutor(ExecutorBase):
         _total_executed_amount_backup, that can be used if the InFlightOrder
         is not available.
         """
+        self._ensure_buy_cap_state()
         self.update_tracked_orders_with_order_id(event.order_id)
 
         # STORY A1: Update last_fill_timestamp (any fill = activity)
@@ -4505,8 +4536,9 @@ class GridExecutor(ExecutorBase):
                 order_id=event.order_id,
                 order_state="PARTIALLY_FILLED",
             )
-            if (self.config.max_executed_open_orders is not None
-                    and len(self._executed_open_order_ids) >= self.config.max_executed_open_orders
+            configured_cap = self._configured_open_order_cap()
+            if (configured_cap is not None
+                    and len(self._executed_open_order_ids) >= configured_cap
                     and not self._buy_cap_reached_emitted):
                 self._buy_cap_reached_emitted = True
                 self._emit_decision_telemetry("BUY_CAP_REACHED", reason_code="DISTINCT_EXECUTED_ORDER_CAP")
@@ -4518,6 +4550,7 @@ class GridExecutor(ExecutorBase):
         This method is responsible for processing the order completed event. Here we will check if the id is one of the
         tracked orders and update the state
         """
+        self._ensure_buy_cap_state()
         self.update_tracked_orders_with_order_id(event.order_id)
 
         # FASE 1A: Soft-risk shadow-mode fill tracking (logging only).
@@ -4939,6 +4972,7 @@ class GridExecutor(ExecutorBase):
         _post_fill_final_snapshot_written guarantees only one write regardless
         of which one fires.
         """
+        self._ensure_buy_cap_state()
         try:
             self._maybe_sample_post_fill_risk(force_final=True)
         except Exception as e:
@@ -4956,6 +4990,7 @@ class GridExecutor(ExecutorBase):
         """
         This method is responsible for processing the order canceled event
         """
+        self._ensure_buy_cap_state()
         # BITGET FIX: Clear cancel retry tracking when order is successfully cancelled
         order_id = event.order_id
         if order_id in self._buy_cap_cancel_requested_ids:
@@ -5051,6 +5086,7 @@ class GridExecutor(ExecutorBase):
         This method is responsible for processing the order failed event. Here we will add the InFlightOrder to the
         failed orders list.
         """
+        self._ensure_buy_cap_state()
         # BITGET FIX: Clear cancel retry tracking when order fails (including "order not found" errors)
         order_id = event.order_id
         if order_id in self._buy_cap_cancel_requested_ids:
