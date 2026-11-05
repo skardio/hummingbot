@@ -3,9 +3,11 @@ Pydantic schema for the Bitget SPOT grid controller.
 Based on the base MultiCoinGridConfig with Bitget-specific spot settings.
 """
 
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from multi_coin_grid_pro.controllers.multi_coin_grid_config import MultiCoinGridConfig
 
@@ -57,6 +59,33 @@ class SpotGridBitgetConfig(MultiCoinGridConfig):
         le=300,
         description="Seconds between order refreshes"
     )
+
+    # Prepared safety experiment. A missing activation timestamp is deliberately
+    # inactive, even though the configured cap is present.
+    max_executed_buy_orders_per_executor: int = Field(default=4, ge=1, le=100)
+    buy_cap_activation_timestamp_utc: Optional[str] = Field(default=None)
+    buy_cap_config_version: str = Field(default="bitget-buy-cap-v1", max_length=64)
+    decision_telemetry_enabled: bool = Field(default=True)
+    decision_telemetry_queue_size: int = Field(default=1000, ge=10, le=100000)
+    decision_telemetry_retention_days: int = Field(default=90, ge=1, le=3650)
+
+    @field_validator("buy_cap_activation_timestamp_utc")
+    @classmethod
+    def validate_buy_cap_activation_timestamp(cls, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return value
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+            raise ValueError("buy_cap_activation_timestamp_utc must include a UTC offset")
+        return value
+
+    def buy_cap_is_active(self, timestamp: float) -> bool:
+        """True only at/after an explicitly configured, timezone-aware UTC time."""
+        raw = self.buy_cap_activation_timestamp_utc
+        if not raw:
+            return False
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return timestamp >= parsed.astimezone(timezone.utc).timestamp()
 
     @property
     def triple_barrier_config(self):

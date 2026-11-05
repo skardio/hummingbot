@@ -69,6 +69,10 @@ multi_coin_grid_pro/
 
 **See:** `docs/ARCHITECTURE.md` for detailed architecture documentation
 
+De voorbereide maar nog niet geactiveerde Bitget 4-BUY-cap en generieke
+decision-telemetrie staan beschreven in
+[`docs/BITGET_BUY_CAP_AND_DECISION_TELEMETRY.md`](docs/BITGET_BUY_CAP_AND_DECISION_TELEMETRY.md).
+
 ---
 
 ## 🎯 Development Phases

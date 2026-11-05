@@ -1553,3 +1553,86 @@ class TestGridExecutor(IsolatedAsyncioWrapperTestCase, LoggerMixinForTest):
         await executor.control_task()
         self.assertEqual(executor._status, RunnableStatus.TERMINATED)
         self.assertEqual(executor.close_type, CloseType.POSITION_HOLD)
+
+    @patch.object(GridExecutor, "get_price", return_value=Decimal("110"))
+    def test_buy_cap_reserves_submitted_orders_and_prevents_fifth(self, _):
+        config = GridExecutorConfig(
+            id="cap-test", timestamp=123, side=TradeType.BUY, connector_name="binance",
+            trading_pair="ETH-USDT", start_price=Decimal("100"), end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"), min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("9"), max_open_orders=10, max_orders_per_batch=2,
+            max_executed_open_orders=4, limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(take_profit=Decimal("0.01"), stop_loss=Decimal("0.05")),
+        )
+        executor = self.get_grid_executor_from_config(config)
+        executor.mid_price = Decimal("110")
+        executor.update_grid_levels()
+        first_batch = executor.get_open_orders_to_create()
+        self.assertEqual(len(first_batch), 2)
+        for index, level in enumerate(first_batch):
+            level.active_open_order = TrackedOrder(f"OID-{index}")
+        executor.update_grid_levels()
+        second_batch = executor.get_open_orders_to_create()
+        self.assertEqual(len(second_batch), 2)
+        for index, level in enumerate(second_batch, start=2):
+            level.active_open_order = TrackedOrder(f"OID-{index}")
+        executor.update_grid_levels()
+        self.assertEqual(executor.get_open_orders_to_create(), [])
+        self.assertEqual(executor._buy_cap_counts(), (0, 4, 4))
+
+    @patch.object(GridExecutor, "get_in_flight_order")
+    @patch.object(GridExecutor, "get_price", return_value=Decimal("110"))
+    def test_partial_fills_count_distinct_order_once(self, _, get_in_flight_order_mock):
+        config = GridExecutorConfig(
+            id="partial-test", timestamp=123, side=TradeType.BUY, connector_name="binance",
+            trading_pair="ETH-USDT", start_price=Decimal("100"), end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"), min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("9"), max_executed_open_orders=4, limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(take_profit=Decimal("0.01"), stop_loss=Decimal("0.05")),
+        )
+        executor = self.get_grid_executor_from_config(config)
+        executor.grid_levels[0].active_open_order = TrackedOrder("OID-PARTIAL")
+        order = InFlightOrder(
+            client_order_id="OID-PARTIAL", exchange_order_id="EX-1", trading_pair="ETH-USDT",
+            order_type=OrderType.LIMIT, trade_type=TradeType.BUY, amount=Decimal("1"),
+            price=Decimal("100"), creation_timestamp=123,
+            initial_state=OrderState.PARTIALLY_FILLED,
+        )
+        order.executed_amount_base = Decimal("0.2")
+        get_in_flight_order_mock.return_value = order
+        event = OrderFilledEvent(
+            timestamp=124, order_id="OID-PARTIAL", trading_pair="ETH-USDT",
+            trade_type=TradeType.BUY, order_type=OrderType.LIMIT, price=Decimal("100"),
+            amount=Decimal("0.1"), trade_fee=AddedToCostTradeFee(), exchange_trade_id="trade-1",
+        )
+        executor.process_order_filled_event(None, None, event)
+        executor.process_order_filled_event(None, None, event)
+        self.assertEqual(executor._executed_open_order_ids, {"OID-PARTIAL"})
+        self.assertEqual(executor._buy_cap_counts()[0], 1)
+
+    @patch.object(GridExecutor, "get_price", return_value=Decimal("110"))
+    def test_buy_cap_cancels_only_unexecuted_reservations_after_cap(self, _):
+        config = GridExecutorConfig(
+            id="cancel-test", timestamp=123, side=TradeType.BUY, connector_name="binance",
+            trading_pair="ETH-USDT", start_price=Decimal("100"), end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"), min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("9"), max_executed_open_orders=1, limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(take_profit=Decimal("0.01"), stop_loss=Decimal("0.05")),
+        )
+        executor = self.get_grid_executor_from_config(config)
+        executor.grid_levels[0].active_open_order = TrackedOrder("OID-EXECUTED")
+        executor.grid_levels[1].active_open_order = TrackedOrder("OID-PENDING")
+        executor._executed_open_order_ids.add("OID-EXECUTED")
+        self.assertEqual(executor._get_buy_cap_order_ids_to_cancel(), ["OID-PENDING"])
+
+    @patch.object(GridExecutor, "get_price", return_value=Decimal("110"))
+    def test_default_grid_executor_has_no_buy_cap(self, _):
+        config = GridExecutorConfig(
+            id="legacy-test", timestamp=123, side=TradeType.BUY, connector_name="binance",
+            trading_pair="ETH-USDT", start_price=Decimal("100"), end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"), min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("9"), limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(take_profit=Decimal("0.01"), stop_loss=Decimal("0.05")),
+        )
+        executor = self.get_grid_executor_from_config(config)
+        self.assertIsNone(executor.config.max_executed_open_orders)

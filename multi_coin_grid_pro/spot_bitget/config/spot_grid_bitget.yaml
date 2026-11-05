@@ -5,6 +5,15 @@
 # ==============================================================================
 
 controller_name: spot_grid_bitget
+
+# Prepared 4-BUY experiment. Deliberately inactive until an explicit UTC
+# activation timestamp is configured during an approved deployment window.
+max_executed_buy_orders_per_executor: 4
+buy_cap_activation_timestamp_utc: null
+buy_cap_config_version: bitget-buy-cap-v1
+decision_telemetry_enabled: true
+decision_telemetry_queue_size: 1000
+decision_telemetry_retention_days: 90
 log_level: INFO
 
 # ==============================================================================

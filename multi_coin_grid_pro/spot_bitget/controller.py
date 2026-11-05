@@ -77,6 +77,25 @@ class SpotGridBitgetController(MultiCoinGridController):
 
         return True
 
+    def _executor_open_order_cap(self, timestamp: float):
+        """Enable only for newly-created Bitget Spot USDT executors after activation."""
+        if (self.config.connector_name == "bitget"
+                and self.config.quote_asset == "USDT"
+                and self.config.buy_cap_is_active(timestamp)):
+            return self.config.max_executed_buy_orders_per_executor
+        return None
+
+    def _decision_telemetry_config(self) -> dict:
+        if not self.config.decision_telemetry_enabled:
+            return {}
+        return {
+            "decision_telemetry_enabled": True,
+            "decision_telemetry_db_path": "data/trading_decision_telemetry_spot_grid_bitget.db",
+            "decision_telemetry_queue_size": self.config.decision_telemetry_queue_size,
+            "decision_telemetry_retention_days": self.config.decision_telemetry_retention_days,
+            "buy_cap_config_version": self.config.buy_cap_config_version,
+        }
+
     def _calculate_order_size(self, trading_pair: str, mid_price: Decimal) -> Decimal:
         """
         Calculate order size for Bitget spot (no leverage).

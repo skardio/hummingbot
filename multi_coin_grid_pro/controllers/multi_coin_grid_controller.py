@@ -11108,6 +11108,14 @@ class MultiCoinGridController(ControllerBase):
                 }
         return None
 
+    def _executor_open_order_cap(self, timestamp: float):
+        """Controller hook; disabled unless a specific controller opts in."""
+        return None
+
+    def _decision_telemetry_config(self) -> dict:
+        """Controller hook; no telemetry database for existing controllers."""
+        return {}
+
     def _create_grid_action(self, symbol: str, total_amount_quote: Optional[Decimal] = None) -> CreateExecutorAction:
         """
         Create a CreateExecutorAction for GridExecutor
@@ -11617,8 +11625,11 @@ class MultiCoinGridController(ControllerBase):
             time_limit_order_type=OrderType.LIMIT   # LIMIT for lower fees (0.20% vs 0.35%)
         )
 
+        executor_timestamp = self.market_data_provider.time()
+        executor_open_order_cap = self._executor_open_order_cap(executor_timestamp)
+        decision_telemetry_config = self._decision_telemetry_config()
         grid_config = GridExecutorConfig(
-            timestamp=self.market_data_provider.time(),
+            timestamp=executor_timestamp,
             connector_name=self.config.connector_name,
             trading_pair=symbol,
             side=TradeType.BUY,  # Buy-side grid
@@ -11632,6 +11643,7 @@ class MultiCoinGridController(ControllerBase):
             # Adjust max orders to grid count, ensure >= 1
             max_open_orders=max(1, min(self.config.max_open_orders, num_grids)),
             max_orders_per_batch=2,  # Can place 2 OPEN orders per batch
+            max_executed_open_orders=executor_open_order_cap,
             order_frequency=self.config.order_frequency,
             # FIX: Use take_profit as activation_bounds so SELL orders are placed immediately after BUY fills
             # Previously 0.05 (5%) meant SELL orders only placed when price is within 5% of TP
@@ -11671,6 +11683,9 @@ class MultiCoinGridController(ControllerBase):
                 "regime_telemetry_max_age_sec": float(getattr(self.config, 'regime_telemetry_max_age_seconds', 300)),
                 # FASE 1C: observational-only, independent from soft_risk_baseline_fills.
                 "post_fill_sampling_start_fill": int(getattr(self.config, 'post_fill_sampling_start_fill', 3)),
+                # Generic decision telemetry. Only explicitly opted-in controllers populate this.
+                **decision_telemetry_config,
+                "configured_buy_cap": executor_open_order_cap,
             }
         )
 

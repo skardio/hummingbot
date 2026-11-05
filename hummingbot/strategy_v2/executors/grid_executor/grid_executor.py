@@ -26,6 +26,16 @@ from hummingbot.strategy_v2.models.executors import CloseType, EarlyStopReason, 
 from hummingbot.strategy_v2.utils.distributions import Distributions
 from multi_coin_grid_pro.logic.exit_safety import fee_aware_exit_decision, realized_net_pnl
 
+# Generic, asynchronous decision telemetry (optional and fail-open).
+try:
+    from multi_coin_grid_pro.observability.decision_telemetry import (
+        DecisionTelemetryEvent,
+        get_decision_telemetry_writer,
+    )
+    HAS_DECISION_TELEMETRY = True
+except ImportError:
+    HAS_DECISION_TELEMETRY = False
+
 # Story C1: Log Throttling - prevent executor spam
 try:
     from multi_coin_grid_pro.utils.log_throttle import StructuredLogger, should_log
@@ -264,6 +274,17 @@ class GridExecutor(ExecutorBase):
         self._counted_buy_order_ids: set = set()
         # ==============================================================================
 
+        # Optional lifetime cap for distinct open-side orders with any execution.
+        # A submitted but not-yet-executed order reserves a slot, preventing races.
+        initial_cap_state = (self.config.custom_info or {}).get("executed_open_order_ids", [])
+        self._executed_open_order_ids: set = {str(order_id) for order_id in initial_cap_state if order_id}
+        self._buy_cap_cancel_requested_ids: set = set()
+        self._buy_cap_reached_emitted = False
+        self._decision_last_block_signature = None
+        self._decision_exit_emitted = False
+        self._decision_telemetry = None
+        self._initialize_decision_telemetry()
+
         # ==============================================================================
         # FASE 1C: Post-fill-5 periodic shadow risk sampling (logging/DB only).
         # Active only once _buy_fill_count exceeds soft_risk_baseline_fills. Throttled
@@ -290,6 +311,129 @@ class GridExecutor(ExecutorBase):
     def buy_fill_count(self) -> int:
         """FASE 1A: Count of distinct FILLED BUY orders (deduplicated by order_id)."""
         return self._buy_fill_count
+
+    def _initialize_decision_telemetry(self) -> None:
+        custom_info = self.config.custom_info or {}
+        if not HAS_DECISION_TELEMETRY or not custom_info.get("decision_telemetry_enabled", False):
+            return
+        try:
+            db_path = custom_info.get("decision_telemetry_db_path")
+            if not db_path:
+                return
+            self._decision_telemetry = get_decision_telemetry_writer(
+                db_path=db_path,
+                queue_size=int(custom_info.get("decision_telemetry_queue_size", 1000)),
+                retention_days=int(custom_info.get("decision_telemetry_retention_days", 90)),
+            )
+        except Exception as exc:
+            self.logger().warning("Decision telemetry initialization failed (trading unaffected): %s", exc)
+            self._decision_telemetry = None
+
+    @staticmethod
+    def _safe_float(value):
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError, InvalidOperation):
+            return None
+
+    def _active_open_orders(self):
+        return [
+            level.active_open_order
+            for level in self.grid_levels
+            if level.active_open_order is not None
+        ]
+
+    @staticmethod
+    def _tracked_order_has_execution(tracked_order) -> bool:
+        order = getattr(tracked_order, "order", None)
+        if order is None:
+            return False
+        try:
+            return Decimal(str(getattr(order, "executed_amount_base", 0) or 0)) > Decimal("0")
+        except (InvalidOperation, TypeError, ValueError):
+            return False
+
+    def _sync_executed_open_order_ids(self) -> None:
+        for tracked_order in self._active_open_orders():
+            if self._tracked_order_has_execution(tracked_order):
+                self._executed_open_order_ids.add(tracked_order.order_id)
+        for payload in self._filled_orders:
+            try:
+                order_id = payload.get("client_order_id")
+                side = str(payload.get("trade_type", "")).upper()
+                executed = Decimal(str(payload.get("executed_amount_base", 0) or 0))
+                if order_id and side in {self.config.side.name, str(self.config.side)} and executed > 0:
+                    self._executed_open_order_ids.add(order_id)
+            except (AttributeError, InvalidOperation, TypeError, ValueError):
+                continue
+
+    def _buy_cap_counts(self):
+        self._sync_executed_open_order_ids()
+        active = self._active_open_orders()
+        active_ids = {order.order_id for order in active}
+        reserved_ids = active_ids - self._executed_open_order_ids
+        return len(self._executed_open_order_ids), len(active), len(reserved_ids)
+
+    def _emit_decision_telemetry(
+        self,
+        event_type: str,
+        reason_code: Optional[str] = None,
+        order_id: Optional[str] = None,
+        order_state: Optional[str] = None,
+    ) -> None:
+        writer = self._decision_telemetry
+        if writer is None:
+            return
+        try:
+            executed_count, open_count, reserved_count = self._buy_cap_counts()
+            custom_info = self.config.custom_info or {}
+            regime = None
+            regime_status = None
+            if HAS_REGIME_TELEMETRY:
+                try:
+                    _, observation = self._observe_regime(float(self._strategy.current_timestamp))
+                    regime, _ = _regime_headline(observation)
+                    regime_status = observation.status
+                except Exception:
+                    pass
+            grid_score = custom_info.get("entry_grid_score")
+            if isinstance(grid_score, dict):
+                grid_score = grid_score.get("composite")
+            stop_loss = getattr(self.config.triple_barrier_config, "stop_loss", None)
+            distance_to_stop = None
+            if stop_loss is not None and self.position_pnl_pct is not None:
+                distance_to_stop = self._safe_float(Decimal(str(self.position_pnl_pct)) + Decimal(str(stop_loss)))
+            writer.emit(DecisionTelemetryEvent(
+                event_type=event_type,
+                event_timestamp=float(self._strategy.current_timestamp),
+                exchange=self.config.connector_name,
+                strategy="multi_coin_grid_pro",
+                bot_instance_id=custom_info.get("bot_instance_id"),
+                executor_id=str(self.config.id),
+                trading_pair=self.config.trading_pair,
+                reason_code=reason_code,
+                order_id=order_id,
+                side=self.config.side.name,
+                order_state=order_state,
+                config_version=custom_info.get("buy_cap_config_version"),
+                configured_cap=self.config.max_executed_open_orders,
+                executed_order_count=executed_count,
+                open_order_count=open_count,
+                reserved_order_count=reserved_count,
+                fill_count=self._buy_fill_count,
+                average_entry_price=self._safe_float(self.position_break_even_price),
+                current_price=self._safe_float(getattr(self, "mid_price", None)),
+                position_size_base=self._safe_float(self.position_size_base),
+                position_size_quote=self._safe_float(self.position_size_quote),
+                unrealized_pnl_quote=self._safe_float(self.position_pnl_quote),
+                distance_to_stop_pct=distance_to_stop,
+                grid_score=self._safe_float(grid_score),
+                trend_score=self._safe_float(custom_info.get("entry_trend_score")),
+                regime=regime,
+                regime_status=regime_status,
+            ))
+        except Exception as exc:
+            self.logger().debug("Decision telemetry emit failed (trading unaffected): %s", exc)
 
     # ==========================================================================
     # US-003: Validated Order Placement
@@ -1707,6 +1851,8 @@ class GridExecutor(ExecutorBase):
             open_orders_to_create = self.get_open_orders_to_create()
             close_orders_to_create = self.get_close_orders_to_create()
             open_order_ids_to_cancel = self.get_open_order_ids_to_cancel()
+            buy_cap_cancel_ids = self._get_buy_cap_order_ids_to_cancel()
+            open_order_ids_to_cancel = list(dict.fromkeys(open_order_ids_to_cancel + buy_cap_cancel_ids))
             close_order_ids_to_cancel = self.get_close_order_ids_to_cancel()
             for level in open_orders_to_create:
                 self.adjust_and_place_open_order(level)
@@ -1728,6 +1874,15 @@ class GridExecutor(ExecutorBase):
                 self.adjust_and_place_close_order(level)
             for orders_id_to_cancel in open_order_ids_to_cancel + close_order_ids_to_cancel:
                 # TODO: Implement batch order cancel
+                if (orders_id_to_cancel in buy_cap_cancel_ids
+                        and orders_id_to_cancel not in self._buy_cap_cancel_requested_ids):
+                    self._buy_cap_cancel_requested_ids.add(orders_id_to_cancel)
+                    self._emit_decision_telemetry(
+                        "BUY_ORDER_CANCEL_REQUESTED",
+                        reason_code="BUY_CAP_REACHED",
+                        order_id=orders_id_to_cancel,
+                        order_state="CANCEL_REQUESTED",
+                    )
                 self._strategy.cancel(
                     connector_name=self.config.connector_name,
                     trading_pair=self.config.trading_pair,
@@ -2466,6 +2621,12 @@ class GridExecutor(ExecutorBase):
                 level.active_open_order = TrackedOrder(order_id=order_id)
                 self.max_open_creation_timestamp = self._strategy.current_timestamp
                 self.logger().debug(f"Executor ID: {self.config.id} - Placing open order {order_id}")
+                self._emit_decision_telemetry(
+                    "BUY_ORDER_SUBMITTED",
+                    reason_code="CAPACITY_RESERVED" if self.config.max_executed_open_orders else "CAP_DISABLED",
+                    order_id=order_id,
+                    order_state="SUBMITTED",
+                )
             else:
                 # US-003: Order failed validation, reset level to allow retry later
                 self.logger().debug(f"Executor ID: {self.config.id} - Open order failed validation, will retry")
@@ -3136,7 +3297,48 @@ class GridExecutor(ExecutorBase):
             return []
         levels_allowed = self._filter_levels_by_activation_bounds()
         sorted_levels_by_proximity = self._sort_levels_by_proximity(levels_allowed)
-        return sorted_levels_by_proximity[:self.config.max_orders_per_batch]
+        configured_cap = self.config.max_executed_open_orders
+        if configured_cap is None:
+            return sorted_levels_by_proximity[:self.config.max_orders_per_batch]
+
+        executed_count, _, reserved_count = self._buy_cap_counts()
+        remaining_slots = configured_cap - executed_count - reserved_count
+        if remaining_slots <= 0:
+            signature = (executed_count, reserved_count, configured_cap)
+            if signature != self._decision_last_block_signature:
+                self._decision_last_block_signature = signature
+                reason = "BUY_CAP_REACHED" if executed_count >= configured_cap else "BUY_CAP_RESERVED"
+                self._emit_decision_telemetry("BUY_DECISION_BLOCK", reason_code=reason)
+                if executed_count >= configured_cap and not self._buy_cap_reached_emitted:
+                    self._buy_cap_reached_emitted = True
+                    self._emit_decision_telemetry("BUY_CAP_REACHED", reason_code="DISTINCT_EXECUTED_ORDER_CAP")
+            return []
+
+        batch_limit = self.config.max_orders_per_batch or remaining_slots
+        allowed_count = min(batch_limit, remaining_slots)
+        selected = sorted_levels_by_proximity[:allowed_count]
+        if selected:
+            self._decision_last_block_signature = None
+            self._emit_decision_telemetry("BUY_DECISION_ALLOW", reason_code="BUY_CAP_CAPACITY_AVAILABLE")
+        return selected
+
+    def _get_buy_cap_order_ids_to_cancel(self) -> List[str]:
+        """Cancel unexecuted reservations once the execution cap is reached.
+
+        This is normally empty because reservations prevent over-submission. It
+        is a recovery/race safeguard for delayed exchange state and restored
+        order tracking.
+        """
+        configured_cap = self.config.max_executed_open_orders
+        if configured_cap is None:
+            return []
+        executed_count, _, _ = self._buy_cap_counts()
+        if executed_count < configured_cap:
+            return []
+        return [
+            order.order_id for order in self._active_open_orders()
+            if order.order_id not in self._executed_open_order_ids
+        ]
 
     def get_close_orders_to_create(self):
         """
@@ -4046,6 +4248,14 @@ class GridExecutor(ExecutorBase):
             # that have no dedicated EarlyStopReason. None when a proper reason was
             # recorded. Never consumed by trading/risk logic.
             "exit_diagnostic": self._exit_diagnostic,
+            # Persisted executor-local cap state for orchestrators that support
+            # active-executor reconstruction. Current orchestrator deployments
+            # do not recreate active executors after a full process restart.
+            "executed_open_order_ids": sorted(self._executed_open_order_ids),
+            "executed_open_order_count": len(self._executed_open_order_ids),
+            "reserved_open_order_count": self._buy_cap_counts()[2],
+            "configured_buy_cap": self.config.max_executed_open_orders,
+            "buy_cap_config_version": initial_info.get("buy_cap_config_version"),
         }
 
     async def on_start(self):
@@ -4283,6 +4493,24 @@ class GridExecutor(ExecutorBase):
         # STORY A1: Update last_fill_timestamp (any fill = activity)
         self._last_fill_timestamp = self._strategy.current_timestamp
 
+        if (event.trade_type == self.config.side
+                and self._order_belongs_to_this_executor(event.order_id)
+                and self._safe_float(event.amount) is not None
+                and self._safe_float(event.amount) > 0):
+            was_new = event.order_id not in self._executed_open_order_ids
+            self._executed_open_order_ids.add(event.order_id)
+            self._emit_decision_telemetry(
+                "BUY_ORDER_PARTIAL_FILL",
+                reason_code="FIRST_POSITIVE_EXECUTION" if was_new else "ADDITIONAL_PARTIAL_FILL",
+                order_id=event.order_id,
+                order_state="PARTIALLY_FILLED",
+            )
+            if (self.config.max_executed_open_orders is not None
+                    and len(self._executed_open_order_ids) >= self.config.max_executed_open_orders
+                    and not self._buy_cap_reached_emitted):
+                self._buy_cap_reached_emitted = True
+                self._emit_decision_telemetry("BUY_CAP_REACHED", reason_code="DISTINCT_EXECUTED_ORDER_CAP")
+
         self._record_regime_fill(event)
 
     def process_order_completed_event(self, _, market, event: Union[BuyOrderCompletedEvent, SellOrderCompletedEvent]):
@@ -4307,6 +4535,13 @@ class GridExecutor(ExecutorBase):
             self._counted_buy_order_ids.add(event.order_id)
             self._buy_fill_count += 1
             self._log_fill_risk_shadow(event)
+            self._executed_open_order_ids.add(event.order_id)
+            self._emit_decision_telemetry(
+                "BUY_ORDER_FILLED",
+                reason_code="ORDER_COMPLETED",
+                order_id=event.order_id,
+                order_state="FILLED",
+            )
 
     def _order_belongs_to_this_executor(self, order_id: str) -> bool:
         """Returns True if order_id matches one of this executor's own tracked
@@ -4709,6 +4944,12 @@ class GridExecutor(ExecutorBase):
         except Exception as e:
             self.logger().debug(f"[POST_FILL_RISK_LOG] final snapshot failed (non-critical): {e}")
         self._record_regime_exit()
+        if not self._decision_exit_emitted:
+            self._decision_exit_emitted = True
+            self._emit_decision_telemetry(
+                "EXECUTOR_EXIT",
+                reason_code=self.close_type.name if self.close_type else "UNKNOWN",
+            )
         super().stop()
 
     def process_order_canceled_event(self, _, market: ConnectorBase, event: OrderCancelledEvent):
@@ -4717,6 +4958,14 @@ class GridExecutor(ExecutorBase):
         """
         # BITGET FIX: Clear cancel retry tracking when order is successfully cancelled
         order_id = event.order_id
+        if order_id in self._buy_cap_cancel_requested_ids:
+            self._buy_cap_cancel_requested_ids.discard(order_id)
+            self._emit_decision_telemetry(
+                "BUY_ORDER_CANCEL_CONFIRMED",
+                reason_code="BUY_CAP_REACHED",
+                order_id=order_id,
+                order_state="CANCELED",
+            )
         if order_id in self._cancel_request_times:
             retry_count = self._cancel_retry_count.get(order_id, 0)
             if retry_count > 0:
@@ -4804,6 +5053,14 @@ class GridExecutor(ExecutorBase):
         """
         # BITGET FIX: Clear cancel retry tracking when order fails (including "order not found" errors)
         order_id = event.order_id
+        if order_id in self._buy_cap_cancel_requested_ids:
+            self._buy_cap_cancel_requested_ids.discard(order_id)
+            self._emit_decision_telemetry(
+                "BUY_ORDER_CANCEL_FAILED",
+                reason_code="CANCEL_EVENT_FAILED",
+                order_id=order_id,
+                order_state="CANCEL_FAILED",
+            )
         if order_id in self._cancel_request_times:
             # Check if this is an "order not found" error (order already cancelled)
             error_msg = str(event).lower()
