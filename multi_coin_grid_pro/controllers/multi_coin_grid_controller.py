@@ -3962,6 +3962,32 @@ class MultiCoinGridController(ControllerBase):
             import traceback
             self.logger().error(traceback.format_exc())
 
+    def _bounded_monitored_coins(self, candidates: List[str]) -> List[str]:
+        protected = set(self.active_coins)
+        protected.update(
+            pair for pair, exposure in getattr(self, 'current_exposure_per_coin', {}).items()
+            if exposure > 0
+        )
+        for executor in getattr(self, 'executors_info', []):
+            if getattr(executor, 'is_done', False):
+                continue
+            pair = getattr(executor, 'trading_pair', None)
+            if not pair:
+                pair = getattr(getattr(executor, 'config', None), 'trading_pair', None)
+            if pair:
+                protected.add(pair)
+        result = sorted(protected)
+        limit = max(self.config.max_coins_to_monitor, len(result))
+        for pair in candidates:
+            if pair not in result and len(result) < limit:
+                result.append(pair)
+        if len(protected) > self.config.max_coins_to_monitor:
+            self.logger().warning(
+                "[MONITORING] %s protected pairs exceed monitoring limit %s; no optional pairs added",
+                len(protected), self.config.max_coins_to_monitor,
+            )
+        return result
+
     async def _update_monitored_coins_from_pool(self, pair_volumes: dict, pair_spreads: dict):
         """
         Update monitored_coins list based on fresh volume/spread data.
@@ -3987,11 +4013,7 @@ class MultiCoinGridController(ControllerBase):
             cooldown = getattr(self.config, 'pool_membership_cooldown_seconds', 0)
 
             # Get coins with active positions (must keep these!)
-            active_coins = set()
-            if hasattr(self, 'executors_info') and self.executors_info:
-                for executor in self.executors_info:
-                    if hasattr(executor, 'trading_pair'):
-                        active_coins.add(executor.trading_pair)
+            active_coins = set(self._bounded_monitored_coins([]))
 
             # Build list of candidate coins sorted by volume
             candidates = []
@@ -4037,10 +4059,9 @@ class MultiCoinGridController(ControllerBase):
                 # Coin can be removed
 
             # Build new monitored list: kept coins first, then fill from candidates
-            new_monitored = list(kept_coins)
-            for pair, volume, spread in candidates:
-                if pair not in new_monitored and len(new_monitored) < max_coins:
-                    new_monitored.append(pair)
+            new_monitored = self._bounded_monitored_coins(
+                kept_coins + [pair for pair, _, _ in candidates]
+            )
 
             # Check if list changed
             old_set = set(self.monitored_coins)
@@ -8455,10 +8476,25 @@ class MultiCoinGridController(ControllerBase):
                     self.config.max_coins_to_monitor
                 )
 
-                # Update monitored coins if significantly different
                 current_monitored = set(self.monitored_coins)
-                new_pairs = active_pairs - current_monitored
-                dropped_pairs = current_monitored - active_pairs
+                ranked_pairs = sorted(
+                    active_pairs,
+                    key=lambda pair: (
+                        -getattr(self.dynamic_pair_manager.all_pairs.get(pair), 'score', 0), pair
+                    ),
+                )
+                now = self.market_data_provider.time()
+                cooldown = getattr(self.config, 'pool_membership_cooldown_seconds', 0)
+                join_times = getattr(self, '_pool_join_time', {})
+                cooling_pairs = [
+                    pair for pair in self.monitored_coins
+                    if cooldown > 0 and now - join_times.get(pair, now) < cooldown
+                ]
+                new_monitored = self._bounded_monitored_coins(
+                    cooling_pairs + ranked_pairs + self.monitored_coins
+                )
+                new_pairs = set(new_monitored) - current_monitored
+                dropped_pairs = current_monitored - set(new_monitored)
 
                 if new_pairs or dropped_pairs:
                     self.logger().info(
@@ -8467,10 +8503,16 @@ class MultiCoinGridController(ControllerBase):
                         f"Dropped: {list(dropped_pairs)[:5]}"
                     )
 
-                    # Update monitored coins (preserving active coins AND existing monitored coins)
-                    # Never shrink: only ADD new pairs, never drop existing ones
-                    # This prevents the DynamicPairManager from reducing a 24-coin pool to 9
-                    self.monitored_coins = list(current_monitored | active_pairs | set(self.active_coins.keys()))
+                self.monitored_coins = new_monitored
+                if not hasattr(self, '_pool_join_time'):
+                    self._pool_join_time = {}
+                for pair in new_monitored:
+                    self._pool_join_time.setdefault(pair, now)
+                for pair in new_pairs:
+                    self._pool_join_time[pair] = now
+                for pair in dropped_pairs:
+                    self._pool_join_time.pop(pair, None)
+                    self._unsubscribe_from_orderbook(pair)
 
             # Propagate volume/spread from DPM scan into pair_volumes/pair_spreads
             # so the bucket-tracker can build MarketMetrics for any scanned coin.
@@ -11910,6 +11952,13 @@ class MultiCoinGridController(ControllerBase):
             self.logger().error(traceback.format_exc())
             return None
 
+    def _monitored_coins_with_full_data(self) -> int:
+        return sum(
+            1 for pair in set(self.monitored_coins)
+            if (trend := self.trend_calculator.trends.get(pair)) is not None
+            and trend.has_sufficient_data
+        )
+
     def to_format_status(self) -> List[str]:
         """
         Format status for display in Hummingbot UI
@@ -12075,10 +12124,7 @@ class MultiCoinGridController(ControllerBase):
 
         # Monitored coins summary
         if self.trend_calculator:
-            coins_with_data = sum(
-                1 for t in self.trend_calculator.trends.values()
-                if t.has_sufficient_data
-            )
+            coins_with_data = self._monitored_coins_with_full_data()
             status.append(
                 f"║ Monitored Coins: {len(self.monitored_coins)} total, {coins_with_data} with full data    ║")
 

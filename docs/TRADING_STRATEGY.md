@@ -669,6 +669,39 @@ vermijdt een brede WebSocket-/accountmigratie, maar geeft geen tick-level
 dieptecontinuiteit. Compatibiliteit van V2-orderplaatsing voor deze markten is
 niet aangetoond en wordt door deze marktdatafix niet gewijzigd.
 
+Gerichte vervolgfix (2026-11-06): de Bitget Spot-controller weigert nieuwe
+live entries voor paren waarvan de datasource na `40502` V3 vereist, zowel
+bij SmartEntry als direct in de grid-actionfactory. Een ontbrekende/onbekende
+datasource blokkeert eveneens; V2-paren, paper trading en bestaande executors
+blijven ongewijzigd. Er is geen prefixuitzondering of orderroute-migratie.
+
+De dynamische pairscan en periodieke poolrefresh begrenzen optionele monitoring
+op `max_coins_to_monitor`. Actieve/niet-afgesloten executors en positief
+gevolgde exposure gaan voor; alleen deze noodzakelijke paren mogen de limiet
+overschrijden, met waarschuwing. Cooldown krijgt prioriteit binnen resterende
+ruimte. Bij een kleinere scan vullen bestaande paren de vrije ruimte; werkelijk
+verwijderde paren worden van orderbookmonitoring afgemeld. De statustelling
+`with full data` telt uitsluitend unieke actuele monitored pairs met voldoende
+trenddata, niet alle historische cache-items; dit is geen freshnessgarantie.
+
+V3-diagnostiek: eenmaal per paar een geslaagde refresh met exchange-ts
+(milliseconden), leeftijd (seconden) en aantallen bids/asks; daarna hoogstens
+een samenvatting per 60 seconden met success/failed/stale, overdue boeken,
+maximale leeftijd en laatste fouttype/reden. Niet-oplopende timestamps tellen
+als stale. Een leeftijd boven refreshinterval plus requesttimeout (5+10 s)
+wordt uitsluitend diagnostisch als stale/overdue geteld, zonder wijziging van
+trading-freshnessdrempels. Bestaande validatie, lege boeken bij fouten en back-off
+blijven behouden; crossed boeken worden niet versoepeld.
+
+4-BUY-cap: `buy_cap_activation_timestamp_utc: null` blijft uitgeschakeld.
+Handmatige activatie vereist een timezone-aware ISO-timestamp met nul UTC-offset
+(`...Z` of `...+00:00`), bereikt volgens de controllerklok, bij connector
+`bitget` en quote `USDT`. Alleen nieuwe executors krijgen
+`max_executed_open_orders=4`; bestaande executors worden niet aangepast.
+Elke unieke BUY-order met enige fill telt eenmaal; open ongefillede orders
+reserveren capaciteit. SELL/TP-orders blijven toegestaan. De configuratie
+wordt met deze wijziging niet aangepast of automatisch opnieuw geladen.
+
 Alle waarden zijn effectieve waarden uit het geladen model; bron = YAML (kolom "Key") tenzij anders gemarkeerd. Eenheid: F = fractie, P = percent, s = seconden.
 
 | Onderdeel | Kraken USD (U) | Bitget Spot (B) | OKX Spot (O) | Key (YAML / model) |
@@ -891,3 +924,4 @@ Nieuwste onderaan. Per wijziging in dezelfde commit bijwerken (zie onderhoudsreg
 | 2026-11-03 | Bitget startup-reconciliatie en tickerrefresh | Dust gebruikt `min_notional_size` plus `min_order_size` met fail-closed bewijslogging; Bitget haalt 29 prijzen via één officiële all-tickers-call; korte cache, `Retry-After`/begrensde back-off en geen fan-out/retry na 429, timeout of partiële response | Sub-minimum BGB/NEAR/ONDO blokkeerden alle entries; de vermeende batch deed 29 requests en veroorzaakte HTTP 429, waarna de fallback opnieuw requests startte | Alleen aantoonbaar niet-verhandelbare dust wordt genegeerd; materiële/onbekende inventory en open orders blijven blokkeren. Requestbudget voor 29 Bitget-symbolen: 29 → 1 normaal, 1 → 0 tijdens back-off; TP/SL, filters, sizing en kapitaalallocatie ongewijzigd | `test_pre_deploy_risk_safety.py`, `test_trend_calculator.py`, Bitget connector/data-source tests | LOKAAL |
 | 2026-11-06 | Startup-inventorywaardering | Gevalideerde verse ticker uit bestaande same-connector/pair-cache als fallback voor ontbrekende midprijs; beide minimumregels vooraf valideren | Dezelfde BGB-dust werd op 4/5 november met orderboek correct gewaardeerd, maar blokkeerde na herstart zonder BGB-orderboek | Alleen bewezen dust niet-blokkerend; materiele/onbekende inventory blijft blokkeren; geen orders, nieuwe prijsrequests of risicolimietwijzigingen | `test_pre_deploy_risk_safety.py`: BGB-dust, materiele BTC, ontbrekende/stale/ongeldige ticker, connector/pair/rules en bestaande startup/risk-tests | LOKAAL |
 | 2026-11-06 | Bitget Spot-orderbookdata | Per-paar V3 REST-snapshots na 40502, volledige boekrefresh met timestamp-/depthvalidatie; V2-delta's voor deze paren geweigerd; begrensde retries/429-back-off | r-symbolen weigeren V2-orderbooksnapshots; alleen URL vervangen laat ontbrekende live updates bestaan | V2-paren behouden WS; V3-boeken bij fouten leeg/fail-closed; geen wijzigingen aan orders, risicolimieten of andere exchanges | Bitget Spot-orderbook-, exchange- en post-only-lifecycletests; Bitget Futures-orderbooktests | LOKAAL |
+| 2026-11-06 | Bitget monitoring en entryveiligheid | Begrensde pool met executor/exposurebescherming; actuele full-data-telling; geen nieuwe live V3-only entries; begrensde V3-refreshdiagnostiek | Pool groeide boven limiet; V2-ordercompatibiliteit voor V3-markten onbewezen | V2-entrygedrag, risicodrempels en inactieve 4-BUY-cap behouden; geen wijzigingen aan bestaande executors | Ticker/risk-pipeline, pool-cooldown, Bitget cap/entry-gates en V3-refreshregressies | LOKAAL |

@@ -38,6 +38,36 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._snapshot_rate_limit_until = 0.0
         self._snapshot_disabled_pairs: set[str] = set()
         self._snapshot_locks: Dict[str, asyncio.Lock] = {}
+        self._v3_refresh_counts = {"success": 0, "failed": 0, "stale": 0}
+        self._v3_diagnostic_at = 0.0
+        self._v3_success_pairs: set[str] = set()
+        self._v3_last_failure = ""
+
+    def requires_v3_order_book(self, trading_pair: str) -> bool:
+        return trading_pair in self._v3_pairs
+
+    def _log_v3_refresh_summary(self) -> None:
+        now = self._time()
+        if now < self._v3_diagnostic_at:
+            return
+        ages = [max(0.0, now - book.snapshot_uid * 1e-3) for book in self._v3_books.values()]
+        refresh_budget = CONSTANTS.ORDERBOOK_V3_REFRESH_SECONDS + CONSTANTS.ORDERBOOK_SNAPSHOT_TIMEOUT_SECONDS
+        overdue = sum(age > refresh_budget for age in ages)
+        log = (
+            self.logger().warning
+            if self._v3_refresh_counts["failed"] or self._v3_refresh_counts["stale"] or overdue
+            else self.logger().info
+        )
+        log(
+            "[V3_REFRESH] pairs=%s successful_pairs=%s success=%s failed=%s stale=%s "
+            "overdue_books=%s max_age_s=%.3f last_failure=%s",
+            len(self._v3_books), len(self._v3_success_pairs),
+            self._v3_refresh_counts["success"], self._v3_refresh_counts["failed"],
+            self._v3_refresh_counts["stale"], overdue,
+            max(ages, default=0.0), self._v3_last_failure or "none",
+        )
+        self._v3_refresh_counts = dict.fromkeys(self._v3_refresh_counts, 0)
+        self._v3_diagnostic_at = now + CONSTANTS.ORDERBOOK_V3_DIAGNOSTIC_SECONDS
 
     async def get_new_order_book(self, trading_pair: str) -> OrderBook:
         book = await super().get_new_order_book(trading_pair)
@@ -62,15 +92,33 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 try:
                     snapshot = await self._order_book_snapshot(pair)
                     if snapshot.update_id <= book.snapshot_uid:
+                        self._v3_refresh_counts["stale"] += 1
                         raise IOError(f"Non-increasing Bitget V3 snapshot timestamp for {pair}")
                     book.apply_snapshot(snapshot.bids, snapshot.asks, snapshot.update_id)
+                    age = self._time() - snapshot.timestamp
+                    stale = (
+                        age < 0
+                        or age > CONSTANTS.ORDERBOOK_V3_REFRESH_SECONDS + CONSTANTS.ORDERBOOK_SNAPSHOT_TIMEOUT_SECONDS
+                    )
+                    if stale:
+                        self._v3_refresh_counts["stale"] += 1
+                    else:
+                        self._v3_refresh_counts["success"] += 1
+                    if not stale and pair not in self._v3_success_pairs:
+                        self._v3_success_pairs.add(pair)
+                        self.logger().info(
+                            "[V3_REFRESH_OK] pair=%s ts=%s age_s=%.3f bids=%s asks=%s",
+                            pair, snapshot.update_id, age, len(snapshot.bids), len(snapshot.asks),
+                        )
                 except asyncio.CancelledError:
                     raise
                 except (IOError, ValueError, TypeError, KeyError) as exc:
                     # Consumers must not mistake an old REST-only book for live depth.
                     book.apply_snapshot([], [], book.snapshot_uid)
-                    self.logger().warning("Bitget V3 order book unavailable for %s: %s", pair, exc)
+                    self._v3_refresh_counts["failed"] += 1
+                    self._v3_last_failure = f"{pair}: {type(exc).__name__}: {exc}"
                     self._snapshot_retry_at[pair] = self._time() + CONSTANTS.ORDERBOOK_ERROR_BACKOFF_SECONDS
+            self._log_v3_refresh_summary()
             if not self._v3_books:
                 self._v3_books_ready.clear()
             await self._sleep(CONSTANTS.ORDERBOOK_V3_REFRESH_SECONDS)

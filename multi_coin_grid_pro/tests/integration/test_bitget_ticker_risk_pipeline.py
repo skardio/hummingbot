@@ -55,6 +55,7 @@ def bare_controller(exchange="bitget", quote="USDT"):
         max_coins_to_monitor=5,
     )
     controller.connector = SimpleNamespace(trading_pair_symbol_map=AsyncMock())
+    controller.market_data_provider = SimpleNamespace(time=lambda: 1000.0)
     controller.logger = MagicMock(return_value=MagicMock())
     controller.all_available_pairs = []
     controller.monitored_coins = []
@@ -162,3 +163,62 @@ async def test_dynamic_scan_does_not_reuse_stale_metrics_after_failed_scan():
     )
     await controller._run_dynamic_pair_scan()
     assert controller.pair_volumes == controller.pair_spreads == {}
+
+
+@pytest.mark.asyncio
+async def test_dynamic_scan_caps_union_and_releases_removed_books():
+    controller = bare_controller()
+    controller.config.max_coins_to_monitor = 2
+    controller.monitored_coins = ["OLD-USDT", "BTC-USDT", "EXTRA-USDT"]
+    controller.active_coins = {"BTC-USDT": "executor"}
+    controller.dynamic_pair_manager = SimpleNamespace(
+        all_pairs={}, full_scan=AsyncMock(return_value=1),
+        _select_best_pairs=MagicMock(return_value={"ETH-USDT", "SOL-USDT"}),
+    )
+    controller._unsubscribe_from_orderbook = MagicMock()
+    await controller._run_dynamic_pair_scan()
+    assert controller.monitored_coins == ["BTC-USDT", "ETH-USDT"]
+    assert set(call.args[0] for call in controller._unsubscribe_from_orderbook.call_args_list) == {
+        "OLD-USDT", "EXTRA-USDT",
+    }
+    await controller._run_dynamic_pair_scan()
+    assert controller.monitored_coins == ["BTC-USDT", "ETH-USDT"]
+
+
+@pytest.mark.asyncio
+async def test_dynamic_scan_keeps_cooldown_and_fills_small_scan_without_shrinking():
+    controller = bare_controller()
+    controller.config.max_coins_to_monitor = 3
+    controller.config.pool_membership_cooldown_seconds = 100
+    controller.monitored_coins = ["OLD-USDT", "BTC-USDT"]
+    controller._pool_join_time = {"OLD-USDT": 950, "BTC-USDT": 0}
+    controller.dynamic_pair_manager = SimpleNamespace(
+        all_pairs={}, full_scan=AsyncMock(return_value=1),
+        _select_best_pairs=MagicMock(return_value={"ETH-USDT"}),
+    )
+    await controller._run_dynamic_pair_scan()
+    assert controller.monitored_coins == ["OLD-USDT", "ETH-USDT", "BTC-USDT"]
+
+
+def test_monitoring_retains_executor_config_pairs_and_exposure_above_limit():
+    controller = bare_controller()
+    controller.config.max_coins_to_monitor = 1
+    controller.executors_info = [
+        SimpleNamespace(is_done=False, config=SimpleNamespace(trading_pair="BTC-USDT")),
+        SimpleNamespace(is_done=True, config=SimpleNamespace(trading_pair="DONE-USDT")),
+    ]
+    controller.current_exposure_per_coin = {"ETH-USDT": Decimal("10")}
+    assert controller._bounded_monitored_coins(["SOL-USDT"]) == ["BTC-USDT", "ETH-USDT"]
+
+
+def test_full_data_count_excludes_cached_unmonitored_and_insufficient_pairs():
+    controller = bare_controller()
+    controller.monitored_coins = ["BTC-USDT", "ETH-USDT"]
+    controller.trend_calculator = SimpleNamespace(trends={
+        "BTC-USDT": SimpleNamespace(has_sufficient_data=True),
+        "ETH-USDT": SimpleNamespace(has_sufficient_data=False),
+        "OLD-USDT": SimpleNamespace(has_sufficient_data=True),
+    })
+    assert controller._monitored_coins_with_full_data() == 1
+    controller.monitored_coins.append("MISSING-USDT")
+    assert controller._monitored_coins_with_full_data() == 1

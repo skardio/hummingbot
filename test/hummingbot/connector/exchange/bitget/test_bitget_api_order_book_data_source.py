@@ -419,6 +419,49 @@ class BitgetAPIOrderBookDataSourceUnitTests(IsolatedAsyncioWrapperTestCase):
         self.assertEqual(1695710947294, book.snapshot_uid)
         self.assertTrue(list(book.bid_entries()))
 
+    @aioresponses()
+    async def test_v3_refresh_diagnostics_show_success_failure_stale_without_spam(self, mock_get):
+        self.data_source._v3_pairs.add(self.trading_pair)
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response())
+        book = await self.data_source.get_new_order_book(self.trading_pair)
+        now = 1695710947.300
+        responses = [
+            self.v3_snapshot_response(ts="1695710947294"),
+            self.v3_snapshot_response(ts="1695710947295"),
+            self.v3_snapshot_response(ts="1695710947295"),
+        ]
+        for response in responses:
+            mock_get.get(self.snapshot_url(v3=True), payload=response)
+            with patch.object(self.data_source, "_time", return_value=now), \
+                    patch.object(self.data_source, "_sleep", side_effect=asyncio.CancelledError):
+                with self.assertRaises(asyncio.CancelledError):
+                    await self.data_source._refresh_v3_order_books()
+        messages = [record.getMessage() for record in self.log_records]
+        self.assertEqual(1, sum("[V3_REFRESH_OK]" in message for message in messages))
+        self.assertEqual(1, sum("[V3_REFRESH]" in message for message in messages))
+        self.assertTrue(any("bids=2 asks=2" in message for message in messages))
+        self.assertFalse(list(book.bid_entries()))
+        with patch.object(self.data_source, "_time", return_value=now + 61):
+            self.data_source._log_v3_refresh_summary()
+        summary = self.log_records[-1].getMessage()
+        self.assertIn("success=1 failed=1 stale=1", summary)
+        self.assertIn("overdue_books=1", summary)
+        self.assertIn("Non-increasing", summary)
+
+    @aioresponses()
+    async def test_increasing_but_old_v3_timestamp_is_diagnosed_not_logged_as_success(self, mock_get):
+        self.data_source._v3_pairs.add(self.trading_pair)
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response())
+        await self.data_source.get_new_order_book(self.trading_pair)
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response(ts="1695710947294"))
+        with patch.object(self.data_source, "_time", return_value=1695710970.0), \
+                patch.object(self.data_source, "_sleep", side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.data_source._refresh_v3_order_books()
+        messages = [record.getMessage() for record in self.log_records]
+        self.assertFalse(any("[V3_REFRESH_OK]" in message for message in messages))
+        self.assertTrue(any("success=0 failed=0 stale=1 overdue_books=1" in message for message in messages))
+
     async def test_v3_refresh_task_stops_with_subscription_listener(self):
         stopped = asyncio.Event()
 

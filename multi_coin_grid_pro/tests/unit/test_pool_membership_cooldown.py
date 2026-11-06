@@ -84,6 +84,14 @@ class TestPoolMembershipCooldownRefresh:
     """Test cooldown logic in _update_monitored_coins_from_pool."""
 
     @pytest.mark.asyncio
+    async def test_oversized_pool_is_trimmed_but_missing_active_pair_is_added(self):
+        ctrl = _make_controller(cooldown=1800, max_coins=2)
+        ctrl.monitored_coins = ["BTC-EUR", "SOL-EUR", "XRP-EUR", "ADA-EUR"]
+        ctrl.active_coins = {"DOGE-EUR": "executor"}
+        await ctrl._update_monitored_coins_from_pool(ctrl.pair_volumes, ctrl.pair_spreads)
+        assert ctrl.monitored_coins == ["DOGE-EUR", "BTC-EUR"]
+
+    @pytest.mark.asyncio
     async def test_cooldown_keeps_coin_that_fell_out_of_topn(self):
         """A coin within cooldown must NOT be removed from the pool."""
         ctrl = _make_controller(cooldown=1800, max_coins=2)
@@ -200,6 +208,7 @@ class TestPoolMembershipCooldownRefresh:
         # DOGE has active executor
         mock_exec = MagicMock()
         mock_exec.trading_pair = "DOGE-EUR"
+        mock_exec.is_done = False
         ctrl.executors_info = [mock_exec]
 
         volumes = {"BTC-EUR": 10000, "SOL-EUR": 7000, "DOGE-EUR": 500}

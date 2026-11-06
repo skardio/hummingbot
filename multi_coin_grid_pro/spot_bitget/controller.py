@@ -9,7 +9,10 @@ Extends MultiCoinGridController with Bitget spot-specific logic:
 """
 
 from decimal import Decimal
+from typing import Optional
 
+from hummingbot.connector.exchange.bitget.bitget_api_order_book_data_source import BitgetAPIOrderBookDataSource
+from hummingbot.strategy_v2.models.executor_actions import CreateExecutorAction
 from multi_coin_grid_pro.controllers.multi_coin_grid_controller import MultiCoinGridController
 from multi_coin_grid_pro.spot_bitget.config_schema import SpotGridBitgetConfig
 
@@ -84,6 +87,33 @@ class SpotGridBitgetController(MultiCoinGridController):
                 and self.config.buy_cap_is_active(timestamp)):
             return self.config.max_executed_buy_orders_per_executor
         return None
+
+    def _entry_market_supported(self, symbol: str) -> bool:
+        if self.config.paper_trading or self.config.connector_name != "bitget":
+            return True
+        tracker = getattr(self.connector, 'order_book_tracker', None)
+        source = getattr(tracker, '_data_source', None)
+        if isinstance(source, BitgetAPIOrderBookDataSource) and not source.requires_v3_order_book(symbol):
+            return True
+        if not hasattr(self, '_unsupported_entry_pairs'):
+            self._unsupported_entry_pairs = set()
+        if symbol not in self._unsupported_entry_pairs:
+            self._unsupported_entry_pairs.add(symbol)
+            self.logger().warning(
+                "[ENTRY_REJECTED] pair=%s reason=BITGET_ORDER_ROUTE_UNVERIFIED source=%s",
+                symbol, "V3" if isinstance(source, BitgetAPIOrderBookDataSource) else "unknown",
+            )
+        return False
+
+    def _check_smart_entry_filter(self, symbol: str) -> bool:
+        return self._entry_market_supported(symbol) and super()._check_smart_entry_filter(symbol)
+
+    def _create_grid_action(
+        self, symbol: str, total_amount_quote: Optional[Decimal] = None
+    ) -> Optional[CreateExecutorAction]:
+        if not self._entry_market_supported(symbol):
+            return None
+        return super()._create_grid_action(symbol, total_amount_quote)
 
     def _decision_telemetry_config(self) -> dict:
         if not self.config.decision_telemetry_enabled:
