@@ -129,7 +129,7 @@ from multi_coin_grid_pro.utils.decision_trace import PairDecisionTrace
 from multi_coin_grid_pro.utils.dynamic_grid_sizer import DynamicGridSizer
 
 # US-007: Dynamic Pair Manager for two-tier pair discovery
-from multi_coin_grid_pro.utils.dynamic_pair_manager import DynamicPairManager
+from multi_coin_grid_pro.utils.dynamic_pair_manager import DynamicPairManager, normalize_bitget_pair
 
 # Story C1: Log Throttling + Structured Logging
 from multi_coin_grid_pro.utils.log_throttle import StructuredLogger, should_log
@@ -1760,16 +1760,7 @@ class MultiCoinGridController(ControllerBase):
                     for ticker in tickers:
                         symbol = ticker.get('symbol', '')  # e.g., "BTCUSDT"
 
-                        # Convert to Hummingbot format (with dash)
-                        # BTCUSDT -> BTC-USDT
-                        if 'USDT' in symbol:
-                            hb_symbol = symbol.replace('USDT', '-USDT')
-                        elif 'USDC' in symbol:
-                            hb_symbol = symbol.replace('USDC', '-USDC')
-                        elif 'BTC' in symbol and symbol != 'BTC':
-                            hb_symbol = symbol.replace('BTC', '-BTC')
-                        else:
-                            hb_symbol = symbol
+                        hb_symbol = normalize_bitget_pair(symbol)
 
                         # Extract data - Bitget format:
                         # quoteVolume = 24h volume in quote currency (USDT)
@@ -1777,10 +1768,15 @@ class MultiCoinGridController(ControllerBase):
                         # askPr = best ask price
                         # bidPr = best bid price
                         # lastPr = last traded price
-                        quote_vol = float(ticker.get('quoteVolume', 0) or 0)
-                        last_price = float(ticker.get('lastPr', 0) or 0)
-                        ask_price = float(ticker.get('askPr', 0) or 0)
-                        bid_price = float(ticker.get('bidPr', 0) or 0)
+                        try:
+                            quote_vol = float(ticker.get('quoteVolume', 0) or 0)
+                            last_price = float(ticker.get('lastPr', 0) or 0)
+                            ask_price = float(ticker.get('askPr', 0) or 0)
+                            bid_price = float(ticker.get('bidPr', 0) or 0)
+                        except (TypeError, ValueError):
+                            continue
+                        if not all(math.isfinite(v) for v in (quote_vol, last_price, ask_price, bid_price)):
+                            continue
 
                         # Store in Kraken-compatible format
                         result[hb_symbol] = {
@@ -3485,44 +3481,8 @@ class MultiCoinGridController(ControllerBase):
                     pair_volumes = {}
                     pair_spreads = {}
 
-                    # Determine if this is Bitget (ticker_data keyed by hb_symbol) or Kraken (keyed by exchange_symbol)
+                    pair_volumes, pair_spreads = self._ticker_pair_metrics(trading_pair_map, ticker_data, eur_pairs)
                     is_bitget = 'bitget' in self.config.connector_name.lower()
-
-                    for exchange_symbol, hb_symbol in trading_pair_map.items():
-                        if hb_symbol not in eur_pairs:
-                            continue
-
-                        # For Bitget: ticker_data is keyed by hb_symbol (BTC-USDT)
-                        # For Kraken: ticker_data is keyed by exchange_symbol (XBTEUR)
-                        ticker_key = hb_symbol if is_bitget else exchange_symbol
-
-                        if ticker_key not in ticker_data:
-                            continue
-
-                        ticker = ticker_data[ticker_key]
-
-                        # Volume data: ticker["v"] = [volume_today, volume_24h]
-                        # For Bitget, we also stored quoteVolume directly
-                        if is_bitget and 'quoteVolume' in ticker:
-                            volume_quote = float(ticker['quoteVolume'])
-                        elif "v" in ticker:
-                            volume_24h = float(ticker["v"][1]) if ticker["v"] else 0
-                            last_price = float(ticker["c"][0]) if "c" in ticker and ticker["c"] else 0
-                            volume_quote = volume_24h * last_price
-                        else:
-                            volume_quote = 0
-
-                        pair_volumes[hb_symbol] = volume_quote
-
-                        # Calculate spread
-                        try:
-                            best_ask = float(ticker["a"][0]) if "a" in ticker and ticker["a"] else None
-                            best_bid = float(ticker["b"][0]) if "b" in ticker and ticker["b"] else None
-                            if best_bid and best_ask and best_ask > 0:
-                                spread = (best_ask - best_bid) / best_ask
-                                pair_spreads[hb_symbol] = spread
-                        except Exception:
-                            pass
 
                     # Store volume and spread data for rotation
                     self.pair_volumes = pair_volumes
@@ -3556,7 +3516,7 @@ class MultiCoinGridController(ControllerBase):
                         for pair, vol in filtered_pairs[:100]:
                             # For Bitget: use hb_symbol directly, for Kraken: find exchange_symbol
                             if is_bitget:
-                                ticker_key = pair  # hb_symbol like "BTC-USDT"
+                                ticker_key = normalize_bitget_pair(pair)
                             else:
                                 # Find exchange_symbol for this pair
                                 ticker_key = None
@@ -3912,6 +3872,46 @@ class MultiCoinGridController(ControllerBase):
             import traceback
             self.logger().error(traceback.format_exc())
 
+    def _ticker_pair_metrics(self, trading_pair_map, ticker_data, quote_pairs):
+        """Return validated quote volume and fractional spread under internal pair keys."""
+        volumes, spreads = {}, {}
+        is_bitget = 'bitget' in self.config.connector_name.lower()
+        allowed_pairs = set(quote_pairs)
+        for exchange_symbol, hb_symbol in trading_pair_map.items():
+            if hb_symbol not in allowed_pairs:
+                continue
+            ticker_key = normalize_bitget_pair(hb_symbol) if is_bitget else exchange_symbol
+            ticker = ticker_data.get(ticker_key)
+            if not isinstance(ticker, dict):
+                continue
+            if not is_bitget:
+                # Preserve the exchange-symbol lookup and existing Kraken/OKX semantics.
+                try:
+                    volume_24h = float(ticker['v'][1]) if ticker.get('v') else 0
+                    last_price = float(ticker['c'][0]) if ticker.get('c') else 0
+                    volume = volume_24h * last_price
+                    volumes[hb_symbol] = volume
+                    ask = float(ticker['a'][0])
+                    bid = float(ticker['b'][0])
+                    if bid > 0 and ask > 0:
+                        spreads[hb_symbol] = (ask - bid) / ask
+                except (KeyError, IndexError, TypeError, ValueError):
+                    pass
+                continue
+            try:
+                ask = float(ticker['a'][0])
+                bid = float(ticker['b'][0])
+                volume = float(ticker['quoteVolume'])
+                if not all(math.isfinite(v) for v in (volume, ask, bid)) or not (
+                    volume > 0 and bid > 0 and ask >= bid
+                ):
+                    continue
+            except (KeyError, IndexError, TypeError, ValueError):
+                continue
+            volumes[hb_symbol] = volume
+            spreads[hb_symbol] = (ask - bid) / ask
+        return volumes, spreads
+
     async def _refresh_coin_pool(self):
         """
         Refresh the coin pool by rescanning ALL available pairs from the exchange.
@@ -3938,27 +3938,7 @@ class MultiCoinGridController(ControllerBase):
             # Fetch fresh ticker data
             ticker_data = await self._get_ticker_data_safe()
 
-            # Build volume and spread maps
-            pair_volumes = {}
-            pair_spreads = {}
-            for exchange_symbol, hb_symbol in trading_pair_map.items():
-                if hb_symbol in quote_pairs and exchange_symbol in ticker_data:
-                    ticker = ticker_data[exchange_symbol]
-                    # Volume data
-                    volume_24h = float(ticker["v"][1]) if "v" in ticker else 0
-                    last_price = float(ticker["c"][0]) if "c" in ticker else 0
-                    volume_quote = volume_24h * last_price
-                    pair_volumes[hb_symbol] = volume_quote
-
-                    # Spread data
-                    try:
-                        best_ask = float(ticker["a"][0]) if "a" in ticker and ticker["a"] else None
-                        best_bid = float(ticker["b"][0]) if "b" in ticker and ticker["b"] else None
-                        if best_bid and best_ask and best_ask > 0:
-                            spread = (best_ask - best_bid) / best_ask
-                            pair_spreads[hb_symbol] = spread
-                    except Exception:
-                        pass
+            pair_volumes, pair_spreads = self._ticker_pair_metrics(trading_pair_map, ticker_data, quote_pairs)
 
             # Update stored data
             self.pair_volumes = pair_volumes
@@ -8446,6 +8426,7 @@ class MultiCoinGridController(ControllerBase):
 
         try:
             self.logger().info("🔍 US-007: Starting dynamic pair scan...")
+            scan_started = time.time()
             scanned_count = await self.dynamic_pair_manager.full_scan()
 
             if scanned_count > 0:
@@ -8475,11 +8456,27 @@ class MultiCoinGridController(ControllerBase):
             # so the bucket-tracker can build MarketMetrics for any scanned coin.
             # PairMetrics.spread_pct is in %; pair_spreads stores fractions (÷100).
             if self.dynamic_pair_manager.all_pairs:
+                is_bitget = 'bitget' in self.config.connector_name.lower()
                 for sym, pm in self.dynamic_pair_manager.all_pairs.items():
-                    if pm.volume_24h > 0:
-                        self.pair_volumes[sym] = pm.volume_24h
-                    if pm.bid > 0 and pm.ask > 0:
-                        self.pair_spreads[sym] = (pm.ask - pm.bid) / pm.bid
+                    if not is_bitget:
+                        if pm.volume_24h > 0:
+                            self.pair_volumes[sym] = pm.volume_24h
+                        if pm.bid > 0 and pm.ask > 0:
+                            self.pair_spreads[sym] = (pm.ask - pm.bid) / pm.bid
+                        continue
+                    if scanned_count <= 0:
+                        continue
+                    pair = normalize_bitget_pair(sym)
+                    try:
+                        values = (float(pm.volume_24h), float(pm.bid), float(pm.ask))
+                        if pm.last_scanned < scan_started or not all(math.isfinite(v) for v in values):
+                            continue
+                        volume, bid, ask = values
+                        if volume > 0 and bid > 0 and ask >= bid:
+                            self.pair_volumes[pair] = volume
+                            self.pair_spreads[pair] = (ask - bid) / bid
+                    except (AttributeError, TypeError, ValueError):
+                        continue
                 self.logger().debug(
                     f"[US-007] pair_volumes updated: {len(self.pair_volumes)} pairs, "
                     f"pair_spreads: {len(self.pair_spreads)} pairs"

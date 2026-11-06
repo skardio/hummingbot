@@ -13,11 +13,23 @@ This allows the bot to:
 
 import asyncio
 import logging
+import math
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_bitget_pair(symbol: str) -> str:
+    """Convert a Bitget spot symbol to the connector's BASE-QUOTE format."""
+    symbol = symbol.upper().replace("/", "-")
+    if "-" in symbol:
+        return symbol
+    for quote in ("USDT", "USDC", "USD", "EUR", "BTC", "ETH"):
+        if symbol.endswith(quote) and len(symbol) > len(quote):
+            return f"{symbol[:-len(quote)]}-{quote}"
+    return symbol
 
 
 @dataclass
@@ -219,7 +231,54 @@ class DynamicPairManager:
         exchange = getattr(self.connector, "name", "").replace("_paper_trade", "").lower()
         if "okx" in exchange:
             return await self._fetch_okx_tickers()
+        if "bitget" in exchange:
+            return await self._fetch_bitget_tickers(pairs)
         return await self._fetch_kraken_tickers(pairs)
+
+    async def _fetch_bitget_tickers(self, pairs: List[str]) -> Dict[str, dict]:
+        """Fetch Bitget spot metrics under the same keys as the connector pair map."""
+        import aiohttp
+
+        result: Dict[str, dict] = {}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.bitget.com/api/v2/spot/market/tickers",
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as response:
+                    if response.status != 200:
+                        logger.warning("Bitget tickers API returned status %s", response.status)
+                        return result
+                    data = await response.json()
+            if data.get("code") != "00000":
+                logger.warning("Bitget tickers API returned an error")
+                return result
+            allowed_pairs = set(pairs)
+            for ticker in data.get("data", []):
+                symbol = normalize_bitget_pair(ticker.get("symbol", ""))
+                if symbol not in allowed_pairs:
+                    continue
+                try:
+                    volume = float(ticker.get("quoteVolume") or 0)
+                    bid = float(ticker.get("bidPr") or 0)
+                    ask = float(ticker.get("askPr") or 0)
+                    last = float(ticker.get("lastPr") or 0)
+                    if not all(math.isfinite(v) for v in (volume, bid, ask, last)) or not (
+                        volume > 0 and bid > 0 and ask >= bid and last > 0
+                    ):
+                        continue
+                    result[symbol] = {
+                        "volume_24h": volume,
+                        "price_change_24h": 0.0,
+                        "last_price": last,
+                        "bid": bid,
+                        "ask": ask,
+                    }
+                except (ValueError, TypeError):
+                    continue
+        except Exception as exc:
+            logger.warning("Bitget tickers unavailable: %s", type(exc).__name__)
+        return result
 
     async def _fetch_okx_tickers(self) -> Dict[str, dict]:
         """
