@@ -340,6 +340,113 @@ class TestStartupReconciliation:
         ctrl.time_based_filter.check_trading_permission.assert_not_called()
 
 
+class TestStartupTickerValuation:
+    @pytest.fixture
+    def ctrl(self):
+        ctrl = MultiCoinGridController.__new__(MultiCoinGridController)
+        ctrl.config = SimpleNamespace(
+            connector_name="bitget", quote_asset="USDT", max_price_age_ms=35000,
+            startup_reconcile_enabled=True, startup_reconcile_ack_assets=[],
+            startup_reconcile_ack_locked_quote=D("0"),
+            startup_reconcile_locked_tolerance_quote=D("1"),
+        )
+        ctrl.connector = FakeConnector(
+            balances={"USDT": 1000, "BGB": "0.47669034"},
+            rules={"BGB-USDT": SimpleNamespace(
+                trading_pair="BGB-USDT", min_order_size=D("0.0001"), min_notional_size=D("1"))},
+        )
+        ctrl.connector.get_mid_price = Mock(side_effect=ValueError("No order book exists"))
+        ctrl.trend_calculator = SimpleNamespace(
+            connector=ctrl.connector, base_connector=None,
+            _last_price_cache={"BGB-USDT": (1.74, 990.0)},
+        )
+        ctrl.market_data_provider = SimpleNamespace(time=lambda: 1000.0)
+        ctrl.active_coins = {}
+        ctrl.budget_allocator = SimpleNamespace(total_reserved=D("0"))
+        ctrl._startup_reconciled = False
+        ctrl._startup_block_reason = ""
+        ctrl._last_startup_check_ts = 0.0
+        ctrl._log_startup_inventory_classification = Mock()
+        return ctrl
+
+    def test_bgb_dust_uses_fresh_same_exchange_ticker(self, ctrl):
+        assert ctrl._asset_inventory_quote("BGB") == D("0")
+        evidence = ctrl._log_startup_inventory_classification.call_args
+        assert evidence.args[2] == D("0.8294411916")
+        assert evidence.kwargs["reason"] == "below_min_notional_size"
+        assert ctrl._startup_exposure_gate() is True
+
+    def test_material_btc_remains_blocked(self, ctrl):
+        ctrl.connector.balances = {"USDT": D("1000"), "BTC": D("0.01")}
+        ctrl.connector.trading_rules = {"BTC-USDT": SimpleNamespace(
+            trading_pair="BTC-USDT", min_order_size=D("0.00001"), min_notional_size=D("5"))}
+        ctrl.trend_calculator._last_price_cache = {"BTC-USDT": (70000.0, 990.0)}
+        assert ctrl._asset_inventory_quote("BTC") == D("700.000")
+        assert ctrl._startup_exposure_gate() is False
+        assert "BTC: ~700.00 USDT" in ctrl._startup_block_reason
+
+    @pytest.mark.parametrize("price", [0, -1, float("nan"), float("inf"), "invalid"])
+    def test_invalid_ticker_price_fails_closed(self, ctrl, price):
+        ctrl.trend_calculator._last_price_cache["BGB-USDT"] = (price, 990.0)
+        assert ctrl._startup_exposure_gate() is False
+
+    @pytest.mark.parametrize("timestamp", [964.999, 1000.001, float("nan"), float("inf"), None])
+    def test_stale_future_or_invalid_ticker_timestamp_fails_closed(self, ctrl, timestamp):
+        ctrl.trend_calculator._last_price_cache["BGB-USDT"] = (1.74, timestamp)
+        assert ctrl._startup_exposure_gate() is False
+
+    def test_freshness_boundary_is_in_seconds(self, ctrl):
+        ctrl.trend_calculator._last_price_cache["BGB-USDT"] = (1.74, 965.0)
+        assert ctrl._startup_exposure_gate() is True
+
+    def test_missing_price_fails_closed(self, ctrl):
+        ctrl.trend_calculator._last_price_cache.clear()
+        assert ctrl._startup_exposure_gate() is False
+
+    def test_wrong_pair_price_is_not_used(self, ctrl):
+        ctrl.trend_calculator._last_price_cache = {"BGB-USD": (1.74, 990.0)}
+        assert ctrl._startup_exposure_gate() is False
+
+    def test_other_exchange_cache_is_not_used(self, ctrl):
+        ctrl.trend_calculator.connector = FakeConnector()
+        assert ctrl._startup_exposure_gate() is False
+
+    def test_other_base_connector_cache_is_not_used(self, ctrl):
+        ctrl.trend_calculator.base_connector = FakeConnector()
+        assert ctrl._startup_exposure_gate() is False
+
+    @pytest.mark.parametrize("field,value", [
+        ("trading_pair", "BTC-USDT"),
+        ("min_order_size", D("-1")),
+        ("min_order_size", D("NaN")),
+        ("min_notional_size", D("0")),
+        ("min_notional_size", D("-1")),
+        ("min_notional_size", D("NaN")),
+        ("min_notional_size", None),
+    ])
+    def test_invalid_trading_rules_fail_closed(self, ctrl, field, value):
+        setattr(ctrl.connector.trading_rules["BGB-USDT"], field, value)
+        assert ctrl._startup_exposure_gate() is False
+
+    def test_missing_trading_rules_fail_closed(self, ctrl):
+        ctrl.connector.trading_rules.clear()
+        assert ctrl._startup_exposure_gate() is False
+
+    def test_invalid_notional_cannot_be_bypassed_by_small_quantity(self, ctrl):
+        ctrl.connector.balances["BGB"] = D("0.00001")
+        ctrl.connector.trading_rules["BGB-USDT"].min_notional_size = D("0")
+        assert ctrl._startup_exposure_gate() is False
+
+    def test_available_orderbook_remains_primary(self, ctrl):
+        ctrl.connector.get_mid_price = Mock(return_value=D("3"))
+        assert ctrl._asset_inventory_quote("BGB") == D("1.43007102")
+        assert ctrl._startup_exposure_gate() is False
+
+    def test_invalid_mid_uses_validated_ticker(self, ctrl):
+        ctrl.connector.get_mid_price = Mock(return_value=D("NaN"))
+        assert ctrl._startup_exposure_gate() is True
+
+
 class TestLiveReferencePreconditions:
     def test_reference_is_not_resolved_while_exposure_is_unreconciled(self):
         ctrl = make_controller(reference="50000", use_live=True)

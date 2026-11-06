@@ -7865,13 +7865,6 @@ class MultiCoinGridController(ControllerBase):
                     reason="invalid_min_order_size", is_material=True,
                 )
                 return None
-            if amount < min_order_size:
-                self._log_startup_inventory_classification(
-                    asset, amount, value, min_notional, min_order_size,
-                    reason="below_min_order_size", is_material=False,
-                )
-                return Decimal("0")
-
             raw_min_notional = getattr(rule, "min_notional_size", None)
             if raw_min_notional is None:
                 self._log_startup_inventory_classification(
@@ -7887,7 +7880,34 @@ class MultiCoinGridController(ControllerBase):
                 )
                 return None
 
-            mid = Decimal(str(connector.get_mid_price(pair)))
+            if amount < min_order_size:
+                self._log_startup_inventory_classification(
+                    asset, amount, value, min_notional, min_order_size,
+                    reason="below_min_order_size", is_material=False,
+                )
+                return Decimal("0")
+
+            try:
+                mid = Decimal(str(connector.get_mid_price(pair)))
+            except (KeyError, ValueError):
+                mid = Decimal("NaN")
+            if not mid.is_finite() or mid <= 0:
+                calculator = self.trend_calculator
+                # Only reuse ticker observations fetched by this exact exchange connector.
+                cached = (
+                    calculator._last_price_cache.get(pair)
+                    if calculator is not None
+                    and calculator.connector is connector
+                    and (calculator.base_connector is None or calculator.base_connector is connector)
+                    and getattr(rule, "trading_pair", None) == pair
+                    else None
+                )
+                if cached is not None:
+                    price, fetched_at = cached
+                    now = self.market_data_provider.time()
+                    max_age = self.config.max_price_age_ms / 1000
+                    if math.isfinite(fetched_at) and 0 <= now - fetched_at <= max_age:
+                        mid = Decimal(str(price))
             if not mid.is_finite() or mid <= 0:
                 self._log_startup_inventory_classification(
                     asset, amount, value, min_notional, min_order_size,
