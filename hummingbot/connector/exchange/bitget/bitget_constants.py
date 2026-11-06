@@ -35,6 +35,10 @@ SECONDS_TO_WAIT_TO_RECEIVE_MESSAGE = 40  # must be > WS_HEARTBEAT_TIME_INTERVAL 
 WS_HEARTBEAT_TIME_INTERVAL = 30
 
 PUBLIC_ORDERBOOK_ENDPOINT = "/api/v2/spot/market/orderbook"
+PUBLIC_ORDERBOOK_V3_ENDPOINT = "/api/v3/market/orderbook"
+ORDERBOOK_V3_REFRESH_SECONDS = 5.0
+ORDERBOOK_SNAPSHOT_TIMEOUT_SECONDS = 10.0
+ORDERBOOK_ERROR_BACKOFF_SECONDS = 30.0
 PUBLIC_SYMBOLS_ENDPOINT = "/api/v2/spot/public/symbols"
 PUBLIC_TICKERS_ENDPOINT = "/api/v2/spot/market/tickers"
 PUBLIC_TIME_ENDPOINT = "/api/v2/public/time"
@@ -58,6 +62,7 @@ WS_ACCOUNT_ENDPOINT = "account"
 WS_FILL_ENDPOINT = "fill"
 
 RET_CODE_OK = "00000"
+RET_CODE_V3_REQUIRED = "40502"
 RET_CODE_CHANNEL_NOT_EXIST = "30001"
 RET_CODE_ILLEGAL_REQUEST = "30002"
 RET_CODE_INVALID_OP = "30003"
@@ -80,6 +85,7 @@ RET_CODES_ORDER_NOT_EXISTS = [
 
 RATE_LIMITS = [
     RateLimit(limit_id=PUBLIC_ORDERBOOK_ENDPOINT, limit=20, time_interval=1),
+    RateLimit(limit_id=PUBLIC_ORDERBOOK_V3_ENDPOINT, limit=20, time_interval=1),
     RateLimit(limit_id=PUBLIC_SYMBOLS_ENDPOINT, limit=20, time_interval=1),
     RateLimit(limit_id=PUBLIC_TICKERS_ENDPOINT, limit=20, time_interval=1),
     RateLimit(limit_id=PUBLIC_TIME_ENDPOINT, limit=10, time_interval=1),

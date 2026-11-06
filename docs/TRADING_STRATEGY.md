@@ -629,6 +629,46 @@ Of de kwaliteitsscorer (gate 36) historische uitkomsten als input gebruikt: `ONB
 
 ## 9. Exchange-vergelijking (U / B / O)
 
+### Bitget Spot: selectieve V3-orderbooksnapshots (LOKAAL, 2026-11-06)
+
+De Spot-datasource probeert bestaande V2-snapshots. Alleen exchangecode `40502`
+schakelt het betreffende paar voor deze sessie naar
+`GET /api/v3/market/orderbook`, met `category=SPOT`, `limit=100` en het exacte
+exchange-symbool uit de connector-mapping (behoud van bijvoorbeeld `rSPYUSDT`).
+V3 `b`/`a` worden bids/asks; `ts` blijft de exchange-millisecondtimestamp als
+update-ID en wordt uitsluitend voor de berichttijd naar seconden omgerekend.
+Succescode, beide zijden, eindige positieve prijzen/hoeveelheden, prijsvolgorde,
+unieke niveaus, niet-gekruist boek en timestamp worden gevalideerd.
+
+V2-compatibele paren behouden hun bestaande WebSocket-snapshots/delta's.
+V3-verplichte paren krijgen uitsluitend volledige REST-snapshots; hun
+V2-berichten worden niet toegepast en er worden geen V3-delta's geintroduceerd.
+Dit voorkomt vermenging van onverenigbare delta-/sequenceformaten. De bestaande
+subscriptionlistener beheert een annuleerbare refreshtaak: een ronde langs
+actieve V3-boeken, daarna 5 seconden wachten, maximaal 20 V3-requests/s/IP via
+de throttler, requesttimeout 10 seconden. De tracker behoudt hetzelfde
+orderboekobject, ook voor dynamisch toegevoegde paren. Alleen strikt oplopende
+timestamps vervangen het boek. Bij refreshfouten wordt de diepte leeggemaakt
+en de fout gelogd; bestaande empty-book/stale-data-controles blijven actief.
+
+Een paar probeert V2 maximaal eenmaal na `40502` (ook bij gelijktijdige
+snapshotaanvragen). Een tweede `40502` op V3 blokkeert verdere requests voor
+dat paar gedurende de sessie. HTTP/application-429 geeft globale
+snapshotback-off van minimaal 30 seconden met respect voor `Retry-After`;
+overige refreshfouten geven 30 seconden back-off per paar. Tijdens back-off
+worden geen snapshotrequests verstuurd. Geen handelsparameters, orderroutes,
+private WebSockets, Futures-, Kraken- of OKX-code gewijzigd.
+
+Officiele contracten:
+[V3 orderbook](https://www.bitget.com/docs/catalog/market/market-data#get-order-book)
+en [V3 WebSocket depth](https://www.bitget.com/legacy-docs/uta/websocket/public/Order-Book-Channel).
+Publieke probes bevestigden BTC op V2 en rSPY op V3; korte V2/V3-WebSocketprobes
+voor r-symbolen kregen acknowledgements maar geen depthdata. Dit bewijst niet
+dat V3-WebSocketdepth voor die symbolen nooit beschikbaar is. De REST-route
+vermijdt een brede WebSocket-/accountmigratie, maar geeft geen tick-level
+dieptecontinuiteit. Compatibiliteit van V2-orderplaatsing voor deze markten is
+niet aangetoond en wordt door deze marktdatafix niet gewijzigd.
+
 Alle waarden zijn effectieve waarden uit het geladen model; bron = YAML (kolom "Key") tenzij anders gemarkeerd. Eenheid: F = fractie, P = percent, s = seconden.
 
 | Onderdeel | Kraken USD (U) | Bitget Spot (B) | OKX Spot (O) | Key (YAML / model) |
@@ -850,3 +890,4 @@ Nieuwste onderaan. Per wijziging in dezelfde commit bijwerken (zie onderhoudsreg
 | 2026-11-02 | Core orderveiligheid, Bitget Spot, offline backtesting | Ambigue create-cancellation/timeout blijft `PENDING_CREATE`; tijdelijke statusfouten tellen niet als not-found; Bitget herstelt via `clientOid`; Kraken via open/closed `userref`; Bitget ondersteunt `LIMIT_MAKER` met `force=post_only`; nieuw FIFO-ledger en conservatieve candle-replay | Voorkomt dat een geaccepteerd exchangeorder na lokale cancellation uit tracking verdwijnt; corrigeert base/quote-fee-eenheden en open-inventory-P&L in onderzoek | Onzekere orders blokkeren duplicaatplaatsing tot reconciliatie; Bitget-livegedrag ongewijzigd omdat `use_post_only_orders: false` blijft; backtesting is offline en wijzigt geen tradingregels | core/Bitget/Kraken connector-tests en `multi_coin_grid_pro/tests/backtest/test_{pnl_ledger,candle_replay,backtest}.py` | LOKAAL |
 | 2026-11-03 | Bitget startup-reconciliatie en tickerrefresh | Dust gebruikt `min_notional_size` plus `min_order_size` met fail-closed bewijslogging; Bitget haalt 29 prijzen via één officiële all-tickers-call; korte cache, `Retry-After`/begrensde back-off en geen fan-out/retry na 429, timeout of partiële response | Sub-minimum BGB/NEAR/ONDO blokkeerden alle entries; de vermeende batch deed 29 requests en veroorzaakte HTTP 429, waarna de fallback opnieuw requests startte | Alleen aantoonbaar niet-verhandelbare dust wordt genegeerd; materiële/onbekende inventory en open orders blijven blokkeren. Requestbudget voor 29 Bitget-symbolen: 29 → 1 normaal, 1 → 0 tijdens back-off; TP/SL, filters, sizing en kapitaalallocatie ongewijzigd | `test_pre_deploy_risk_safety.py`, `test_trend_calculator.py`, Bitget connector/data-source tests | LOKAAL |
 | 2026-11-06 | Startup-inventorywaardering | Gevalideerde verse ticker uit bestaande same-connector/pair-cache als fallback voor ontbrekende midprijs; beide minimumregels vooraf valideren | Dezelfde BGB-dust werd op 4/5 november met orderboek correct gewaardeerd, maar blokkeerde na herstart zonder BGB-orderboek | Alleen bewezen dust niet-blokkerend; materiele/onbekende inventory blijft blokkeren; geen orders, nieuwe prijsrequests of risicolimietwijzigingen | `test_pre_deploy_risk_safety.py`: BGB-dust, materiele BTC, ontbrekende/stale/ongeldige ticker, connector/pair/rules en bestaande startup/risk-tests | LOKAAL |
+| 2026-11-06 | Bitget Spot-orderbookdata | Per-paar V3 REST-snapshots na 40502, volledige boekrefresh met timestamp-/depthvalidatie; V2-delta's voor deze paren geweigerd; begrensde retries/429-back-off | r-symbolen weigeren V2-orderbooksnapshots; alleen URL vervangen laat ontbrekende live updates bestaan | V2-paren behouden WS; V3-boeken bij fouten leeg/fail-closed; geen wijzigingen aan orders, risicolimieten of andere exchanges | Bitget Spot-orderbook-, exchange- en post-only-lifecycletests; Bitget Futures-orderbooktests | LOKAAL |

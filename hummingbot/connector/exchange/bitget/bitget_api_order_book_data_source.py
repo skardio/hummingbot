@@ -1,8 +1,10 @@
 import asyncio
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Optional
 
 from hummingbot.connector.exchange.bitget import bitget_constants as CONSTANTS, bitget_web_utils as web_utils
 from hummingbot.core.data_type.common import TradeType
+from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.order_book_message import OrderBookMessage, OrderBookMessageType
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod, WSJSONRequest, WSPlainTextRequest
@@ -29,6 +31,49 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._connector: 'BitgetExchange' = connector
         self._api_factory: WebAssistantsFactory = api_factory
         self._ping_task: Optional[asyncio.Task] = None
+        self._v3_pairs: set[str] = set()
+        self._v3_books: Dict[str, OrderBook] = {}
+        self._v3_books_ready = asyncio.Event()
+        self._snapshot_retry_at: Dict[str, float] = {}
+        self._snapshot_rate_limit_until = 0.0
+        self._snapshot_disabled_pairs: set[str] = set()
+        self._snapshot_locks: Dict[str, asyncio.Lock] = {}
+
+    async def get_new_order_book(self, trading_pair: str) -> OrderBook:
+        book = await super().get_new_order_book(trading_pair)
+        if trading_pair in self._v3_pairs:
+            # Keep the tracker-owned object fresh, including dynamically added pairs.
+            self._v3_books[trading_pair] = book
+            self._v3_books_ready.set()
+        return book
+
+    async def _refresh_v3_order_books(self) -> None:
+        while True:
+            await self._v3_books_ready.wait()
+            for pair, book in list(self._v3_books.items()):
+                if pair not in self._trading_pairs:
+                    del self._v3_books[pair]
+                    continue
+                if pair in self._snapshot_disabled_pairs:
+                    continue
+                if self._time() < max(self._snapshot_rate_limit_until, self._snapshot_retry_at.get(pair, 0)):
+                    book.apply_snapshot([], [], book.snapshot_uid)
+                    continue
+                try:
+                    snapshot = await self._order_book_snapshot(pair)
+                    if snapshot.update_id <= book.snapshot_uid:
+                        raise IOError(f"Non-increasing Bitget V3 snapshot timestamp for {pair}")
+                    book.apply_snapshot(snapshot.bids, snapshot.asks, snapshot.update_id)
+                except asyncio.CancelledError:
+                    raise
+                except (IOError, ValueError, TypeError, KeyError) as exc:
+                    # Consumers must not mistake an old REST-only book for live depth.
+                    book.apply_snapshot([], [], book.snapshot_uid)
+                    self.logger().warning("Bitget V3 order book unavailable for %s: %s", pair, exc)
+                    self._snapshot_retry_at[pair] = self._time() + CONSTANTS.ORDERBOOK_ERROR_BACKOFF_SECONDS
+            if not self._v3_books:
+                self._v3_books_ready.clear()
+            await self._sleep(CONSTANTS.ORDERBOOK_V3_REFRESH_SECONDS)
 
     async def get_last_traded_prices(
         self,
@@ -93,6 +138,8 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         :return: The parsed order book message.
         """
         trading_pair: str = await self._connector.trading_pair_associated_to_exchange_symbol(symbol)
+        if trading_pair in self._v3_pairs:
+            raise IOError(f"V2 depth cannot update REST-only V3 order book {trading_pair}")
         update_id: int = int(data["ts"])
         timestamp: float = update_id * 1e-3
 
@@ -118,6 +165,8 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         symbol: str = raw_message["arg"]["instId"]
 
         for diff in diffs_data:
+            if await self._is_v3_symbol(symbol):
+                return
             diff_message: OrderBookMessage = await self._parse_any_order_book_message(
                 data=diff,
                 symbol=symbol,
@@ -135,6 +184,8 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         symbol: str = raw_message["arg"]["instId"]
 
         for snapshot in snapshot_data:
+            if await self._is_v3_symbol(symbol):
+                return
             snapshot_message: OrderBookMessage = await self._parse_any_order_book_message(
                 data=snapshot,
                 symbol=symbol,
@@ -143,6 +194,13 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
             message_queue.put_nowait(snapshot_message)
 
+    async def _is_v3_symbol(self, symbol: str) -> bool:
+        # V2 acknowledgements can uppercase a case-sensitive r-symbol.
+        for pair in self._v3_pairs:
+            if (await self._connector.exchange_symbol_associated_to_pair(pair)).casefold() == symbol.casefold():
+                return True
+        return False
+
     async def _parse_trade_message(
         self,
         raw_message: Dict[str, Any],
@@ -150,6 +208,8 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
     ) -> None:
         data: List[Dict[str, Any]] = raw_message["data"]
         symbol: str = raw_message["arg"]["instId"]
+        if await self._is_v3_symbol(symbol):
+            return
         trading_pair: str = await self._connector.trading_pair_associated_to_exchange_symbol(symbol)
 
         for trade_data in data:
@@ -184,6 +244,8 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
             subscription_topics: List[Dict[str, str]] = []
 
             for trading_pair in self._trading_pairs:
+                if trading_pair in self._v3_pairs:
+                    continue
                 symbol: str = await self._connector.exchange_symbol_associated_to_pair(
                     trading_pair
                 )
@@ -194,14 +256,14 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         "instId": symbol
                     })
 
-            await ws.send(
-                WSJSONRequest({
-                    "op": "subscribe",
-                    "args": subscription_topics,
-                })
-            )
-
-            self.logger().info("Subscribed to public channels...")
+            if subscription_topics:
+                await ws.send(
+                    WSJSONRequest({
+                        "op": "subscribe",
+                        "args": subscription_topics,
+                    })
+                )
+                self.logger().info("Subscribed to public channels...")
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -209,25 +271,88 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
             raise
 
     async def _request_order_book_snapshot(self, trading_pair: str) -> Dict[str, Any]:
+        lock = self._snapshot_locks.setdefault(trading_pair, asyncio.Lock())
+        async with lock:
+            return await self._request_order_book_snapshot_locked(trading_pair)
+
+    async def _request_order_book_snapshot_locked(self, trading_pair: str) -> Dict[str, Any]:
+        if trading_pair in self._snapshot_disabled_pairs:
+            raise IOError(f"Bitget V3 order book disabled after 40502 for {trading_pair}")
+        if self._time() < max(self._snapshot_rate_limit_until, self._snapshot_retry_at.get(trading_pair, 0)):
+            raise IOError(f"Bitget order book request in backoff for {trading_pair}")
         symbol: str = await self._connector.exchange_symbol_associated_to_pair(trading_pair)
         rest_assistant: RESTAssistant = await self._api_factory.get_rest_assistant()
-
-        data: Dict[str, Any] = await rest_assistant.execute_request(
-            url=web_utils.public_rest_url(path_url=CONSTANTS.PUBLIC_ORDERBOOK_ENDPOINT),
-            params={
-                "symbol": symbol,
-                "limit": "100",
-            },
-            method=RESTMethod.GET,
-            throttler_limit_id=CONSTANTS.PUBLIC_ORDERBOOK_ENDPOINT,
-        )
-
-        return data
+        for _ in range(2):
+            use_v3 = trading_pair in self._v3_pairs
+            endpoint = CONSTANTS.PUBLIC_ORDERBOOK_V3_ENDPOINT if use_v3 else CONSTANTS.PUBLIC_ORDERBOOK_ENDPOINT
+            params = {"symbol": symbol, "limit": "100"}
+            if use_v3:
+                params["category"] = "SPOT"
+            response = await rest_assistant.execute_request_and_get_response(
+                url=web_utils.public_rest_url(path_url=endpoint),
+                params=params,
+                method=RESTMethod.GET,
+                throttler_limit_id=endpoint,
+                return_err=True,
+                timeout=CONSTANTS.ORDERBOOK_SNAPSHOT_TIMEOUT_SECONDS,
+            )
+            if response.status == 429:
+                delay = self._connector._retry_after_seconds(response.headers)
+                self._snapshot_rate_limit_until = self._time() + max(
+                    CONSTANTS.ORDERBOOK_ERROR_BACKOFF_SECONDS, delay or 0)
+                raise IOError(f"Bitget order book HTTP 429 for {trading_pair}")
+            try:
+                data = await response.json()
+            except (ValueError, TypeError) as exc:
+                raise IOError(f"Invalid Bitget order book JSON for {trading_pair}") from exc
+            if isinstance(data, dict) and str(data.get("code")) == "429":
+                delay = self._connector._retry_after_seconds(response.headers)
+                self._snapshot_rate_limit_until = self._time() + max(
+                    CONSTANTS.ORDERBOOK_ERROR_BACKOFF_SECONDS, delay or 0)
+                raise IOError(f"Bitget order book rate limited for {trading_pair}")
+            if isinstance(data, dict) and str(data.get("code")) == CONSTANTS.RET_CODE_V3_REQUIRED:
+                if use_v3:
+                    self._snapshot_disabled_pairs.add(trading_pair)
+                    raise IOError(f"Bitget V3 order book also returned 40502 for {trading_pair}")
+                self._v3_pairs.add(trading_pair)
+                self.logger().warning("Bitget order book %s requires V3; using full REST snapshots only", trading_pair)
+                continue
+            if response.status >= 400 or not isinstance(data, dict) or data.get("code") != CONSTANTS.RET_CODE_OK:
+                self._snapshot_retry_at[trading_pair] = self._time() + CONSTANTS.ORDERBOOK_ERROR_BACKOFF_SECONDS
+                raise IOError(f"Bitget order book request failed for {trading_pair}: HTTP {response.status}, {data}")
+            if use_v3:
+                depth = data.get("data")
+                if not isinstance(depth, dict):
+                    raise IOError(f"Invalid Bitget V3 order book data for {trading_pair}")
+                data = {**data, "data": {"bids": depth.get("b"), "asks": depth.get("a"), "ts": depth.get("ts")}}
+            return data
+        raise IOError(f"Bitget order book version negotiation failed for {trading_pair}")
 
     async def _order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
         snapshot_response: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair)
         snapshot_data: Dict[str, Any] = snapshot_response["data"]
-        update_id: int = int(snapshot_data["ts"])
+        try:
+            update_id = int(snapshot_data["ts"])
+            if update_id <= 0 or str(update_id) != str(snapshot_data["ts"]):
+                raise ValueError("Invalid timestamp")
+            for side, descending in (("bids", True), ("asks", False)):
+                levels = snapshot_data[side]
+                if not isinstance(levels, list) or not levels:
+                    raise ValueError(f"Missing {side}")
+                prices = []
+                for level in levels:
+                    if not isinstance(level, (list, tuple)) or len(level) != 2:
+                        raise ValueError("Invalid price level")
+                    price, size = (Decimal(str(v)) for v in level)
+                    if not price.is_finite() or not size.is_finite() or price <= 0 or size <= 0:
+                        raise ValueError("Invalid price or size")
+                    prices.append(price)
+                if prices != sorted(set(prices), reverse=descending):
+                    raise ValueError(f"Unordered or duplicate {side}")
+            if Decimal(str(snapshot_data["bids"][0][0])) >= Decimal(str(snapshot_data["asks"][0][0])):
+                raise ValueError("Crossed order book")
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+            raise IOError(f"Invalid Bitget order book snapshot for {trading_pair}: {exc}") from exc
         timestamp: float = update_id * 1e-3
 
         order_book_message_content: Dict[str, Any] = {
@@ -265,6 +390,16 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
             self.logger().exception("Error sending interval PING")
 
     async def listen_for_subscriptions(self) -> NoReturn:
+        refresh_task = asyncio.create_task(self._refresh_v3_order_books())
+        stream_task = asyncio.create_task(self._listen_for_v2_subscriptions())
+        try:
+            await asyncio.gather(refresh_task, stream_task)
+        finally:
+            refresh_task.cancel()
+            stream_task.cancel()
+            await asyncio.gather(refresh_task, stream_task, return_exceptions=True)
+
+    async def _listen_for_v2_subscriptions(self) -> NoReturn:
         ws: Optional[WSAssistant] = None
         while True:
             try:

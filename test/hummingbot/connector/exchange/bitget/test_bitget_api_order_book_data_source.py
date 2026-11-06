@@ -221,6 +221,219 @@ class BitgetAPIOrderBookDataSourceUnitTests(IsolatedAsyncioWrapperTestCase):
         return any(record.levelname == log_level and record.getMessage() == message
                    for record in self.log_records)
 
+    def v3_snapshot_response(self, ts="1695710946294"):
+        return {
+            "code": "00000", "msg": "success",
+            "data": {"b": [[100, 2], [99, 3]], "a": [[101, 4], [102, 5]], "ts": ts},
+        }
+
+    def snapshot_url(self, v3=False):
+        endpoint = CONSTANTS.PUBLIC_ORDERBOOK_V3_ENDPOINT if v3 else CONSTANTS.PUBLIC_ORDERBOOK_ENDPOINT
+        return re.compile(f"^{re.escape(web_utils.public_rest_url(endpoint))}")
+
+    def snapshot_request_count(self, mock_get):
+        return sum(
+            len(calls) for (_, url), calls in mock_get.requests.items()
+            if url.path in (CONSTANTS.PUBLIC_ORDERBOOK_ENDPOINT, CONSTANTS.PUBLIC_ORDERBOOK_V3_ENDPOINT)
+        )
+
+    @aioresponses()
+    async def test_v3_required_pair_negotiates_once_preserves_case_and_timestamp(self, mock_get):
+        pair = "rSPY-USDT"
+        self.connector._set_trading_pair_symbol_map(bidict({"rSPYUSDT": pair}))
+        mock_get.get(self.snapshot_url(), status=400, payload={"code": "40502", "data": None})
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response(), repeat=True)
+        book = await self.data_source.get_new_order_book(pair)
+        self.assertEqual(1695710946294, book.snapshot_uid)
+        self.assertEqual(100, list(book.bid_entries())[0].price)
+        self.assertEqual(4, list(book.ask_entries())[0].amount)
+        second = await self.data_source._order_book_snapshot(pair)
+        self.assertEqual(1695710946294 * 1e-3, second.timestamp)
+        requests = [(url, calls) for (_, url), calls in mock_get.requests.items()]
+        v2_calls = [calls for url, calls in requests if url.path == CONSTANTS.PUBLIC_ORDERBOOK_ENDPOINT]
+        v3_calls = [calls for url, calls in requests if url.path == CONSTANTS.PUBLIC_ORDERBOOK_V3_ENDPOINT]
+        self.assertEqual(1, sum(map(len, v2_calls)))
+        self.assertEqual(2, sum(map(len, v3_calls)))
+        self.assertEqual({"category": "SPOT", "symbol": "rSPYUSDT", "limit": "100"},
+                         v3_calls[0][0].kwargs["params"])
+        self.assertIs(book, self.data_source._v3_books[pair])
+
+    @aioresponses()
+    async def test_v2_compatible_pair_never_calls_v3(self, mock_get):
+        mock_get.get(self.snapshot_url(), payload=self.rest_order_book_snapshot_mock_response())
+        await self.data_source.get_new_order_book(self.trading_pair)
+        self.assertFalse(self.data_source._v3_pairs)
+        self.assertEqual(1, self.snapshot_request_count(mock_get))
+
+    @aioresponses()
+    async def test_v3_failure_never_falls_back_to_v2_and_40502_disables_retries(self, mock_get):
+        mock_get.get(self.snapshot_url(), status=400, payload={"code": "40502"})
+        mock_get.get(self.snapshot_url(v3=True), status=400, payload={"code": "40502"})
+        for _ in range(3):
+            with self.assertRaisesRegex(IOError, "40502"):
+                await self.data_source._order_book_snapshot(self.trading_pair)
+        self.assertEqual(2, self.snapshot_request_count(mock_get))
+
+    @aioresponses()
+    async def test_http_429_honors_retry_after_globally_without_version_switch(self, mock_get):
+        mock_get.get(self.snapshot_url(), status=429, headers={"Retry-After": "120"}, payload={"code": "429"})
+        with patch.object(self.data_source, "_time", return_value=1000):
+            with self.assertRaisesRegex(IOError, "429"):
+                await self.data_source._order_book_snapshot(self.trading_pair)
+            with self.assertRaisesRegex(IOError, "backoff"):
+                await self.data_source._order_book_snapshot(self.trading_pair)
+        self.assertEqual(1120, self.data_source._snapshot_rate_limit_until)
+        self.assertFalse(self.data_source._v3_pairs)
+        self.assertEqual(1, self.snapshot_request_count(mock_get))
+
+    @aioresponses()
+    async def test_v3_http_429_does_not_repeat_v2_probe(self, mock_get):
+        mock_get.get(self.snapshot_url(), status=400, payload={"code": "40502"})
+        mock_get.get(self.snapshot_url(v3=True), status=429, payload={"code": "429"})
+        with self.assertRaisesRegex(IOError, "429"):
+            await self.data_source._order_book_snapshot(self.trading_pair)
+        with self.assertRaisesRegex(IOError, "backoff"):
+            await self.data_source._order_book_snapshot(self.trading_pair)
+        self.assertIn(self.trading_pair, self.data_source._v3_pairs)
+        self.assertEqual(2, self.snapshot_request_count(mock_get))
+
+    @aioresponses()
+    async def test_http_200_with_40502_negotiates_v3_and_application_429_backs_off(self, mock_get):
+        mock_get.get(self.snapshot_url(), payload={"code": "40502"})
+        mock_get.get(self.snapshot_url(v3=True), payload={"code": "429"})
+        with self.assertRaisesRegex(IOError, "rate limited"):
+            await self.data_source._order_book_snapshot(self.trading_pair)
+        with self.assertRaisesRegex(IOError, "backoff"):
+            await self.data_source._order_book_snapshot(self.trading_pair)
+        self.assertEqual(2, self.snapshot_request_count(mock_get))
+
+    @aioresponses()
+    async def test_v3_timeout_is_propagated_without_downgrade(self, mock_get):
+        self.data_source._v3_pairs.add(self.trading_pair)
+        mock_get.get(self.snapshot_url(v3=True), exception=asyncio.TimeoutError)
+        with self.assertRaises(asyncio.TimeoutError):
+            await self.data_source._order_book_snapshot(self.trading_pair)
+        self.assertEqual(1, self.snapshot_request_count(mock_get))
+        self.assertIn(self.trading_pair, self.data_source._v3_pairs)
+
+    @aioresponses()
+    async def test_concurrent_requests_probe_v2_only_once(self, mock_get):
+        mock_get.get(self.snapshot_url(), status=400, payload={"code": "40502"})
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response(), repeat=True)
+        await asyncio.gather(*(
+            self.data_source._order_book_snapshot(self.trading_pair) for _ in range(2)
+        ))
+        v2_count = sum(len(calls) for (_, url), calls in mock_get.requests.items()
+                       if url.path == CONSTANTS.PUBLIC_ORDERBOOK_ENDPOINT)
+        self.assertEqual(1, v2_count)
+
+    async def test_v3_pairs_are_not_subscribed_to_v2_stream(self):
+        self.data_source._v3_pairs.add(self.trading_pair)
+        ws = AsyncMock()
+        await self.data_source._subscribe_channels(ws)
+        ws.send.assert_not_called()
+
+    @aioresponses()
+    async def test_application_error_is_not_treated_as_depth(self, mock_get):
+        mock_get.get(self.snapshot_url(), payload={"code": "40017", "data": None})
+        with self.assertRaisesRegex(IOError, "request failed"):
+            await self.data_source._order_book_snapshot(self.trading_pair)
+        with self.assertRaisesRegex(IOError, "backoff"):
+            await self.data_source._order_book_snapshot(self.trading_pair)
+
+    async def test_invalid_v3_snapshots_fail_closed(self):
+        invalid_depths = [
+            None, [],
+            {"a": [], "b": [[100, 1]], "ts": "1"},
+            {"a": [[101, 1]], "b": [[100, -1]], "ts": "1"},
+            {"a": [[101, 1]], "b": [[float("nan"), 1]], "ts": "1"},
+            {"a": [[101, 1]], "b": [[100, float("inf")]], "ts": "1"},
+            {"a": [[101, 1]], "b": [[100, 1, 2]], "ts": "1"},
+            {"a": [[101, 1]], "b": [[102, 1]], "ts": "1"},
+            {"a": [[101, 1]], "b": [[99, 1], [100, 1]], "ts": "1"},
+            {"a": [[101, 1]], "b": [[100, 1]], "ts": "bad"},
+            {"a": [[101, 1]], "b": [[100, 1]], "ts": "-1"},
+            {"a": [[101, 1]], "b": [[100, 1]], "ts": "1.5"},
+        ]
+        self.data_source._v3_pairs.add(self.trading_pair)
+        for depth in invalid_depths:
+            with self.subTest(depth=depth), aioresponses() as mock_get:
+                mock_get.get(self.snapshot_url(v3=True), payload={"code": "00000", "data": depth})
+                with self.assertRaises(IOError):
+                    await self.data_source._order_book_snapshot(self.trading_pair)
+
+    @aioresponses()
+    async def test_non_json_snapshot_is_rejected(self, mock_get):
+        mock_get.get(self.snapshot_url(), body="<html>upstream unavailable</html>")
+        with self.assertRaisesRegex(IOError, "Invalid Bitget order book JSON"):
+            await self.data_source._order_book_snapshot(self.trading_pair)
+
+    async def test_v2_diffs_and_snapshots_cannot_update_v3_book(self):
+        self.data_source._v3_pairs.add(self.trading_pair)
+        output = asyncio.Queue()
+        await self.data_source._parse_order_book_diff_message(self.ws_order_book_diff_mock_response(), output)
+        await self.data_source._parse_order_book_snapshot_message(self.ws_order_book_snapshot_mock_response(), output)
+        self.assertTrue(output.empty())
+
+    async def test_uppercase_v2_symbol_cannot_update_case_sensitive_v3_pair(self):
+        self.connector._set_trading_pair_symbol_map(bidict({"rSPYUSDT": "rSPY-USDT"}))
+        self.data_source._v3_pairs.add("rSPY-USDT")
+        raw = self.ws_order_book_diff_mock_response()
+        raw["arg"]["instId"] = "RSPYUSDT"
+        output = asyncio.Queue()
+        await self.data_source._parse_order_book_diff_message(raw, output)
+        self.assertTrue(output.empty())
+
+    @aioresponses()
+    async def test_periodic_v3_refresh_updates_tracker_owned_book_then_invalidates_on_failure(self, mock_get):
+        self.data_source._v3_pairs.add(self.trading_pair)
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response())
+        book = await self.data_source.get_new_order_book(self.trading_pair)
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response(ts="1695710947294"))
+        with patch.object(self.data_source, "_sleep", side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.data_source._refresh_v3_order_books()
+        self.assertEqual(1695710947294, book.snapshot_uid)
+        mock_get.get(self.snapshot_url(v3=True), status=429, payload={"code": "429"})
+        with patch.object(self.data_source, "_sleep", side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.data_source._refresh_v3_order_books()
+        self.assertFalse(list(book.bid_entries()))
+        self.assertFalse(list(book.ask_entries()))
+
+    @aioresponses()
+    async def test_old_v3_snapshot_is_not_applied_and_next_fresh_snapshot_recovers(self, mock_get):
+        self.data_source._v3_pairs.add(self.trading_pair)
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response())
+        book = await self.data_source.get_new_order_book(self.trading_pair)
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response(ts="1695710946293"))
+        with patch.object(self.data_source, "_sleep", side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.data_source._refresh_v3_order_books()
+        self.assertFalse(list(book.bid_entries()))
+        self.data_source._snapshot_retry_at.clear()
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response(ts="1695710947294"))
+        with patch.object(self.data_source, "_sleep", side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.data_source._refresh_v3_order_books()
+        self.assertEqual(1695710947294, book.snapshot_uid)
+        self.assertTrue(list(book.bid_entries()))
+
+    async def test_v3_refresh_task_stops_with_subscription_listener(self):
+        stopped = asyncio.Event()
+
+        async def refresh():
+            try:
+                await asyncio.Future()
+            finally:
+                stopped.set()
+
+        with patch.object(self.data_source, "_refresh_v3_order_books", side_effect=refresh), \
+                patch.object(self.data_source, "_listen_for_v2_subscriptions", side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.data_source.listen_for_subscriptions()
+        self.assertTrue(stopped.is_set())
+
     @aioresponses()
     def test_get_last_traded_prices(self, mock_get: aioresponses) -> None:
         """
