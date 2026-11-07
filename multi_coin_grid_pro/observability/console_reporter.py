@@ -124,7 +124,17 @@ class ConsoleReporter:
         self._log("=" * 70)
         self._log(f"Total intents evaluated: {stats['total_intents']}")
         self._log(f"Denied: {stats['total_denied']} ({stats['denial_rate']:.1f}%)")
-        self._log(f"Approved: {stats['total_approved']} ({100 - stats['denial_rate']:.1f}%)")
+        if stats['total_intents'] > 0:
+            self._log(f"Approved: {stats['total_approved']} ({100 - stats['denial_rate']:.1f}%)")
+        else:
+            self._log("Approved: n/a (no intents evaluated)")
+
+        pauses = self.aggregator.get_schedule_pauses(hours=hours)
+        if pauses:
+            self._log(
+                f"Schedule pauses (not counted as intents): {len(pauses)} window(s), "
+                f"last: {pauses[-1]['reason']}"
+            )
 
         if stats['top_rejection_reasons']:
             self._log("\nTop Rejection Reasons:")

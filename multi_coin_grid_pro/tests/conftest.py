@@ -180,6 +180,7 @@ def isolate_operational_test_artifacts(tmp_path, monkeypatch):
         output_dir="logs/events",
         buffer_size=100,
         config_hash=None,
+        **kwargs,
     ):
         requested = Path(output_dir)
         resolved = _resolved_path(requested)
@@ -192,6 +193,7 @@ def isolate_operational_test_artifacts(tmp_path, monkeypatch):
             output_dir=output_dir,
             buffer_size=buffer_size,
             config_hash=config_hash,
+            **kwargs,
         )
 
     monkeypatch.setattr(entry_price_module.EntryPriceStore, "__init__", isolated_entry_init)

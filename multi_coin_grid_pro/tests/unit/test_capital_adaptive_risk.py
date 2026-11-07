@@ -466,3 +466,108 @@ class TestSelectionOnlyPicksFundableCoins:
         assert "self._check_smart_entry_filter(" not in source
         assert source.count("self._entry_candidate_allowed(") == 4
         assert source.count("self._release_capital_skipped_monitoring(best_coin)") == 2
+
+
+class TestRiskBudgetObservability:
+    """WHY-NO-TRADE counts every risk-budget rejection (Bitget 7 Nov: 226 precheck logs, 0 events)."""
+
+    def _ctrl(self):
+        ctrl = TestSelectionOnlyPicksFundableCoins()._ctrl()
+        ctrl.event_logger = Mock()
+        ctrl._entry_gate_tick = 1
+        return ctrl
+
+    def test_every_rejection_is_counted_although_text_log_is_throttled(self):
+        ctrl = self._ctrl()
+        with patch('multi_coin_grid_pro.controllers.multi_coin_grid_controller.should_log', return_value=False):
+            for tick in (1, 2, 3):
+                ctrl._entry_gate_tick = tick
+                assert ctrl._risk_budget_admits_slot("JCT-USDT") is False
+        assert ctrl.event_logger.emit_gate_denied.call_count == 3
+        kwargs = ctrl.event_logger.emit_gate_denied.call_args.kwargs
+        assert kwargs["stage"].value == "RISK"
+        assert kwargs["reason_code"].value == "INSUFFICIENT_RISK_BUDGET"
+        assert kwargs["symbol"] == "JCT-USDT"
+        assert kwargs["metadata"]["headroom_quote"] < kwargs["metadata"]["minimum_viable_quote"]
+
+    def test_repeated_checks_in_one_tick_count_once(self):
+        ctrl = self._ctrl()
+        for _ in range(3):  # primary pick, fallback loop, multi-slot path
+            ctrl._entry_candidate_allowed("JCT-USDT")
+        ctrl._risk_budget_admits_slot("AIN-USDT")
+        assert [c.kwargs["symbol"] for c in ctrl.event_logger.emit_gate_denied.call_args_list] == [
+            "JCT-USDT", "AIN-USDT"]
+
+    def test_fundable_coin_emits_no_risk_event_and_smart_entry_still_short_circuited(self):
+        ctrl = self._ctrl()
+        assert ctrl._entry_candidate_allowed("JCT-USDT") is False
+        assert ctrl._last_entry_gate_rejection == "risk_budget"
+        ctrl._check_smart_entry_filter.assert_not_called()
+        ctrl._check_smart_entry_filter.return_value = False
+        assert ctrl._entry_candidate_allowed("DOT-USDT") is False
+        assert ctrl._last_entry_gate_rejection == "smart_entry"
+        assert ctrl.event_logger.emit_gate_denied.call_count == 1
+        ctrl._check_smart_entry_filter.return_value = True
+        assert ctrl._entry_candidate_allowed("DOT-USDT") is True
+        assert ctrl._last_entry_gate_rejection is None
+
+    def test_event_logger_failure_never_changes_the_decision(self):
+        ctrl = self._ctrl()
+        ctrl.event_logger.emit_gate_denied.side_effect = RuntimeError("disk full")
+        assert ctrl._risk_budget_admits_slot("JCT-USDT") is False
+        assert ctrl._risk_budget_admits_slot("DOT-USDT") is True
+
+    def test_funnel_reason_names_the_actual_gate(self):
+        reason = MultiCoinGridController._entry_rejection_reason
+        ctrl = self._ctrl()
+        rejections = []
+        ctrl._entry_candidate_allowed("JCT-USDT")
+        assert ctrl._record_entry_rejection(rejections, "JCT-USDT") == "risk_budget"
+        assert "risk budget (INSUFFICIENT_RISK_BUDGET)" in reason(rejections)
+        assert "SmartEntry" not in reason(rejections)
+        assert reason([{"filter": "smart_entry"}]) == "All top coins rejected by SmartEntry filters"
+        mixed = reason(rejections + [{"filter": "smart_entry"}, {"filter": "multi_timeframe"}])
+        assert mixed == "All top coins rejected by entry filters (multi_timeframe=1, risk_budget=1, smart_entry=1)"
+        assert "all skipped" in reason([])
+
+    def test_schedule_pause_is_emitted_once_per_window(self):
+        ctrl = self._ctrl()
+        for reason in ("Weekend + low liquidity hour (17:00 UTC)",) * 3 + (None, "Weekend + low liquidity hour (21:00 UTC)"):
+            ctrl._note_schedule_pause(reason)
+        assert ctrl.event_logger.emit_schedule_pause.call_count == 2
+        ctrl.event_logger.emit_gate_denied.assert_not_called()
+
+
+class TestWhyNoTradeReport:
+    def _report(self, tmp_path, emit):
+        from multi_coin_grid_pro.core.reason_codes import ReasonCode, Stage
+        from multi_coin_grid_pro.observability.console_reporter import ConsoleReporter
+        from multi_coin_grid_pro.observability.event_logger import EventLogger
+
+        events_dir = tmp_path / "events"
+        event_logger = EventLogger(enabled=True, output_dir=str(events_dir))
+        emit(event_logger, ReasonCode, Stage)
+        event_logger.close()
+        logger = Mock()
+        reporter = ConsoleReporter(log_dir=events_dir, logger=logger, bot_name="bitget_obs_test")
+        reporter.report_summary(hours=1)
+        return [c.args[0] for c in logger.info.call_args_list]
+
+    def test_zero_intents_reports_approved_na_and_pauses_separately(self, tmp_path):
+        lines = self._report(tmp_path, lambda el, rc, st: el.emit_schedule_pause(
+            reason="Weekend + low liquidity hour (17:00 UTC)", connector="bitget"))
+        assert "Total intents evaluated: 0" in lines
+        assert "Approved: n/a (no intents evaluated)" in lines
+        assert not any("100.0%" in line for line in lines)
+        assert any(line.startswith("Schedule pauses (not counted as intents): 1 window(s)") for line in lines)
+
+    def test_risk_budget_rejections_are_counted_as_denied_intents(self, tmp_path):
+        def emit(el, rc, st):
+            for symbol in ("JCT-USDT", "AIN-USDT"):
+                el.emit_gate_denied(correlation_id=f"risk_budget_{symbol}_1", symbol=symbol, stage=st.RISK,
+                                    reason_code=rc.INSUFFICIENT_RISK_BUDGET, reason_msg="headroom < minimum",
+                                    connector="bitget")
+        lines = self._report(tmp_path, emit)
+        assert "Total intents evaluated: 2" in lines
+        assert "Approved: 0 (0.0%)" in lines
+        assert any("INSUFFICIENT_RISK_BUDGET: 2" in line and "[RISK]" in line for line in lines)

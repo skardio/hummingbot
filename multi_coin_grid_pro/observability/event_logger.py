@@ -17,7 +17,7 @@ import logging
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     from multi_coin_grid_pro.core.reason_codes import ReasonCode, Stage
@@ -25,6 +25,10 @@ except ImportError:
     # Fallback for tests/standalone usage
     ReasonCode = None
     Stage = None
+
+# Per-run disk bound: at most 5 x 20 MB. A single run previously reached 106 MB unbounded.
+DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024
+DEFAULT_MAX_FILES_PER_RUN = 5
 
 
 class EventLogger:
@@ -49,6 +53,8 @@ class EventLogger:
         output_dir: str = "logs/events",
         buffer_size: int = 100,
         config_hash: Optional[str] = None,
+        max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
+        max_files_per_run: int = DEFAULT_MAX_FILES_PER_RUN,
     ):
         """
         Initialize EventLogger.
@@ -58,23 +64,33 @@ class EventLogger:
             output_dir: Directory for event files
             buffer_size: Number of events to buffer before auto-flush
             config_hash: Config hash for run tracking
+            max_file_bytes: Rotate to a new part file once the current one would exceed this size
+            max_files_per_run: Keep at most this many files of this run (oldest part of this run is
+                deleted); files of other runs are never touched
         """
         self.enabled = enabled
         self.output_dir = Path(output_dir)
         self.buffer_size = buffer_size
         self.config_hash = config_hash
+        self.max_file_bytes = max(1, int(max_file_bytes))
+        self.max_files_per_run = max(1, int(max_files_per_run))
 
         self.buffer = []
         self.file_handle = None
         self.logger = logging.getLogger(__name__)
+        self._run_files: List[Path] = []
+        self._part = 0
+        self._bytes_written = 0
 
         if self.enabled:
             try:
                 self.output_dir.mkdir(parents=True, exist_ok=True)
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
-                filename = f"events_{timestamp}.jsonl"
-                self.file_path = self.output_dir / filename
+                self._run_stem = f"events_{timestamp}"
+                self.file_path = self.output_dir / f"{self._run_stem}.jsonl"
                 self.file_handle = open(self.file_path, "a", buffering=1)  # Line buffered
+                self._run_files.append(self.file_path)
+                self._bytes_written = self.file_path.stat().st_size
                 self.logger.info(f"📝 EventLogger initialized: {self.file_path}")
 
                 # Emit config_loaded event
@@ -153,8 +169,12 @@ class EventLogger:
 
         try:
             for event in self.buffer:
-                json_line = json.dumps(event)
-                self.file_handle.write(json_line + "\n")
+                json_line = json.dumps(event) + "\n"
+                size = len(json_line.encode("utf-8"))
+                if self._bytes_written > 0 and self._bytes_written + size > self.max_file_bytes:
+                    self._rotate()
+                self.file_handle.write(json_line)
+                self._bytes_written += size
             self.file_handle.flush()
             self.buffer.clear()
         except Exception as e:
@@ -162,6 +182,30 @@ class EventLogger:
             self.logger.error(f"Failed to flush events (non-fatal): {e}")
             # Clear buffer anyway to prevent memory buildup
             self.buffer.clear()
+
+    def _rotate(self) -> None:
+        """Continue in the next part file of this run; drop this run's oldest part beyond the cap."""
+        self.file_handle.flush()
+        self.file_handle.close()
+        self.file_handle = None  # if the next open fails, flush() degrades to dropping events quietly
+        self._part += 1
+        # "_pNNN" sorts after the base file, so readers using sorted(glob("events_*.jsonl")) keep order
+        self.file_path = self.output_dir / f"{self._run_stem}_p{self._part:03d}.jsonl"
+        self.file_handle = open(self.file_path, "a", buffering=1)
+        self._run_files.append(self.file_path)
+        self._bytes_written = 0
+        dropped = []
+        while len(self._run_files) > self.max_files_per_run:
+            oldest = self._run_files.pop(0)
+            try:
+                oldest.unlink()
+                dropped.append(oldest.name)
+            except OSError as e:
+                self.logger.warning(f"EventLogger could not remove {oldest.name} (non-fatal): {e}")
+        self.logger.info(
+            "EventLogger rotated to %s (max %s bytes/file, %s files/run); dropped=%s",
+            self.file_path.name, self.max_file_bytes, self.max_files_per_run, dropped,
+        )
 
     def close(self) -> None:
         """Close the event logger and flush any remaining events."""
@@ -301,6 +345,17 @@ class EventLogger:
             "side": side,
             "price": price,
             "amount": amount
+        })
+
+    def emit_schedule_pause(self, reason: str, connector: Optional[str] = None) -> None:
+        """
+        Emit schedule_pause event: new entries paused by the time-based filter.
+
+        Not a trade intent - never counted as denied/approved. Emitted once per pause window.
+        """
+        self._emit("schedule_pause", {
+            "reason": reason,
+            "connector": connector
         })
 
     def emit_entry_guard_evaluation(

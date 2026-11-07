@@ -4283,6 +4283,7 @@ class MultiCoinGridController(ControllerBase):
             List of executor actions (create/stop)
         """
         actions = []
+        self._entry_gate_tick = getattr(self, "_entry_gate_tick", 0) + 1
         self._sync_risk_state()
         self._reconcile_stale_exposure()
 
@@ -4321,10 +4322,13 @@ class MultiCoinGridController(ControllerBase):
             time_decision = self.time_based_filter.check_trading_permission()
             if not time_decision.can_enter_trades():
                 self.logger().info(f"⏸️  Feature 1.2: {time_decision.reason}")
+                self._note_schedule_pause(time_decision.reason)
                 # Allow exits but block new entries
                 if not (self.active_coin and self.active_executor_id):
                     return actions
                 # Continue to allow monitoring of active positions
+            else:
+                self._note_schedule_pause(None)
 
         now_ts = self.market_data_provider.time()
         risk_block_new_entries = False
@@ -4734,8 +4738,9 @@ class MultiCoinGridController(ControllerBase):
             rejection_reason = None
             candidate_rejections = []
             if best_coin and not self._entry_candidate_allowed(best_coin):
+                gate = self._record_entry_rejection(candidate_rejections, best_coin)
                 self.logger().warning(
-                    f"⚠️  {best_coin} rejected by risk budget or SmartEntry - checking fallbacks..."
+                    f"⚠️  {best_coin} rejected by {gate} - checking fallbacks..."
                 )
 
                 # Try next best coins from top 10
@@ -4757,6 +4762,7 @@ class MultiCoinGridController(ControllerBase):
                             # Multi-timeframe buy protection check
                             if not self._check_multi_timeframe_buy(fallback_coin):
                                 self.logger().warning(f"⏱️  {fallback_coin}: Blocked by multi-timeframe protection")
+                                self._record_entry_rejection(candidate_rejections, fallback_coin, "multi_timeframe")
                                 continue
 
                             # Also check multi-timeframe if enabled
@@ -4770,15 +4776,18 @@ class MultiCoinGridController(ControllerBase):
                                 break
                             else:
                                 self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (multi-timeframe)")
+                                self._record_entry_rejection(candidate_rejections, fallback_coin, "multi_timeframe")
                         else:
-                            self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (SmartEntry)")
+                            gate = self._record_entry_rejection(candidate_rejections, fallback_coin)
+                            self.logger().debug(f"   {i}. {fallback_coin}: REJECTED ({gate})")
 
                 if not fallback_found:
-                    self.logger().warning("⚠️  No valid coin found in top 10 after SmartEntry filtering")
                     best_coin = None
-                    rejection_reason = "All top coins rejected by SmartEntry filters"
+                    rejection_reason = self._entry_rejection_reason(candidate_rejections)
+                    self.logger().warning(f"⚠️  No valid coin found in top 10: {rejection_reason}")
 
             elif best_coin and not self._check_multi_timeframe_buy(best_coin):
+                self._record_entry_rejection(candidate_rejections, best_coin, "multi_timeframe")
                 self.logger().warning(
                     f"⏱️  {best_coin} rejected by multi-timeframe protection - checking fallbacks..."
                 )
@@ -4802,6 +4811,7 @@ class MultiCoinGridController(ControllerBase):
                             # Multi-timeframe buy protection check
                             if not self._check_multi_timeframe_buy(fallback_coin):
                                 self.logger().warning(f"⏱️  {fallback_coin}: Blocked by multi-timeframe protection")
+                                self._record_entry_rejection(candidate_rejections, fallback_coin, "multi_timeframe")
                                 continue
 
                             # Also check multi-timeframe if enabled
@@ -4815,13 +4825,15 @@ class MultiCoinGridController(ControllerBase):
                                 break
                             else:
                                 self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (multi-timeframe)")
+                                self._record_entry_rejection(candidate_rejections, fallback_coin, "multi_timeframe")
                         else:
-                            self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (SmartEntry)")
+                            gate = self._record_entry_rejection(candidate_rejections, fallback_coin)
+                            self.logger().debug(f"   {i}. {fallback_coin}: REJECTED ({gate})")
 
                 if not fallback_found:
-                    self.logger().warning("⚠️  No valid coin found in top 10 after SmartEntry filtering")
                     best_coin = None
-                    rejection_reason = "All top coins rejected by SmartEntry filters"
+                    rejection_reason = self._entry_rejection_reason(candidate_rejections)
+                    self.logger().warning(f"⚠️  No valid coin found in top 10: {rejection_reason}")
 
             # Phase 2.5: Apply multi-timeframe buy conditions if enabled (only if not already checked above)
             if best_coin and use_multi_timeframe and rejection_reason is None:
@@ -6009,7 +6021,7 @@ class MultiCoinGridController(ControllerBase):
 
                 # 2. SmartEntry filter
                 if not self._entry_candidate_allowed(candidate_coin):
-                    self.logger().debug("      ❌ SmartEntry filter rejected")
+                    self.logger().debug(f"      ❌ Entry gate rejected ({self._last_entry_gate_rejection})")
                     continue
 
                 # 2b. Multi-timeframe buy protection
@@ -8294,6 +8306,7 @@ class MultiCoinGridController(ControllerBase):
         minimum = Decimal(str(self.config.min_order_amount_quote)) * MIN_VIABLE_LEVELS
         if headroom >= minimum:
             return True
+        self._emit_risk_budget_denial(symbol, headroom, minimum, binding)
         if should_log(f"capital_precheck_{symbol}", interval_sec=300):
             self.logger().info(
                 f"CAPITAL PRECHECK {symbol}: {binding or 'risk'} headroom {headroom:.2f} < minimum viable "
@@ -8301,9 +8314,86 @@ class MultiCoinGridController(ControllerBase):
             )
         return False
 
+    def _note_schedule_pause(self, reason: Optional[str]) -> None:
+        """Emit one schedule_pause event per pause window (reason change); not a trade intent."""
+        previous = getattr(self, "_schedule_pause_reason", None)
+        self._schedule_pause_reason = reason
+        if reason is None or reason == previous:
+            return
+        event_logger = getattr(self, "event_logger", None)
+        if not event_logger:
+            return
+        try:
+            event_logger.emit_schedule_pause(reason=reason, connector=self.config.connector_name)
+        except Exception as e:
+            self.logger().debug(f"Failed to emit schedule pause: {e}")
+
+    def _emit_risk_budget_denial(self, symbol: str, headroom: Decimal, minimum: Decimal, binding: str) -> None:
+        """
+        Count every precheck rejection for WHY-NO-TRADE (only the text log is throttled), but at most
+        once per symbol per decision tick: primary pick, fallbacks and multi-slot may re-check a coin.
+        """
+        event_logger = getattr(self, "event_logger", None)
+        if not event_logger:
+            return
+        tick = getattr(self, "_entry_gate_tick", 0)
+        emitted = getattr(self, "_risk_budget_denial_ticks", None)
+        if emitted is None:
+            emitted = self._risk_budget_denial_ticks = {}
+        if emitted.get(symbol) == tick:
+            return
+        emitted[symbol] = tick
+        try:
+            event_logger.emit_gate_denied(
+                correlation_id=f"risk_budget_{symbol}_{tick}",
+                symbol=symbol,
+                stage=Stage.RISK,
+                reason_code=ReasonCode.INSUFFICIENT_RISK_BUDGET,
+                reason_msg=(
+                    f"{binding or 'risk'} headroom {headroom:.2f} < minimum viable {minimum:.2f} "
+                    f"{self.config.quote_asset}"
+                ),
+                metadata={
+                    "headroom_quote": float(headroom),
+                    "minimum_viable_quote": float(minimum),
+                    "binding_limit": binding or "risk",
+                },
+                connector=self.config.connector_name,
+            )
+        except Exception as e:
+            self.logger().debug(f"Failed to emit risk budget denial for {symbol}: {e}")
+
     def _entry_candidate_allowed(self, symbol: str) -> bool:
         """Selection gate: fundable within the risk budget, then the (unchanged) SmartEntry filter."""
-        return self._risk_budget_admits_slot(symbol) and self._check_smart_entry_filter(symbol)
+        if not self._risk_budget_admits_slot(symbol):
+            self._last_entry_gate_rejection = "risk_budget"
+            return False
+        if not self._check_smart_entry_filter(symbol):
+            self._last_entry_gate_rejection = "smart_entry"
+            return False
+        self._last_entry_gate_rejection = None
+        return True
+
+    def _record_entry_rejection(self, candidate_rejections: list, symbol: str, filter_name: Optional[str] = None) -> str:
+        """Append a funnel rejection; defaults to the gate that rejected the last _entry_candidate_allowed call."""
+        filter_name = filter_name or getattr(self, "_last_entry_gate_rejection", None) or "smart_entry"
+        candidate_rejections.append({"symbol": symbol, "filter": filter_name})
+        return filter_name
+
+    @staticmethod
+    def _entry_rejection_reason(candidate_rejections: list) -> str:
+        """Selection-funnel reason that names the gate(s) that actually rejected the top coins."""
+        counts: Dict[str, int] = {}
+        for rej in candidate_rejections:
+            counts[rej.get("filter", "unknown")] = counts.get(rej.get("filter", "unknown"), 0) + 1
+        if set(counts) == {"risk_budget"}:
+            return "All top coins rejected by risk budget (INSUFFICIENT_RISK_BUDGET)"
+        if set(counts) == {"smart_entry"}:
+            return "All top coins rejected by SmartEntry filters"
+        if not counts:
+            return "No eligible coin in top 10 (all skipped: active or blacklisted)"
+        detail = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
+        return f"All top coins rejected by entry filters ({detail})"
 
     def _release_capital_skipped_monitoring(self, symbol: str) -> None:
         """A coin skipped only for insufficient capital must not run into MONITORING_TIMEOUT/blacklist."""

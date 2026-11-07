@@ -368,6 +368,20 @@ class EventAggregator:
             'by_guard': guard_stats
         }
 
+    def get_schedule_pauses(self, hours: int = 24) -> List[Dict[str, any]]:
+        """
+        Schedule pause windows (time-based filter) in the last N hours.
+
+        These are not trade intents and are never part of denied/approved counts.
+        """
+        end_time = datetime.now()
+        start_time = end_time - timedelta(hours=hours)
+        return [
+            {"ts": e.get("ts"), "reason": e.get("reason", "")}
+            for e in self.read_events(start_time, end_time)
+            if e.get("event_type") == "schedule_pause"
+        ]
+
     def get_missed_opportunities(
         self,
         hours: int = 24,

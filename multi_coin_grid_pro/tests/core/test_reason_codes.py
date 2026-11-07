@@ -20,7 +20,7 @@ class TestReasonCodes(unittest.TestCase):
     def test_reason_code_count(self):
         """Verify we have exactly 53 rejection codes (includes Phase 2 momentum codes)"""
         codes = list(ReasonCode)
-        self.assertEqual(len(codes), 54, f"Expected 54 codes, got {len(codes)}")
+        self.assertEqual(len(codes), 55, f"Expected 55 codes, got {len(codes)}")
 
         # Verify no APPROVED code exists
         code_values = [code.value for code in codes]

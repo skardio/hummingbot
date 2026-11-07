@@ -69,13 +69,14 @@ class ReasonCode(str, Enum):
     MTF_INSUFFICIENT = "MTF_INSUFFICIENT"
     MTF_CRASH_DETECTED = "MTF_CRASH_DETECTED"
 
-    # ===== RISK (6 codes) =====
+    # ===== RISK (7 codes) =====
     EXPOSURE_LIMIT = "EXPOSURE_LIMIT"
     DAILY_LOSS_LIMIT = "DAILY_LOSS_LIMIT"
     COOLDOWN_EXIT = "COOLDOWN_EXIT"
     COOLDOWN_SWITCH = "COOLDOWN_SWITCH"
     COOLDOWN_LOSS_STREAK = "COOLDOWN_LOSS_STREAK"
     POSITION_LIMIT = "POSITION_LIMIT"
+    INSUFFICIENT_RISK_BUDGET = "INSUFFICIENT_RISK_BUDGET"  # Risk headroom below minimum viable grid
 
     # ===== EXECUTION (7 codes) =====
     BLACKLIST = "BLACKLIST"
@@ -139,7 +140,7 @@ def get_stage_for_reason(reason: ReasonCode) -> Stage:
     risk_codes = {
         ReasonCode.EXPOSURE_LIMIT, ReasonCode.DAILY_LOSS_LIMIT,
         ReasonCode.COOLDOWN_EXIT, ReasonCode.COOLDOWN_SWITCH, ReasonCode.COOLDOWN_LOSS_STREAK,
-        ReasonCode.POSITION_LIMIT,
+        ReasonCode.POSITION_LIMIT, ReasonCode.INSUFFICIENT_RISK_BUDGET,
     }
     edge_gate_codes = {ReasonCode.EDGE_GATE_REJECTED}
     execution_codes = {
