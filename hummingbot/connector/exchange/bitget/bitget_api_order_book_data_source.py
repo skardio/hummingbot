@@ -43,6 +43,7 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._v3_diagnostic_at = 0.0
         self._v3_success_pairs: set[str] = set()
         self._v3_last_failure = ""
+        self._route_probe_failures: Dict[str, str] = {}
 
     def requires_v3_order_book(self, trading_pair: str) -> bool:
         return trading_pair in self._v3_pairs
@@ -59,8 +60,35 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
             try:
                 await self._request_order_book_snapshot(trading_pair)
             except (IOError, KeyError, ValueError) as exc:
+                self._route_probe_failures[trading_pair] = self._route_probe_failure_reason(exc)
                 self.logger().debug("Bitget order book route unknown for %s: %s", trading_pair, exc)
-        return self.order_book_route(trading_pair)
+        route = self.order_book_route(trading_pair)
+        if route is not None:
+            self._route_probe_failures.pop(trading_pair, None)
+        return route
+
+    def _route_probe_failure_reason(self, exc: Exception) -> str:
+        message = str(exc)
+        if "in backoff" in message:
+            if self._time() < self._snapshot_rate_limit_until:
+                return "shared_rate_limit_backoff"
+            return "pair_error_backoff"
+        if "429" in message or "rate limited" in message:
+            return "http_429"
+        if "timeout" in message.lower() or isinstance(exc, asyncio.TimeoutError):
+            return "timeout"
+        if "request failed" in message:
+            return "http_error"
+        return type(exc).__name__
+
+    def route_probe_failure_summary(self, trading_pairs: List[str]) -> Dict[str, int]:
+        """Count the last probe failure reason of the given still-unproven pairs."""
+        summary: Dict[str, int] = {}
+        for pair in trading_pairs:
+            if self.order_book_route(pair) is None:
+                reason = self._route_probe_failures.get(pair, "unknown")
+                summary[reason] = summary.get(reason, 0) + 1
+        return summary
 
     def _log_v3_refresh_summary(self) -> None:
         now = self._time()

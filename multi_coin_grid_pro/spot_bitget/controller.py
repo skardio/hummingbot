@@ -126,7 +126,8 @@ class SpotGridBitgetController(MultiCoinGridController):
             return
         protected = set(self._bounded_monitored_coins([]))
         need = self.config.max_coins_to_monitor - len(protected)
-        ordered = [pair for pair in dict.fromkeys(candidates) if pair not in protected]
+        blacklist = self._monitoring_blacklist()
+        ordered = [pair for pair in dict.fromkeys(candidates) if pair not in protected and pair not in blacklist]
         budget = CONSTANTS.ORDERBOOK_ROUTE_PROBE_LIMIT
         while need > 0 and budget > 0:
             filled, pending = 0, []
@@ -145,7 +146,8 @@ class SpotGridBitgetController(MultiCoinGridController):
             routes = await asyncio.gather(*(source.classify_order_book_route(pair) for pair in batch))
             if not any(routes):
                 self.logger().warning(
-                    "[MONITORING] order-book route unknown for %s candidates; left out of live pool", len(batch))
+                    "[MONITORING] order-book route unknown for %s candidates; left out of live pool; reasons=%s",
+                    len(batch), source.route_probe_failure_summary(batch))
                 return
 
     def _check_smart_entry_filter(self, symbol: str) -> bool:

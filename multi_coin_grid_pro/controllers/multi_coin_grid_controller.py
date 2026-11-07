@@ -3591,14 +3591,14 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().error(f"❌ EXCEPTION during DIRECT discovery: {e}")
                     import traceback
                     self.logger().error(traceback.format_exc())
-                    # Use fallback list on error (use - format, not / format)
-                    self.monitored_coins = [
+                    # Use fallback list on error (use - format, not / format); same pool admission as discovery
+                    self.monitored_coins = self._bounded_monitored_coins([
                         f"XRP-{self.config.quote_asset}",
                         f"ADA-{self.config.quote_asset}",
                         f"DOT-{self.config.quote_asset}",
                         f"SOL-{self.config.quote_asset}",
                         f"LINK-{self.config.quote_asset}",
-                    ]
+                    ])
                     self.logger().warning(f"⚠️  Using emergency fallback: {self.monitored_coins}")
 
                 # PHASE 2.6: Load historical data from Kraken after coin discovery
@@ -3968,6 +3968,16 @@ class MultiCoinGridController(ControllerBase):
         """Connector-specific hook: False keeps an unprotected pair out of the monitoring pool."""
         return True
 
+    def _monitoring_blacklist(self) -> set:
+        """Effective (global + connector) blacklist, as applied by the initial discovery."""
+        config = self.config
+        if hasattr(config, 'get_effective_blacklist'):
+            return set(config.get_effective_blacklist(config.connector_name) or [])
+        return set(getattr(config, 'blacklist', None) or [])
+
+    def _optional_monitoring_pair_allowed(self, pair: str, blacklist: set) -> bool:
+        return pair not in blacklist and self._monitoring_market_supported(pair)
+
     async def _prepare_monitoring_candidates(self, candidates: List[str]) -> None:
         """Connector-specific hook: classify candidates before the pool is bounded."""
         return None
@@ -3975,7 +3985,8 @@ class MultiCoinGridController(ControllerBase):
     async def _resync_monitoring_pool(self) -> None:
         """Replace unsupported, unprotected monitored pairs with the next ranked supported candidates."""
         current = list(self.monitored_coins)
-        if all(self._monitoring_market_supported(pair) for pair in current):
+        blacklist = self._monitoring_blacklist()
+        if all(self._optional_monitoring_pair_allowed(pair, blacklist) for pair in current):
             return
         pool_candidates = current + list(getattr(self, '_monitoring_candidates', []))
         await self._prepare_monitoring_candidates(pool_candidates)
@@ -4018,8 +4029,10 @@ class MultiCoinGridController(ControllerBase):
                 protected.add(pair)
         result = sorted(protected)
         limit = max(self.config.max_coins_to_monitor, len(result))
+        blacklist = self._monitoring_blacklist()
         for pair in candidates:
-            if pair not in result and len(result) < limit and self._monitoring_market_supported(pair):
+            if (pair not in result and len(result) < limit
+                    and self._optional_monitoring_pair_allowed(pair, blacklist)):
                 result.append(pair)
         if len(protected) > self.config.max_coins_to_monitor:
             self.logger().warning(
@@ -4674,7 +4687,8 @@ class MultiCoinGridController(ControllerBase):
             ):
                 quote = self.config.quote_asset
                 btc_pair = f"BTC-{quote}"
-                btc_trend_obj = self.trend_calculator.trends.get(btc_pair)
+                # BTC may be tracked only as macro pair (outside the monitoring pool).
+                btc_trend_obj = self._get_macro_trend(btc_pair)
                 coin_trend_obj = self.trend_calculator.trends.get(best_coin)
                 if btc_trend_obj is not None and coin_trend_obj is not None:
                     btc_24h = float(getattr(btc_trend_obj, 'trend_1440m', 0.0) or 0.0)

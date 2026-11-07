@@ -92,6 +92,8 @@ def route_source(v3=(), v2=(), truth=None, fail=False):
     """Real data source whose snapshot negotiation is replaced by a deterministic route oracle."""
     source = object.__new__(BitgetAPIOrderBookDataSource)
     source._v3_pairs, source._v2_pairs = set(v3), set(v2)
+    source._route_probe_failures = {}
+    source._snapshot_rate_limit_until = 0.0
 
     async def negotiate(pair):
         if fail:
@@ -178,3 +180,67 @@ async def test_paper_mode_does_not_probe_and_keeps_existing_pool_behaviour():
     controller = pool_controller(source, paper=True)
     assert await build_pool(controller, TOP30_V3 + NORMALS) == TOP30_V3[:3]
     source._request_order_book_snapshot.assert_not_awaited()
+
+
+def blacklisted_pool_controller(source, blacklist, max_coins=3):
+    controller = pool_controller(source, max_coins=max_coins)
+    controller.config = SpotGridBitgetConfig(max_coins_to_monitor=max_coins, blacklist=list(blacklist))
+    return controller
+
+
+@pytest.mark.asyncio
+async def test_blacklisted_v2_pairs_are_not_probed_nor_fill_live_slots():
+    source = route_source(v2={"BTC-USDT"})
+    controller = blacklisted_pool_controller(source, ["BTC-USDT", "N0-USDT"])
+    pool = await build_pool(controller, ["BTC-USDT"] + TOP30_V3[:2] + NORMALS)
+    assert pool == NORMALS[1:4]  # freed slots go to the next admissible pairs
+    probed = [c.args[0] for c in source._request_order_book_snapshot.await_args_list]
+    assert "BTC-USDT" not in probed and "N0-USDT" not in probed
+
+
+@pytest.mark.asyncio
+async def test_blacklisted_protected_executor_and_exposure_stay_monitored():
+    source = route_source(v2={"BTC-USDT", "ETH-USDT"})
+    controller = blacklisted_pool_controller(source, ["BTC-USDT", "ETH-USDT"])
+    controller.current_exposure_per_coin = {"ETH-USDT": Decimal("5")}
+    controller.executors_info = [SimpleNamespace(is_done=False, trading_pair="BTC-USDT")]
+    assert await build_pool(controller, NORMALS) == ["BTC-USDT", "ETH-USDT", NORMALS[0]]
+
+
+@pytest.mark.asyncio
+async def test_pool_stays_smaller_than_limit_without_enough_admissible_pairs():
+    source = route_source(v2={"BTC-USDT"})
+    controller = blacklisted_pool_controller(source, ["BTC-USDT"], max_coins=30)
+    assert await build_pool(controller, ["BTC-USDT"] + TOP30_V3 + NORMALS[:2]) == NORMALS[:2]
+
+
+@pytest.mark.asyncio
+async def test_failed_probe_batch_reports_reasons():
+    source = route_source(fail=True)
+    controller = pool_controller(source)
+    await build_pool(controller, NORMALS)
+    args = controller.logger().warning.call_args.args
+    assert "reasons=" in args[0] and args[-1] == {"http_429": 3}
+
+
+@pytest.mark.parametrize("message, rate_limited, expected", [
+    ("Bitget order book request in backoff for X-USDT", True, "shared_rate_limit_backoff"),
+    ("Bitget order book request in backoff for X-USDT", False, "pair_error_backoff"),
+    ("Bitget order book HTTP 429 for X-USDT", False, "http_429"),
+    ("Bitget order book rate limited for X-USDT", False, "http_429"),
+    ("Bitget order book request failed for X-USDT: HTTP 500, {}", False, "http_error"),
+    ("Invalid Bitget order book JSON for X-USDT", False, "OSError"),
+])
+def test_route_probe_failure_reason_distinguishes_shared_backoff(message, rate_limited, expected):
+    source = route_source()
+    source._time = MagicMock(return_value=100.0)
+    source._snapshot_rate_limit_until = 130.0 if rate_limited else 0.0
+    assert source._route_probe_failure_reason(IOError(message)) == expected
+
+
+@pytest.mark.asyncio
+async def test_route_probe_failure_is_cleared_after_success():
+    source = route_source()
+    source._route_probe_failures["N0-USDT"] = "http_429"
+    assert await source.classify_order_book_route("N0-USDT") == "v2"
+    assert source.route_probe_failure_summary(["N0-USDT"]) == {}
