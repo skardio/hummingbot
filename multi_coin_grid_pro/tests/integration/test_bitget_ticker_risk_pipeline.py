@@ -222,3 +222,123 @@ def test_full_data_count_excludes_cached_unmonitored_and_insufficient_pairs():
     assert controller._monitored_coins_with_full_data() == 1
     controller.monitored_coins.append("MISSING-USDT")
     assert controller._monitored_coins_with_full_data() == 1
+
+
+V3_TOP = ["rA-USDT", "rB-USDT", "rC-USDT"]
+NORMAL = ["AAA-USDT", "BBB-USDT", "CCC-USDT"]
+
+
+def v3_aware_controller(v3_pairs, max_coins=2):
+    """Routes stay unknown (not admissible) until the pool route awaits candidate classification."""
+    controller = bare_controller()
+    controller.config.max_coins_to_monitor = max_coins
+    controller.routes = {}
+
+    async def classify(candidates):
+        for pair in candidates:
+            controller.routes.setdefault(pair, "v3" if pair in v3_pairs else "v2")
+
+    controller._prepare_monitoring_candidates = AsyncMock(side_effect=classify)
+    controller._monitoring_market_supported = lambda pair: controller.routes.get(pair) == "v2"
+    controller._subscribe_to_orderbook = MagicMock()
+    controller._unsubscribe_from_orderbook = MagicMock()
+    return controller
+
+
+async def run_initial_discovery(controller):
+    pairs = V3_TOP + NORMAL
+    controller.config.use_dynamic_pair_discovery = True
+    controller.config.manual_trading_pairs = None
+    controller.config.min_24h_volume_usdt = 0
+    controller.config.min_24h_volume_eur = 0
+    controller.config.get_effective_blacklist = lambda _name: []
+    controller.connector = SimpleNamespace(
+        trading_pair_symbol_map_ready=lambda: True,
+        trading_pair_symbol_map=AsyncMock(return_value={pair.replace("-", ""): pair for pair in pairs}),
+    )
+
+    async def call(func, *args):
+        return await func(*args)
+
+    controller._api_call_with_error_handling = call
+    controller._get_ticker_data_safe = AsyncMock(return_value={
+        normalize_bitget_pair(pair): {"a": ["1.001"], "b": ["1.0"]} for pair in pairs
+    })
+    controller._ticker_pair_metrics = MagicMock(return_value=({p: 1000 - i for i, p in enumerate(pairs)}, {}))
+    controller.coin_discovery_refresh_interval = 0
+    try:
+        await controller.update_processed_data()
+    except Exception:
+        pass  # only the discovery prefix is under test; later stages need a full controller
+
+
+@pytest.mark.asyncio
+async def test_initial_discovery_classifies_v3_top_before_admission_and_uses_pairs_outside_top_n():
+    controller = v3_aware_controller(set(V3_TOP))
+    await run_initial_discovery(controller)
+    assert controller.monitored_coins == ["AAA-USDT", "BBB-USDT"]
+    controller._prepare_monitoring_candidates.assert_awaited_once_with(V3_TOP + NORMAL)
+    controller._unsubscribe_from_orderbook.assert_not_called()  # r-pairs never entered the pool
+
+
+@pytest.mark.asyncio
+async def test_v2_pair_that_later_requires_v3_is_replaced_after_orderbook_classification():
+    controller = v3_aware_controller(set())
+    await run_initial_discovery(controller)
+    assert controller.monitored_coins == ["rA-USDT", "rB-USDT"]
+
+    controller.routes.update(dict.fromkeys(V3_TOP, "v3"))  # later 40502 learned by the data source
+    tracker = SimpleNamespace(
+        _initial_order_book_for_trading_pair=AsyncMock(side_effect=IOError("Crossed order book")),
+        _trading_pairs=["rA-USDT", "rB-USDT"], _order_books={}, _data_source=None,
+    )
+    await controller._initialize_orderbook("rA-USDT", tracker)
+    assert controller.monitored_coins == ["AAA-USDT", "BBB-USDT"]
+    assert {c.args[0] for c in controller._unsubscribe_from_orderbook.call_args_list} == {"rA-USDT", "rB-USDT"}
+    assert {"AAA-USDT", "BBB-USDT"} <= {c.args[0] for c in controller._subscribe_to_orderbook.call_args_list}
+
+
+@pytest.mark.asyncio
+async def test_book_unsubscribed_during_initialization_is_discarded():
+    controller = v3_aware_controller(set())
+    controller.monitored_coins = ["AAA-USDT"]
+    tracker = SimpleNamespace(
+        _initial_order_book_for_trading_pair=AsyncMock(return_value=MagicMock()),
+        _trading_pairs=[], _order_books={}, _data_source=None,
+    )
+    await controller._initialize_orderbook("rA-USDT", tracker)
+    assert tracker._order_books == {}
+
+
+@pytest.mark.asyncio
+async def test_pool_refresh_excludes_v3_but_keeps_protected_exposure():
+    controller = v3_aware_controller(set(V3_TOP), max_coins=3)
+    controller._update_monitored_coins_from_pool = MultiCoinGridController._update_monitored_coins_from_pool.__get__(
+        controller)
+    controller.config.min_24h_volume_usdt = 0
+    controller.config.min_24h_volume_eur = 0
+    controller.config.pool_membership_cooldown_seconds = 0
+    controller.config.get_effective_blacklist = lambda _name: []
+    controller.monitored_coins = ["rA-USDT", "rC-USDT"]
+    controller.current_exposure_per_coin = {"rC-USDT": Decimal("5")}
+    pairs = V3_TOP + NORMAL
+    await controller._update_monitored_coins_from_pool(
+        {p: 1000 - i for i, p in enumerate(pairs)}, {p: 0.001 for p in pairs})
+    assert controller.monitored_coins == ["rC-USDT", "AAA-USDT", "BBB-USDT"]
+    controller._unsubscribe_from_orderbook.assert_called_once_with("rA-USDT")
+    controller._prepare_monitoring_candidates.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_dynamic_scan_backfills_v3_top_from_ranked_candidates_and_keeps_executor():
+    controller = v3_aware_controller(set(V3_TOP))
+    controller.monitored_coins = ["rA-USDT"]
+    controller.executors_info = [SimpleNamespace(is_done=False, trading_pair="rB-USDT")]
+    controller.dynamic_pair_manager = SimpleNamespace(
+        all_pairs={}, full_scan=AsyncMock(return_value=1), candidate_pairs=["AAA-USDT", "BBB-USDT"],
+        _select_best_pairs=MagicMock(return_value={"rA-USDT", "rB-USDT"}),
+    )
+    await controller._run_dynamic_pair_scan()
+    assert controller.monitored_coins == ["rB-USDT", "AAA-USDT"]
+    controller._unsubscribe_from_orderbook.assert_called_once_with("rA-USDT")
+    controller._prepare_monitoring_candidates.assert_awaited_once()

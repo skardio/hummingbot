@@ -32,6 +32,7 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._api_factory: WebAssistantsFactory = api_factory
         self._ping_task: Optional[asyncio.Task] = None
         self._v3_pairs: set[str] = set()
+        self._v2_pairs: set[str] = set()
         self._v3_books: Dict[str, OrderBook] = {}
         self._v3_books_ready = asyncio.Event()
         self._snapshot_retry_at: Dict[str, float] = {}
@@ -45,6 +46,21 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     def requires_v3_order_book(self, trading_pair: str) -> bool:
         return trading_pair in self._v3_pairs
+
+    def order_book_route(self, trading_pair: str) -> Optional[str]:
+        """Route proven for this session: v3 after a 40502, v2 after a valid V2 response, else None."""
+        if trading_pair in self._v3_pairs:
+            return "v3"
+        return "v2" if trading_pair in self._v2_pairs else None
+
+    async def classify_order_book_route(self, trading_pair: str) -> Optional[str]:
+        """Learn the route through the normal snapshot negotiation; failures leave it unproven."""
+        if self.order_book_route(trading_pair) is None:
+            try:
+                await self._request_order_book_snapshot(trading_pair)
+            except (IOError, KeyError, ValueError) as exc:
+                self.logger().debug("Bitget order book route unknown for %s: %s", trading_pair, exc)
+        return self.order_book_route(trading_pair)
 
     def _log_v3_refresh_summary(self) -> None:
         now = self._time()
@@ -373,6 +389,8 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 if not isinstance(depth, dict):
                     raise IOError(f"Invalid Bitget V3 order book data for {trading_pair}")
                 data = {**data, "data": {"bids": depth.get("b"), "asks": depth.get("a"), "ts": depth.get("ts")}}
+            else:
+                self._v2_pairs.add(trading_pair)
             return data
         raise IOError(f"Bitget order book version negotiation failed for {trading_pair}")
 

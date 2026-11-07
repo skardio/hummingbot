@@ -3550,7 +3550,9 @@ class MultiCoinGridController(ControllerBase):
                             f"  {i:2}. {pair:15} | Volume: €{vol:>12,.0f} | Spread: {spread * 100:>5.3f}%"
                         )
                     self.logger().info("=" * 80)
-                    self.monitored_coins = [pair for pair, vol, spread in spread_checked_pairs[:max_coins]]
+                    self._monitoring_candidates = [pair for pair, _, _ in spread_checked_pairs]
+                    await self._prepare_monitoring_candidates(self._monitoring_candidates)
+                    self.monitored_coins = self._bounded_monitored_coins(self._monitoring_candidates)
 
                     self.logger().info(
                         f"✅ All {len(self.monitored_coins)} selected coins by 24h volume and spread < 0.5%:")
@@ -3962,6 +3964,44 @@ class MultiCoinGridController(ControllerBase):
             import traceback
             self.logger().error(traceback.format_exc())
 
+    def _monitoring_market_supported(self, pair: str) -> bool:
+        """Connector-specific hook: False keeps an unprotected pair out of the monitoring pool."""
+        return True
+
+    async def _prepare_monitoring_candidates(self, candidates: List[str]) -> None:
+        """Connector-specific hook: classify candidates before the pool is bounded."""
+        return None
+
+    async def _resync_monitoring_pool(self) -> None:
+        """Replace unsupported, unprotected monitored pairs with the next ranked supported candidates."""
+        current = list(self.monitored_coins)
+        if all(self._monitoring_market_supported(pair) for pair in current):
+            return
+        pool_candidates = current + list(getattr(self, '_monitoring_candidates', []))
+        await self._prepare_monitoring_candidates(pool_candidates)
+        new_monitored = self._bounded_monitored_coins(pool_candidates)
+        if list(self.monitored_coins) != current:
+            return  # another pool update ran while candidates were classified
+        removed = [pair for pair in current if pair not in new_monitored]
+        added = [pair for pair in new_monitored if pair not in current]
+        if not removed:
+            return
+        self.monitored_coins = new_monitored
+        join_times = getattr(self, '_pool_join_time', None)
+        now = self.market_data_provider.time()
+        for pair in removed:
+            if join_times is not None:
+                join_times.pop(pair, None)
+            self._unsubscribe_from_orderbook(pair)
+        for pair in added:
+            if join_times is not None:
+                join_times[pair] = now
+            self._subscribe_to_orderbook(pair)
+        self.logger().warning(
+            "[MONITORING] replaced %s unsupported pairs %s with %s",
+            len(removed), removed[:5], added[:5],
+        )
+
     def _bounded_monitored_coins(self, candidates: List[str]) -> List[str]:
         protected = set(self.active_coins)
         protected.update(
@@ -3979,7 +4019,7 @@ class MultiCoinGridController(ControllerBase):
         result = sorted(protected)
         limit = max(self.config.max_coins_to_monitor, len(result))
         for pair in candidates:
-            if pair not in result and len(result) < limit:
+            if pair not in result and len(result) < limit and self._monitoring_market_supported(pair):
                 result.append(pair)
         if len(protected) > self.config.max_coins_to_monitor:
             self.logger().warning(
@@ -4059,8 +4099,10 @@ class MultiCoinGridController(ControllerBase):
                 # Coin can be removed
 
             # Build new monitored list: kept coins first, then fill from candidates
+            self._monitoring_candidates = [pair for pair, _, _ in candidates]
+            await self._prepare_monitoring_candidates(kept_coins + self._monitoring_candidates)
             new_monitored = self._bounded_monitored_coins(
-                kept_coins + [pair for pair, _, _ in candidates]
+                kept_coins + self._monitoring_candidates
             )
 
             # Check if list changed
@@ -7913,16 +7955,16 @@ class MultiCoinGridController(ControllerBase):
             except (KeyError, ValueError):
                 mid = Decimal("NaN")
             if not mid.is_finite() or mid <= 0:
-                calculator = self.trend_calculator
-                # Only reuse ticker observations fetched by this exact exchange connector.
+                calculator = self._startup_ticker_cache()
                 cached = (
                     calculator._last_price_cache.get(pair)
-                    if calculator is not None
-                    and calculator.connector is connector
-                    and (calculator.base_connector is None or calculator.base_connector is connector)
-                    and getattr(rule, "trading_pair", None) == pair
+                    if calculator is not None and getattr(rule, "trading_pair", None) == pair
                     else None
                 )
+                if calculator is not None and getattr(rule, "trading_pair", None) == pair:
+                    if not hasattr(self, "_startup_price_pairs"):
+                        self._startup_price_pairs = set()
+                    self._startup_price_pairs.add(pair)
                 if cached is not None:
                     price, fetched_at = cached
                     now = self.market_data_provider.time()
@@ -7953,6 +7995,43 @@ class MultiCoinGridController(ControllerBase):
                 reason=f"classification_error_{type(exc).__name__}", is_material=True,
             )
             return None
+
+    def _startup_ticker_cache(self):
+        """Trend-calculator ticker cache, only when it is filled by this exact exchange connector."""
+        calculator = getattr(self, "trend_calculator", None)
+        connector = self.connector
+        if (calculator is None or calculator.connector is not connector
+                or (calculator.base_connector is not None and calculator.base_connector is not connector)):
+            return None
+        return calculator
+
+    def _request_startup_inventory_prices(self) -> None:
+        """Bitget only: schedule one all-tickers lookup for wallet assets without a usable price."""
+        pairs = getattr(self, "_startup_price_pairs", set())
+        if (not pairs or self.config.connector_name != "bitget"
+                or getattr(self, "_startup_price_task", None) is not None):
+            return
+        self._startup_price_task = safe_ensure_future(self._refresh_startup_inventory_prices())
+
+    async def _refresh_startup_inventory_prices(self) -> None:
+        pairs: List[str] = []
+        try:
+            pairs = sorted(getattr(self, "_startup_price_pairs", set()))
+            self._startup_price_pairs = set()
+            calculator = self._startup_ticker_cache()
+            if not pairs or calculator is None:
+                return
+            prices = await self.connector.get_last_traded_prices(pairs)
+            calculator._cache_prices({pair: prices[pair] for pair in pairs if pair in (prices or {})})
+            if any(pair in calculator._last_price_cache for pair in pairs):
+                # Re-evaluate on the next tick while the fetched price is still fresh.
+                self._last_startup_check_ts = float("-inf")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.logger().warning(f"[STARTUP_RECONCILE] ticker lookup failed for {pairs}: {exc}")
+        finally:
+            self._startup_price_task = None
 
     def _find_untracked_exposure(self) -> List[str]:
         """Reasons why the exchange account holds exposure that no executor of this run owns."""
@@ -8000,6 +8079,7 @@ class MultiCoinGridController(ControllerBase):
         self._last_startup_check_ts = now
         reasons = self._find_untracked_exposure()
         if reasons:
+            self._request_startup_inventory_prices()
             self._startup_block_reason = "; ".join(reasons)
             if should_log("startup_reconcile_block", interval_sec=300):
                 self.logger().critical(
@@ -8490,9 +8570,12 @@ class MultiCoinGridController(ControllerBase):
                     pair for pair in self.monitored_coins
                     if cooldown > 0 and now - join_times.get(pair, now) < cooldown
                 ]
-                new_monitored = self._bounded_monitored_coins(
-                    cooling_pairs + ranked_pairs + self.monitored_coins
+                self._monitoring_candidates = ranked_pairs + list(
+                    getattr(self.dynamic_pair_manager, 'candidate_pairs', None) or []
                 )
+                pool_candidates = cooling_pairs + ranked_pairs + self.monitored_coins + self._monitoring_candidates
+                await self._prepare_monitoring_candidates(pool_candidates)
+                new_monitored = self._bounded_monitored_coins(pool_candidates)
                 new_pairs = set(new_monitored) - current_monitored
                 dropped_pairs = current_monitored - set(new_monitored)
 
@@ -10344,6 +10427,9 @@ class MultiCoinGridController(ControllerBase):
             # Request initial snapshot
             order_book = await tracker._initial_order_book_for_trading_pair(symbol)
 
+            if order_book and symbol not in getattr(tracker, '_trading_pairs', [symbol]):
+                self.logger().info(f"[ORDERBOOK] {symbol} was unsubscribed during initialization; discarded")
+                return
             if order_book:
                 tracker._order_books[symbol] = order_book
                 self.logger().info(f"[ORDERBOOK] ✅ Initialized orderbook for {symbol}")
@@ -10367,6 +10453,8 @@ class MultiCoinGridController(ControllerBase):
             self.logger().error(f"[ORDERBOOK] Error initializing {symbol}: {e}")
             import traceback
             self.logger().debug(traceback.format_exc())
+        if symbol in self.monitored_coins and not self._monitoring_market_supported(symbol):
+            await self._resync_monitoring_pool()
 
     def _unsubscribe_from_orderbook(self, symbol: str) -> None:
         """Unsubscribe from orderbook updates for a trading pair."""

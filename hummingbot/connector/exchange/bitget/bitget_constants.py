@@ -40,6 +40,8 @@ ORDERBOOK_V3_REFRESH_SECONDS = 5.0
 ORDERBOOK_V3_DIAGNOSTIC_SECONDS = 60.0
 ORDERBOOK_SNAPSHOT_TIMEOUT_SECONDS = 10.0
 ORDERBOOK_ERROR_BACKOFF_SECONDS = 30.0
+# Max order-book route probes per monitoring-pool build (V2 vs V3-only classification).
+ORDERBOOK_ROUTE_PROBE_LIMIT = 100
 PUBLIC_SYMBOLS_ENDPOINT = "/api/v2/spot/public/symbols"
 PUBLIC_TICKERS_ENDPOINT = "/api/v2/spot/market/tickers"
 PUBLIC_TIME_ENDPOINT = "/api/v2/public/time"

@@ -1,7 +1,7 @@
 """Regression tests: final-size exposure guard, risk equity, restart reconciliation, stale exposure."""
 from datetime import datetime
 from decimal import Decimal
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -10,6 +10,9 @@ from hummingbot.strategy_v2.models.base import RunnableStatus
 from multi_coin_grid_pro.controllers.multi_coin_grid_config import MultiCoinGridConfig
 from multi_coin_grid_pro.controllers.multi_coin_grid_controller import MultiCoinGridController
 from multi_coin_grid_pro.risk.professional_risk_manager import PortfolioRisk
+from multi_coin_grid_pro.utils.trend_calculator import TrendCalculator
+
+CONTROLLER = "multi_coin_grid_pro.controllers.multi_coin_grid_controller"
 
 D = Decimal
 
@@ -340,34 +343,38 @@ class TestStartupReconciliation:
         ctrl.time_based_filter.check_trading_permission.assert_not_called()
 
 
+def startup_valuation_controller():
+    ctrl = MultiCoinGridController.__new__(MultiCoinGridController)
+    ctrl.config = SimpleNamespace(
+        connector_name="bitget", quote_asset="USDT", max_price_age_ms=35000,
+        startup_reconcile_enabled=True, startup_reconcile_ack_assets=[],
+        startup_reconcile_ack_locked_quote=D("0"),
+        startup_reconcile_locked_tolerance_quote=D("1"),
+    )
+    ctrl.connector = FakeConnector(
+        balances={"USDT": 1000, "BGB": "0.47669034"},
+        rules={"BGB-USDT": SimpleNamespace(
+            trading_pair="BGB-USDT", min_order_size=D("0.0001"), min_notional_size=D("1"))},
+    )
+    ctrl.connector.get_mid_price = Mock(side_effect=ValueError("No order book exists"))
+    ctrl.trend_calculator = SimpleNamespace(
+        connector=ctrl.connector, base_connector=None,
+        _last_price_cache={"BGB-USDT": (1.74, 990.0)},
+    )
+    ctrl.market_data_provider = SimpleNamespace(time=lambda: 1000.0)
+    ctrl.active_coins = {}
+    ctrl.budget_allocator = SimpleNamespace(total_reserved=D("0"))
+    ctrl._startup_reconciled = False
+    ctrl._startup_block_reason = ""
+    ctrl._last_startup_check_ts = 0.0
+    ctrl._log_startup_inventory_classification = Mock()
+    return ctrl
+
+
 class TestStartupTickerValuation:
     @pytest.fixture
     def ctrl(self):
-        ctrl = MultiCoinGridController.__new__(MultiCoinGridController)
-        ctrl.config = SimpleNamespace(
-            connector_name="bitget", quote_asset="USDT", max_price_age_ms=35000,
-            startup_reconcile_enabled=True, startup_reconcile_ack_assets=[],
-            startup_reconcile_ack_locked_quote=D("0"),
-            startup_reconcile_locked_tolerance_quote=D("1"),
-        )
-        ctrl.connector = FakeConnector(
-            balances={"USDT": 1000, "BGB": "0.47669034"},
-            rules={"BGB-USDT": SimpleNamespace(
-                trading_pair="BGB-USDT", min_order_size=D("0.0001"), min_notional_size=D("1"))},
-        )
-        ctrl.connector.get_mid_price = Mock(side_effect=ValueError("No order book exists"))
-        ctrl.trend_calculator = SimpleNamespace(
-            connector=ctrl.connector, base_connector=None,
-            _last_price_cache={"BGB-USDT": (1.74, 990.0)},
-        )
-        ctrl.market_data_provider = SimpleNamespace(time=lambda: 1000.0)
-        ctrl.active_coins = {}
-        ctrl.budget_allocator = SimpleNamespace(total_reserved=D("0"))
-        ctrl._startup_reconciled = False
-        ctrl._startup_block_reason = ""
-        ctrl._last_startup_check_ts = 0.0
-        ctrl._log_startup_inventory_classification = Mock()
-        return ctrl
+        return startup_valuation_controller()
 
     def test_bgb_dust_uses_fresh_same_exchange_ticker(self, ctrl):
         assert ctrl._asset_inventory_quote("BGB") == D("0")
@@ -445,6 +452,77 @@ class TestStartupTickerValuation:
     def test_invalid_mid_uses_validated_ticker(self, ctrl):
         ctrl.connector.get_mid_price = Mock(return_value=D("NaN"))
         assert ctrl._startup_exposure_gate() is True
+
+
+class TestStartupTickerLookupOutsidePool:
+    """Wallet assets are valued via a bounded Bitget ticker lookup, independent of monitored_coins."""
+
+    @pytest.fixture
+    def ctrl(self):
+        ctrl = startup_valuation_controller()
+        ctrl.monitored_coins = ["ETH-USDT"]
+        calculator = ctrl.trend_calculator
+        calculator._last_price_cache = {}
+        calculator._cache_prices = MethodType(TrendCalculator._cache_prices, calculator)
+        ctrl.connector.get_last_traded_prices = AsyncMock(return_value={"BGB-USDT": 1.74})
+        return ctrl
+
+    async def _block_then_lookup(self, ctrl, wall_clock=995.0):
+        scheduled = []
+        with patch(f"{CONTROLLER}.safe_ensure_future", side_effect=lambda coro: scheduled.append(coro) or coro):
+            assert ctrl._startup_exposure_gate() is False
+        assert len(scheduled) == 1
+        with patch("multi_coin_grid_pro.utils.trend_calculator.time.time", return_value=wall_clock):
+            await scheduled[0]
+        assert ctrl._startup_price_task is None
+
+    @pytest.mark.asyncio
+    async def test_bgb_dust_outside_pool_unblocks_after_lookup(self, ctrl):
+        await self._block_then_lookup(ctrl)
+        ctrl.connector.get_last_traded_prices.assert_awaited_once_with(["BGB-USDT"])
+        assert ctrl._startup_exposure_gate() is True
+
+    @pytest.mark.asyncio
+    async def test_material_btc_outside_pool_stays_blocked(self, ctrl):
+        ctrl.connector.balances = {"USDT": D("1000"), "BTC": D("0.01")}
+        ctrl.connector.trading_rules = {"BTC-USDT": SimpleNamespace(
+            trading_pair="BTC-USDT", min_order_size=D("0.00001"), min_notional_size=D("5"))}
+        ctrl.connector.get_last_traded_prices = AsyncMock(return_value={"BTC-USDT": 70000.0})
+        await self._block_then_lookup(ctrl)
+        assert ctrl._startup_exposure_gate() is False
+        assert "BTC: ~700.00 USDT" in ctrl._startup_block_reason
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("prices", [{}, {"BGB-USDT": 0}, {"BGB-USDT": -1}, {"BGB-USDT": float("nan")},
+                                        {"BGB-USDT": float("inf")}, {"BGB-USDT": "invalid"}, {"BGB-USD": 1.74}])
+    async def test_missing_or_invalid_ticker_stays_blocked(self, ctrl, prices):
+        ctrl.connector.get_last_traded_prices = AsyncMock(return_value=prices)
+        await self._block_then_lookup(ctrl)
+        assert ctrl._startup_exposure_gate() is False
+
+    @pytest.mark.asyncio
+    async def test_stale_ticker_stays_blocked(self, ctrl):
+        await self._block_then_lookup(ctrl, wall_clock=964.0)
+        ctrl._last_startup_check_ts = 0.0
+        assert ctrl._startup_exposure_gate() is False
+
+    @pytest.mark.asyncio
+    async def test_lookup_failure_stays_blocked_and_can_retry(self, ctrl):
+        ctrl.connector.get_last_traded_prices = AsyncMock(side_effect=IOError("timeout"))
+        await self._block_then_lookup(ctrl)
+        ctrl._last_startup_check_ts = 0.0
+        await self._block_then_lookup(ctrl)
+        assert ctrl.connector.get_last_traded_prices.await_count == 2
+
+    def test_invalid_rules_or_other_exchange_never_trigger_lookup(self, ctrl):
+        ctrl.connector.trading_rules["BGB-USDT"].trading_pair = "BTC-USDT"
+        with patch(f"{CONTROLLER}.safe_ensure_future") as schedule:
+            assert ctrl._startup_exposure_gate() is False
+            ctrl.connector.trading_rules["BGB-USDT"].trading_pair = "BGB-USDT"
+            ctrl.config.connector_name = "kraken"
+            ctrl._last_startup_check_ts = 0.0
+            assert ctrl._startup_exposure_gate() is False
+        schedule.assert_not_called()
 
 
 class TestLiveReferencePreconditions:

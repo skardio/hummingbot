@@ -8,9 +8,11 @@ Extends MultiCoinGridController with Bitget spot-specific logic:
 - Rate limiting for Bitget API
 """
 
+import asyncio
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
+from hummingbot.connector.exchange.bitget import bitget_constants as CONSTANTS
 from hummingbot.connector.exchange.bitget.bitget_api_order_book_data_source import BitgetAPIOrderBookDataSource
 from hummingbot.strategy_v2.models.executor_actions import CreateExecutorAction
 from multi_coin_grid_pro.controllers.multi_coin_grid_controller import MultiCoinGridController
@@ -104,6 +106,47 @@ class SpotGridBitgetController(MultiCoinGridController):
                 symbol, "V3" if isinstance(source, BitgetAPIOrderBookDataSource) else "unknown",
             )
         return False
+
+    def _live_bitget_order_book_source(self) -> Optional[BitgetAPIOrderBookDataSource]:
+        if self.config.paper_trading or self.config.connector_name != "bitget":
+            return None
+        tracker = getattr(self.connector, 'order_book_tracker', None)
+        source = getattr(tracker, '_data_source', None)
+        return source if isinstance(source, BitgetAPIOrderBookDataSource) else None
+
+    def _monitoring_market_supported(self, pair: str) -> bool:
+        """Live pool admits only pairs with a proven V2 order-book route; protected pairs bypass this."""
+        source = self._live_bitget_order_book_source()
+        return source is None or source.order_book_route(pair) == "v2"
+
+    async def _prepare_monitoring_candidates(self, candidates: List[str]) -> None:
+        """Classify unproven routes in rank order until enough V2 pairs can fill the pool."""
+        source = self._live_bitget_order_book_source()
+        if source is None:
+            return
+        protected = set(self._bounded_monitored_coins([]))
+        need = self.config.max_coins_to_monitor - len(protected)
+        ordered = [pair for pair in dict.fromkeys(candidates) if pair not in protected]
+        budget = CONSTANTS.ORDERBOOK_ROUTE_PROBE_LIMIT
+        while need > 0 and budget > 0:
+            filled, pending = 0, []
+            for pair in ordered:
+                route = source.order_book_route(pair)
+                if route == "v2":
+                    filled += 1
+                elif route is None:
+                    pending.append(pair)
+                if filled + len(pending) >= need:
+                    break
+            batch = pending[:budget]
+            if not batch:
+                return
+            budget -= len(batch)
+            routes = await asyncio.gather(*(source.classify_order_book_route(pair) for pair in batch))
+            if not any(routes):
+                self.logger().warning(
+                    "[MONITORING] order-book route unknown for %s candidates; left out of live pool", len(batch))
+                return
 
     def _check_smart_entry_filter(self, symbol: str) -> bool:
         return self._entry_market_supported(symbol) and super()._check_smart_entry_filter(symbol)

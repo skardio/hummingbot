@@ -266,6 +266,32 @@ class BitgetAPIOrderBookDataSourceUnitTests(IsolatedAsyncioWrapperTestCase):
         self.assertEqual(1, self.snapshot_request_count(mock_get))
 
     @aioresponses()
+    async def test_route_classification_reuses_negotiation_and_caches_v2_and_v3(self, mock_get):
+        v3_pair = "rSPY-USDT"
+        self.connector._set_trading_pair_symbol_map(
+            bidict({"rSPYUSDT": v3_pair, self.exchange_trading_pair: self.trading_pair}))
+        mock_get.get(re.compile(f"{self.snapshot_url().pattern}.*symbol=rSPYUSDT"), status=400,
+                     payload={"code": "40502"})
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response())
+        mock_get.get(self.snapshot_url(), payload=self.rest_order_book_snapshot_mock_response())
+        self.assertIsNone(self.data_source.order_book_route(v3_pair))
+        self.assertEqual("v3", await self.data_source.classify_order_book_route(v3_pair))
+        self.assertEqual("v2", await self.data_source.classify_order_book_route(self.trading_pair))
+        count = self.snapshot_request_count(mock_get)
+        self.assertEqual(3, count)
+        self.assertEqual("v3", await self.data_source.classify_order_book_route(v3_pair))
+        self.assertEqual("v2", await self.data_source.classify_order_book_route(self.trading_pair))
+        self.assertEqual(count, self.snapshot_request_count(mock_get))
+
+    @aioresponses()
+    async def test_route_classification_failure_stays_unknown_without_raising(self, mock_get):
+        mock_get.get(self.snapshot_url(), status=500, payload={"code": "50000"})
+        self.assertIsNone(await self.data_source.classify_order_book_route(self.trading_pair))
+        self.assertIsNone(await self.data_source.classify_order_book_route(self.trading_pair))  # backoff, no request
+        self.assertEqual(1, self.snapshot_request_count(mock_get))
+        self.assertFalse(self.data_source._v2_pairs | self.data_source._v3_pairs)
+
+    @aioresponses()
     async def test_v3_failure_never_falls_back_to_v2_and_40502_disables_retries(self, mock_get):
         mock_get.get(self.snapshot_url(), status=400, payload={"code": "40502"})
         mock_get.get(self.snapshot_url(v3=True), status=400, payload={"code": "40502"})

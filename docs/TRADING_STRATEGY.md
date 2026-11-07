@@ -569,6 +569,8 @@ Drie lagen, alle ENABLED:
 
 **Tickerfallback bij ontbrekend orderboek (LOKAAL, 2026-11-06):** startup-inventorywaardering gebruikt eerst de orderboek-midprijs. Bij ontbrekende of ongeldige midprijs wordt uitsluitend de bestaande `TrendCalculator._last_price_cache` van exact dezelfde connector gebruikt (geen andere base-connector), met exact hetzelfde base/quote-paar en `TradingRule.trading_pair`. De tickerprijs moet eindig en positief zijn; de ontvangsttijd is Unix-seconden en mag niet in de toekomst liggen of ouder zijn dan `max_price_age_ms / 1000` (Bitget: 35 seconden). Beide minimumregels worden vooraf gevalideerd. Hoeveelheid maal prijs geeft quote-waarde; alleen strikt onder de exchangegrens is dust. Materiele inventory, ontbrekende/stale/ongeldige prijzen en ongeldige rules blijven fail-closed. Geen extra netwerkverzoeken, orders, BGB-uitzondering of gewijzigde risicolimieten. Deze gedeelde controllerlogica geldt ook voor Kraken USD/EUR en OKX wanneer zij dezelfde gevalideerde tickercache hebben.
 
+**Tickerlookup buiten de monitoringpool (LOKAAL, 2026-11-07, alleen Bitget):** de inventorywaardering hangt niet meer af van `monitored_coins`. Als de gate blokkeert en een asset met geldige `TradingRule` geen bruikbare prijs heeft, start de controller hoogstens één gelijktijdige lookup via de bestaande `BitgetExchange.get_last_traded_prices` (één all-tickers-request voor alle ontbrekende paren). Geldige prijzen gaan via `TrendCalculator._cache_prices` in dezelfde cache en worden daarna met dezelfde validatie (connector, paar, eindig/positief, versheid ≤ `max_price_age_ms`) gewaardeerd; de gate herbeoordeelt direct bij de volgende tick. Lookupfouten, ontbrekende/ongeldige/stale prijzen, ongeldige rules en materiële inventory blijven fail-closed. Geen automatische verkoop of acknowledgement; Kraken en OKX ongewijzigd.
+
 **Exposure-reconciliatie** (`_reconcile_stale_exposure`, `exposure_reconcile_grace_seconds` = 120): getrackte exposure van een executor die zo lang ontbreekt in `executors_info` (SHUTTING_DOWN telt als aanwezig) wordt idempotent vrijgegeven via de bestaande cleanup plus `GlobalRiskManager.release_allocation`. Bij resterende of niet-verifieerbare inventory blijft de exposure staan. Een gemiste P&L-hand-over wordt hiermee niet alsnog geboekt.
 
 **Onderzocht, niet geïmplementeerd:** waardering van gedeeltelijke fills van open buy-orders; REST-query naar open orders; herberekening van historische P&L; detectie van stortingen/opnames tijdens een actieve positie (alleen op rustmomenten, zie 7.1a); schaling van `r_unit_quote` met het kapitaal.
@@ -683,6 +685,23 @@ ruimte. Bij een kleinere scan vullen bestaande paren de vrije ruimte; werkelijk
 verwijderde paren worden van orderbookmonitoring afgemeld. De statustelling
 `with full data` telt uitsluitend unieke actuele monitored pairs met voldoende
 trenddata, niet alle historische cache-items; dit is geen freshnessgarantie.
+
+Monitoringpool alleen met bewezen V2-orderbookroute (2026-11-07): live Bitget
+laat een optioneel paar pas toe nadat de datasource een geldige V2-snapshot heeft
+ontvangen (`order_book_route() == "v2"`). Paren met `40502` (V3-only, onbewezen
+orderroute) of een nog onbekende route krijgen geen plaats. Vóór elke poolopbouw
+(initiële discovery, periodieke refresh, dynamische scan en resync na
+orderbook-init) classificeert `_prepare_monitoring_candidates` onbekende kandidaten
+in rangvolgorde via de bestaande snapshotonderhandeling, alleen zover nodig om de
+pool te vullen en maximaal `ORDERBOOK_ROUTE_PROBE_LIMIT` (100) probes per opbouw.
+Routes worden per sessie gecachet; mislukte probes, 429 en backoff laten een paar
+onbekend en dus buiten de pool (fail-closed). Vrije plaatsen gaan naar de volgende
+bewezen V2-kandidaten (backlog maximaal 100); vindt de bot er minder, dan blijft de
+pool kleiner. Wordt een V2-paar later V3-only, dan vervangt de resync na
+orderbook-init het (`[MONITORING] replaced`). Paren met actieve executors of
+gevolgde exposure blijven altijd beschermd en kosten geen probes. Paper trading en
+onbekende datasources sluiten niets uit; entries blijven daar via de entrygate
+fail-closed.
 
 V3-diagnostiek: eenmaal per paar een geslaagde refresh met exchange-ts
 (milliseconden), leeftijd (seconden) en aantallen bids/asks; daarna hoogstens
@@ -925,3 +944,4 @@ Nieuwste onderaan. Per wijziging in dezelfde commit bijwerken (zie onderhoudsreg
 | 2026-11-06 | Startup-inventorywaardering | Gevalideerde verse ticker uit bestaande same-connector/pair-cache als fallback voor ontbrekende midprijs; beide minimumregels vooraf valideren | Dezelfde BGB-dust werd op 4/5 november met orderboek correct gewaardeerd, maar blokkeerde na herstart zonder BGB-orderboek | Alleen bewezen dust niet-blokkerend; materiele/onbekende inventory blijft blokkeren; geen orders, nieuwe prijsrequests of risicolimietwijzigingen | `test_pre_deploy_risk_safety.py`: BGB-dust, materiele BTC, ontbrekende/stale/ongeldige ticker, connector/pair/rules en bestaande startup/risk-tests | LOKAAL |
 | 2026-11-06 | Bitget Spot-orderbookdata | Per-paar V3 REST-snapshots na 40502, volledige boekrefresh met timestamp-/depthvalidatie; V2-delta's voor deze paren geweigerd; begrensde retries/429-back-off | r-symbolen weigeren V2-orderbooksnapshots; alleen URL vervangen laat ontbrekende live updates bestaan | V2-paren behouden WS; V3-boeken bij fouten leeg/fail-closed; geen wijzigingen aan orders, risicolimieten of andere exchanges | Bitget Spot-orderbook-, exchange- en post-only-lifecycletests; Bitget Futures-orderbooktests | LOKAAL |
 | 2026-11-06 | Bitget monitoring en entryveiligheid | Begrensde pool met executor/exposurebescherming; actuele full-data-telling; geen nieuwe live V3-only entries; begrensde V3-refreshdiagnostiek | Pool groeide boven limiet; V2-ordercompatibiliteit voor V3-markten onbewezen | V2-entrygedrag, risicodrempels en inactieve 4-BUY-cap behouden; geen wijzigingen aan bestaande executors | Ticker/risk-pipeline, pool-cooldown, Bitget cap/entry-gates en V3-refreshregressies | LOKAAL |
+| 2026-11-07 | Bitget monitoringpool en startupwaardering | Alleen paren met bewezen V2-orderbookroute in optionele poolplaatsen; onbekende routes begrensd geclassificeerd vóór toelating (discovery, refresh, scan, resync na init); begrensde Bitget all-tickers lookup voor walletassets buiten de pool | Pool bestond volledig uit V3-only paren; BGB-dust kreeg geen prijs en blokkeerde startup | Geen gewijzigde drempels/limieten; beschermde executors/exposure behouden; materiële/onwaardeerbare inventory blijft blokkeren | Top-30 V3-only, routeclassificatie/probebudget/429, monitoringroutes, BGB-dust/BTC buiten pool, ontbrekende/stale/ongeldige ticker, Bitget hook | LOKAAL |
