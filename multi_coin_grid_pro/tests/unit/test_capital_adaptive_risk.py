@@ -387,3 +387,82 @@ class TestOpenOrdersBeforeRestart:
         assert connector.order_actions == []
         assert ctrl._ensure_risk_reference() is False  # live reference waits for a clean account
         assert ctrl._live_risk_reference_resolved is False
+
+
+class TestSelectionOnlyPicksFundableCoins:
+    """Selection uses the same risk headroom as executor creation (Bitget 7 Nov: ILLIQUID 10% x 164 < 30)."""
+
+    EQUITY = "164.05"
+
+    def _ctrl(self, equity=EQUITY):
+        ctrl = ready(bitget_config, "USDT", D(equity))
+        ctrl.pair_volumes = {"JCT-USDT": 3_556_104, "AIN-USDT": 1_335_408, "DOT-USDT": 40_000_000}
+        ctrl.pair_spreads = {"JCT-USDT": 0.00142, "AIN-USDT": 0.00137, "DOT-USDT": 0.0002}
+        ctrl._check_smart_entry_filter = Mock(return_value=True)
+        return ctrl
+
+    def test_illiquid_coin_below_minimum_is_rejected_but_l2_is_admitted(self):
+        ctrl = self._ctrl()
+        profile = ctrl.bucket_tracker._classifier.classify("JCT-USDT", MarketMetrics(3_556_104, 0.142))
+        assert profile.bucket.value == "ILLIQUID"
+        assert ctrl._risk_budget_admits_slot("JCT-USDT") is False
+        assert ctrl._risk_budget_admits_slot("DOT-USDT") is True
+
+    def test_illiquid_coin_is_fundable_once_capital_supports_a_minimum_grid(self):
+        ctrl = self._ctrl(equity="1000")
+        assert ctrl._risk_budget_admits_slot("JCT-USDT") is True
+
+    def test_unfundable_coin_does_not_reach_smart_entry(self):
+        ctrl = self._ctrl()
+        assert ctrl._entry_candidate_allowed("JCT-USDT") is False
+        ctrl._check_smart_entry_filter.assert_not_called()
+        assert ctrl._entry_candidate_allowed("DOT-USDT") is True
+        ctrl._check_smart_entry_filter.assert_called_once_with("DOT-USDT")
+
+    def test_smart_entry_rejection_is_still_respected_for_fundable_coins(self):
+        ctrl = self._ctrl()
+        ctrl._check_smart_entry_filter.return_value = False
+        assert ctrl._entry_candidate_allowed("DOT-USDT") is False
+
+    def test_multiple_candidates_select_the_first_fundable_one(self):
+        ctrl = self._ctrl()
+        ranked = ["JCT-USDT", "AIN-USDT", "DOT-USDT"]
+        assert next(c for c in ranked if ctrl._entry_candidate_allowed(c)) == "DOT-USDT"
+
+    def test_no_fundable_candidates_selects_nothing(self):
+        ctrl = self._ctrl()
+        assert not any(ctrl._entry_candidate_allowed(c) for c in ("JCT-USDT", "AIN-USDT"))
+
+    def test_active_exposure_consumes_the_bucket_headroom(self):
+        ctrl = self._ctrl(equity="1000")
+        assert ctrl._risk_budget_admits_slot("AIN-USDT") is True
+        ctrl.bucket_tracker.set_pending("JCT-USDT", 80.0, MarketMetrics(3_556_104, 0.142))  # ILLIQUID cap 100 -> 20 left < 30
+        assert ctrl._risk_budget_admits_slot("AIN-USDT") is False
+        assert ctrl._risk_budget_admits_slot("DOT-USDT") is True
+
+    def test_missing_liquidity_metrics_fail_closed(self):
+        ctrl = self._ctrl()
+        assert ctrl._risk_budget_admits_slot("NEW-USDT") is False
+
+    def test_precheck_agrees_with_the_final_executor_check(self):
+        ctrl = self._ctrl()
+        minimum = D(str(ctrl.config.min_order_amount_quote)) * D("3")
+        for symbol in ("JCT-USDT", "AIN-USDT", "DOT-USDT"):
+            for size in (minimum, D("60"), D("187.02")):
+                fits, _ = ctrl._slot_fits_risk_budget(symbol, size)
+                assert fits is ctrl._risk_budget_admits_slot(symbol)
+
+    def test_capital_skip_releases_monitoring_so_no_timeout_blacklist(self):
+        ctrl = self._ctrl()
+        ctrl.monitoring_coin, ctrl.monitoring_start_time = "JCT-USDT", 1000.0
+        ctrl._release_capital_skipped_monitoring("DOT-USDT")
+        assert ctrl.monitoring_coin == "JCT-USDT"
+        ctrl._release_capital_skipped_monitoring("JCT-USDT")
+        assert (ctrl.monitoring_coin, ctrl.monitoring_start_time) == (None, 0)
+
+    def test_every_selection_route_uses_the_fundability_gate(self):
+        import inspect
+        source = inspect.getsource(MultiCoinGridController.determine_executor_actions)
+        assert "self._check_smart_entry_filter(" not in source
+        assert source.count("self._entry_candidate_allowed(") == 4
+        assert source.count("self._release_capital_skipped_monitoring(best_coin)") == 2

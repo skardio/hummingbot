@@ -4719,9 +4719,9 @@ class MultiCoinGridController(ControllerBase):
             # This prevents selecting coins that will be rejected anyway
             rejection_reason = None
             candidate_rejections = []
-            if best_coin and not self._check_smart_entry_filter(best_coin):
+            if best_coin and not self._entry_candidate_allowed(best_coin):
                 self.logger().warning(
-                    f"⚠️  {best_coin} rejected by SmartEntry - checking fallbacks..."
+                    f"⚠️  {best_coin} rejected by risk budget or SmartEntry - checking fallbacks..."
                 )
 
                 # Try next best coins from top 10
@@ -4739,7 +4739,7 @@ class MultiCoinGridController(ControllerBase):
                             continue
 
                         # Check SmartEntry for fallback
-                        if self._check_smart_entry_filter(fallback_coin):
+                        if self._entry_candidate_allowed(fallback_coin):
                             # Multi-timeframe buy protection check
                             if not self._check_multi_timeframe_buy(fallback_coin):
                                 self.logger().warning(f"⏱️  {fallback_coin}: Blocked by multi-timeframe protection")
@@ -4784,7 +4784,7 @@ class MultiCoinGridController(ControllerBase):
                             continue
 
                         # Check SmartEntry for fallback
-                        if self._check_smart_entry_filter(fallback_coin):
+                        if self._entry_candidate_allowed(fallback_coin):
                             # Multi-timeframe buy protection check
                             if not self._check_multi_timeframe_buy(fallback_coin):
                                 self.logger().warning(f"⏱️  {fallback_coin}: Blocked by multi-timeframe protection")
@@ -5758,6 +5758,7 @@ class MultiCoinGridController(ControllerBase):
 
                 _fits, adjusted_size = self._slot_fits_risk_budget(best_coin, adjusted_size)
                 if not _fits:
+                    self._release_capital_skipped_monitoring(best_coin)
                     return actions
 
                 self.logger().info(
@@ -5909,6 +5910,7 @@ class MultiCoinGridController(ControllerBase):
                 # Definitive size after all multipliers must still fit the risk budget
                 _fits, adjusted_size = self._slot_fits_risk_budget(best_coin, adjusted_size)
                 if not _fits:
+                    self._release_capital_skipped_monitoring(best_coin)
                     return actions
 
                 grid_action = self._create_grid_action(best_coin, adjusted_size)
@@ -5992,7 +5994,7 @@ class MultiCoinGridController(ControllerBase):
                     continue
 
                 # 2. SmartEntry filter
-                if not self._check_smart_entry_filter(candidate_coin):
+                if not self._entry_candidate_allowed(candidate_coin):
                     self.logger().debug("      ❌ SmartEntry filter rejected")
                     continue
 
@@ -8267,6 +8269,33 @@ class MultiCoinGridController(ControllerBase):
                 f"CAPITAL CAP {symbol}: slot {size:.2f} -> {limited:.2f} {self.config.quote_asset} ({binding})"
             )
         return True, limited
+
+    def _risk_budget_admits_slot(self, symbol: str) -> bool:
+        """
+        Selection-time precheck with the same limits as _slot_fits_risk_budget: the final slot can
+        never exceed the risk headroom, so a coin whose headroom is below the minimum viable slot
+        is unfundable regardless of sizing and must not be selected.
+        """
+        headroom, binding = self._limit_slot_to_risk_budget(symbol, Decimal("Infinity"))
+        minimum = Decimal(str(self.config.min_order_amount_quote)) * MIN_VIABLE_LEVELS
+        if headroom >= minimum:
+            return True
+        if should_log(f"capital_precheck_{symbol}", interval_sec=300):
+            self.logger().info(
+                f"CAPITAL PRECHECK {symbol}: {binding or 'risk'} headroom {headroom:.2f} < minimum viable "
+                f"{minimum:.2f} {self.config.quote_asset} - trying next candidate"
+            )
+        return False
+
+    def _entry_candidate_allowed(self, symbol: str) -> bool:
+        """Selection gate: fundable within the risk budget, then the (unchanged) SmartEntry filter."""
+        return self._risk_budget_admits_slot(symbol) and self._check_smart_entry_filter(symbol)
+
+    def _release_capital_skipped_monitoring(self, symbol: str) -> None:
+        """A coin skipped only for insufficient capital must not run into MONITORING_TIMEOUT/blacklist."""
+        if self.monitoring_coin == symbol:
+            self.monitoring_coin = None
+            self.monitoring_start_time = 0
 
     def _check_position_limits(self, symbol: str, requested_allocation: Optional[Decimal] = None) -> bool:
         """
