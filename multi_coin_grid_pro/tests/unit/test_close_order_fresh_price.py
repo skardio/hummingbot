@@ -139,7 +139,12 @@ def _fail(ex, order_id, msg):
 
 
 def run(coro):
-    return asyncio.run(coro)
+    # Private loop: asyncio.run() would reset the global loop to None and break later tests.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 class TestFreshClosePrice:
