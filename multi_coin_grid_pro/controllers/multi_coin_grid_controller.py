@@ -12635,47 +12635,52 @@ class MultiCoinGridController(ControllerBase):
             # On error, allow (fail open)
             return True
 
-    def _emergency_reference_price(self, coin: str, trend_price: Decimal) -> Decimal:
+    def _emergency_reference_price(self, coin: str, trend_price: Decimal) -> Optional[Decimal]:
         """
-        Price for emergency/hard-stop checks (Bitget). Returns the lowest of the trend ticker price and the
-        executor's fresh executable bid (order book or REST fallback), so a frozen ticker cannot hide a crash.
-        Never less protective than the ticker alone; Kraken/OKX keep the ticker price unchanged.
+        Price for emergency/hard-stop checks. Kraken/OKX: the trend ticker price (unchanged).
+
+        Bitget: only provably fresh prices (age <= max_price_age_ms) are used:
+        - ticker (trend-calculator cache with fetch timestamp) and/or the executor's fresh executable bid;
+        - both fresh -> the lower (conservative executable) price; one fresh -> that one;
+        - none fresh -> None: CRITICAL EMERGENCY_PRICE_STALE and no emergency/hard-stop decision on stale data.
+          The position stays tracked; the executor's own stop-loss remains and never closes without a fresh price.
         """
         if not str(self.config.connector_name).lower().startswith("bitget"):
             return trend_price
         now = self.market_data_provider.time()
         max_age = float(getattr(self.config, "max_price_age_ms", 35000)) / 1000
-        prices = [trend_price]
-        ticker_fresh = False
-        calculator = getattr(self, "trend_calculator", None)
-        cached = getattr(calculator, "_last_price_cache", {}).get(coin) if calculator is not None else None
-        if cached is not None:
+
+        def fresh(price: Any, ts: Any) -> Optional[Decimal]:
             try:
-                ticker_fresh = 0 <= now - float(cached[1]) <= max_age
-            except (TypeError, ValueError, IndexError):
-                ticker_fresh = False
+                value, age = Decimal(str(price)), now - float(ts)
+            except Exception:
+                return None
+            if value.is_finite() and value > 0 and math.isfinite(age) and 0 <= age <= max_age:
+                return value
+            return None
+
+        calculator = getattr(self, "trend_calculator", None)
+        cache = getattr(calculator, "_last_price_cache", None) if calculator is not None else None
+        cached = cache.get(coin) if isinstance(cache, dict) else None
+        ticker = fresh(*cached) if isinstance(cached, tuple) and len(cached) == 2 else None
+
         executor_info = self._get_executor_info(self.active_executor_id) if self.active_executor_id else None
         custom_info = getattr(executor_info, "custom_info", None) or {}
-        bid_fresh = False
-        try:
-            bid = Decimal(str(custom_info.get("reliable_bid")))
-            bid_ts = float(custom_info.get("reliable_bid_ts"))
-            bid_fresh = bid.is_finite() and bid > 0 and 0 <= now - bid_ts <= max_age
-        except Exception:
-            bid_fresh = False
-        if bid_fresh:
-            prices.append(bid)
-        if not ticker_fresh and not bid_fresh:
-            last_log = getattr(self, "_emergency_price_stale_log_ts", {})
-            if now - last_log.get(coin, 0.0) >= 300:
-                last_log[coin] = now
-                self._emergency_price_stale_log_ts = last_log
-                self.logger().critical(
-                    f"🚨 EMERGENCY_PRICE_STALE: {coin} ticker and executor bid older than {max_age:.0f}s — "
-                    f"emergency/hard-stop checks use last known price {trend_price}; "
-                    f"executor will not place a close order without a fresh price"
-                )
-        return min(prices)
+        bid = fresh(custom_info.get("reliable_bid"), custom_info.get("reliable_bid_ts"))
+
+        prices = [p for p in (ticker, bid) if p is not None]
+        if prices:
+            return min(prices)
+        last_log = getattr(self, "_emergency_price_stale_log_ts", {})
+        if now - last_log.get(coin, 0.0) >= 300:
+            last_log[coin] = now
+            self._emergency_price_stale_log_ts = last_log
+            self.logger().critical(
+                f"🚨 EMERGENCY_PRICE_STALE: {coin} no ticker or executor bid fresher than {max_age:.0f}s "
+                f"(last known {trend_price}) — emergency/hard-stop skipped this cycle, no blind exit; "
+                f"position stays tracked and executor stop-loss remains active"
+            )
+        return None
 
     def _grid_profit_exit_mode(self) -> str:
         mode = getattr(self.config, "grid_profit_exit_mode", None)
@@ -12863,13 +12868,15 @@ class MultiCoinGridController(ControllerBase):
 
             # Emergency/hard stop use the most conservative fresh price (frozen ticker must not hide a crash)
             emergency_price = self._emergency_reference_price(coin, current_price)
-            emergency_change_pct = float((emergency_price - entry_price) / entry_price * 100)
+            emergency_change_pct = (
+                float((emergency_price - entry_price) / entry_price * 100) if emergency_price is not None else None
+            )
 
             # ---------------------------------------
             # LAYER 3: EMERGENCY EXIT (PRIORITY #1)
             # ---------------------------------------
             emergency_exit_pct = getattr(self.config, 'emergency_exit_pct', -12.0)  # Default: -12% (only flash crash)
-            if emergency_change_pct <= emergency_exit_pct:
+            if emergency_change_pct is not None and emergency_change_pct <= emergency_exit_pct:
                 current_price, price_change_pct = emergency_price, emergency_change_pct
                 self.logger().critical(
                     f"[EXIT] 🚨 {coin} EMERGENCY EXIT TRIGGERED:\n" f"   Entry Price: €{
@@ -12885,7 +12892,7 @@ class MultiCoinGridController(ControllerBase):
             # LAYER 3: HARD STOP (Fail-safe)
             # ---------------------------------------
             hard_stop_pct = getattr(self.config, 'hard_stop_pct', -15.0)  # Default: -15% (ultimate fail-safe)
-            if emergency_change_pct <= hard_stop_pct:
+            if emergency_change_pct is not None and emergency_change_pct <= hard_stop_pct:
                 current_price, price_change_pct = emergency_price, emergency_change_pct
                 self.logger().critical(
                     f"[EXIT] 🛑 {coin} HARD STOP TRIGGERED:\n" f"   Entry Price: €{

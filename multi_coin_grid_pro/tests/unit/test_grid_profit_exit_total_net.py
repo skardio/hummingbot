@@ -72,6 +72,7 @@ def make_controller(connector_name="bitget", **overrides):
         exit_short_threshold=-4.0,
         exit_mid_threshold=-3.0,
         fee_aware_filter={"taker_fee_pct": 0.20},
+        max_price_age_ms=35000,  # spot_grid_bitget.yaml runtime value
         risk_reference_balance_quote=Decimal("10000"),
         risk_max_daily_loss_pct=Decimal("2"),
         risk_max_balance_per_trade_pct=Decimal("0.5"),
@@ -267,3 +268,57 @@ class TestEmergencyExitFrozenTicker:
         attach(ctrl, icnt_info(ENTRY, reliable_bid=crash, reliable_bid_ts=NOW - 2),
                ticker_price=ENTRY, ticker_age=self.FROZEN_AGE)
         assert ctrl.should_exit_position(COIN) != "emergency_exit"
+
+
+class TestEmergencyPriceFreshnessOnly:
+    """P0 (commit 401dfd7d): min(ticker, bid) let a stale LOW ticker trigger an emergency exit."""
+
+    STALE_AGE = 3.5 * 3600
+    CRASH = ENTRY * Decimal("0.87")  # −13%
+
+    def test_stale_low_ticker_with_fresh_bid_does_not_exit(self):
+        ctrl = make_controller()
+        attach(ctrl, icnt_info(ENTRY, reliable_bid=ENTRY, reliable_bid_ts=NOW - 2),
+               ticker_price=self.CRASH, ticker_age=self.STALE_AGE)
+        assert ctrl._emergency_reference_price(COIN, self.CRASH) == ENTRY
+        assert ctrl.should_exit_position(COIN) not in ("emergency_exit", "hard_stop_exit")
+
+    def test_stale_low_ticker_without_fresh_bid_does_not_exit(self):
+        ctrl = make_controller()
+        ctrl.logger = MagicMock(return_value=MagicMock())
+        attach(ctrl, icnt_info(ENTRY, price_reliable=False, reliable_bid=None, reliable_bid_ts=None),
+               ticker_price=ENTRY * Decimal("0.80"), ticker_age=self.STALE_AGE)
+        assert ctrl._emergency_reference_price(COIN, ENTRY * Decimal("0.80")) is None
+        assert ctrl.should_exit_position(COIN) not in ("emergency_exit", "hard_stop_exit")
+        critical = [c.args[0] for c in ctrl.logger.return_value.critical.call_args_list]
+        assert any("EMERGENCY_PRICE_STALE" in m for m in critical)
+
+    def test_fresh_ticker_only_real_crash_exits(self):
+        ctrl = make_controller()
+        attach(ctrl, icnt_info(self.CRASH, reliable_bid=None, reliable_bid_ts=None), ticker_price=self.CRASH)
+        assert ctrl.should_exit_position(COIN) == "emergency_exit"
+
+    def test_fresh_bid_only_real_crash_exits(self):
+        ctrl = make_controller()
+        attach(ctrl, icnt_info(self.CRASH, reliable_bid=self.CRASH, reliable_bid_ts=NOW - 1),
+               ticker_price=ENTRY, ticker_age=self.STALE_AGE)
+        assert ctrl.should_exit_position(COIN) == "emergency_exit"
+
+    def test_both_fresh_uses_conservative_lower_price(self):
+        ctrl = make_controller()
+        attach(ctrl, icnt_info(self.CRASH, reliable_bid=self.CRASH, reliable_bid_ts=NOW - 1), ticker_price=ENTRY)
+        assert ctrl._emergency_reference_price(COIN, ENTRY) == self.CRASH
+        assert ctrl.should_exit_position(COIN) == "emergency_exit"
+
+    @pytest.mark.parametrize("bid_ts", [NOW + 5, float("nan"), "bad"])
+    def test_future_or_invalid_bid_timestamp_rejected(self, bid_ts):
+        ctrl = make_controller()
+        attach(ctrl, icnt_info(ENTRY, reliable_bid=self.CRASH, reliable_bid_ts=bid_ts), ticker_price=ENTRY)
+        assert ctrl._emergency_reference_price(COIN, ENTRY) == ENTRY
+
+    @pytest.mark.parametrize("connector", ["kraken", "okx"])
+    def test_kraken_okx_still_use_ticker_unchanged(self, connector):
+        ctrl = make_controller(connector_name=connector)
+        attach(ctrl, icnt_info(ENTRY), ticker_price=self.CRASH, ticker_age=self.STALE_AGE)
+        assert ctrl._emergency_reference_price(COIN, self.CRASH) == self.CRASH
+        assert ctrl.should_exit_position(COIN) == "emergency_exit"  # legacy behaviour kept
