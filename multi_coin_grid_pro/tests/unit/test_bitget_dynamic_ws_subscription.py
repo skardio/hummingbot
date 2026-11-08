@@ -78,10 +78,22 @@ def _books_msg(symbol, action, bid, ask, ts_ms):
     }
 
 
+_BOUND = (
+    "_ensure_book_tracking_task", "_initialize_orderbook", "_initialize_orderbook_once",
+    "_orderbook_init_state", "_schedule_orderbook_init", "_record_orderbook_init_result",
+    "_subscribe_to_orderbook", "_has_orderbook_subscription",
+)
+
+
 def _ctrl():
     ctrl = MagicMock()
     ctrl.monitored_coins = set()
-    ctrl._ensure_book_tracking_task = MultiCoinGridController._ensure_book_tracking_task.__get__(ctrl)
+    for name in _BOUND:
+        setattr(ctrl, name, getattr(MultiCoinGridController, name).__get__(ctrl))
+    ctrl._orderbook_init_retryable = MultiCoinGridController._orderbook_init_retryable
+    for name in ("_OB_INIT_RETRY_BASE_S", "_OB_INIT_RETRY_MAX_S",
+                 "_OB_INIT_RETRY_WINDOW_S", "_OB_INIT_RETRIES_PER_WINDOW"):
+        setattr(ctrl, name, getattr(MultiCoinGridController, name))
     return ctrl
 
 
@@ -346,3 +358,172 @@ class TestControllerSubscriptionWiring:
             ctrl._ensure_book_tracking_task.assert_not_called()
 
         run(scenario())
+
+
+class _InitHarness:
+    """Real Bitget data source + real tracker; fake REST and clock. Live 17:57 failure replay."""
+
+    PAIRS = ("ICNT-USDT", "JCT-USDT", "SKYAI-USDT")
+
+    def __init__(self, ws=None):
+        for pair in self.PAIRS:
+            SYMBOLS.setdefault(pair, pair.replace("-", ""))
+        self.clock = [1_794_157_053.0]
+        self.ds = _data_source()
+        self.ds._time = lambda: self.clock[0]
+        self.ds._ws_assistant = ws
+        self.rest_calls = []
+        self.fail_pairs = set()
+        rest = MagicMock()
+        rest.execute_request_and_get_response = AsyncMock(side_effect=self._rest)
+        self.ds._api_factory.get_rest_assistant = AsyncMock(return_value=rest)
+        self.tracker = OrderBookTracker(data_source=self.ds, trading_pairs=[STATIC])
+        self.ctrl = _ctrl()
+        self.ctrl.connector = SimpleNamespace(order_book_tracker=self.tracker)
+
+    async def _rest(self, url, params, **kwargs):
+        symbol = params["symbol"]
+        self.rest_calls.append(symbol)
+        response = MagicMock(status=200, headers={})
+        if symbol in self.fail_pairs:
+            response.json = AsyncMock(return_value={"code": "50000", "msg": "boom"})
+        else:
+            ts = str(int(self.clock[0] * 1000))
+            response.json = AsyncMock(return_value={
+                "code": CONSTANTS.RET_CODE_OK,
+                "data": {"bids": [["0.3590", "10"]], "asks": [["0.3600", "10"]], "ts": ts}})
+        return response
+
+    async def settle(self):
+        for _ in range(20):
+            await asyncio.sleep(0)
+
+    def stop(self):
+        for task in self.tracker._tracking_tasks.values():
+            task.cancel()
+
+
+class TestInitRetryAfterSharedBackoff:
+    def test_live_failure_replay_backoff_then_single_retry_reaches_ws_subscribe(self):
+        async def scenario():
+            ws = FakeWS()
+            h = _InitHarness(ws)
+            h.ds._snapshot_rate_limit_until = h.clock[0] + 30.0  # shared 429 backoff from route probe
+            h.ctrl._subscribe_to_orderbook(DYNAMIC)
+            await h.settle()
+            # Deferred locally (no exchange call, no ERROR); listed but not usable for entries.
+            assert h.rest_calls == []
+            assert DYNAMIC in h.tracker._trading_pairs and DYNAMIC not in h.tracker._order_books
+            assert h.ctrl._has_orderbook_subscription(DYNAMIC) is False
+            h.ctrl.logger().error.assert_not_called()
+            # Repeated cycles during backoff: no request, no new init.
+            for _ in range(5):
+                h.ctrl._subscribe_to_orderbook(DYNAMIC)
+            await h.settle()
+            assert h.rest_calls == [] and not h.ctrl._ob_init_state["inflight"]
+            # Backoff over: the next cycle retries once, then tracking + WS subscribe follow.
+            h.clock[0] += 31.0
+            for _ in range(3):
+                h.ctrl._subscribe_to_orderbook(DYNAMIC)  # same tick: in-flight guard
+            await h.settle()
+            assert h.rest_calls == [SYMBOLS[DYNAMIC]]
+            assert DYNAMIC in h.tracker._order_books
+            assert h.ctrl._has_orderbook_subscription(DYNAMIC) is True
+            assert DYNAMIC in h.tracker._tracking_tasks
+            assert DYNAMIC not in h.ctrl._ob_init_state["failures"]
+            assert ws.subscribed_args().count(
+                {"instType": "SPOT", "channel": CONSTANTS.PUBLIC_WS_BOOKS, "instId": SYMBOLS[DYNAMIC]}) == 1
+            first_task = h.tracker._tracking_tasks[DYNAMIC]
+            # Healthy pair: further cycles do nothing (no REST, no re-subscribe, same task).
+            for _ in range(3):
+                h.ctrl._subscribe_to_orderbook(DYNAMIC)
+            await h.settle()
+            assert h.rest_calls == [SYMBOLS[DYNAMIC]] and len(ws.sent) == 1
+            assert h.tracker._tracking_tasks[DYNAMIC] is first_task
+            h.stop()
+
+        run(scenario())
+
+    def test_retry_uses_exponential_pair_backoff_and_failure_is_visible(self):
+        async def scenario():
+            h = _InitHarness(FakeWS())
+            h.fail_pairs.add(SYMBOLS[DYNAMIC])
+            h.ctrl._subscribe_to_orderbook(DYNAMIC)
+            await h.settle()
+            assert h.rest_calls == [SYMBOLS[DYNAMIC]]
+            assert "INIT_FAILED pair=ICNT-USDT attempt=1 retry_in=10s" in h.ctrl.logger().warning.call_args.args[0]
+            # Data source also sets its own 30 s pair retry; nothing before both expire.
+            h.clock[0] += 29.0
+            h.ctrl._subscribe_to_orderbook(DYNAMIC)
+            await h.settle()
+            assert len(h.rest_calls) == 1
+            h.clock[0] += 2.0
+            h.ctrl._subscribe_to_orderbook(DYNAMIC)
+            await h.settle()
+            assert len(h.rest_calls) == 2
+            assert "attempt=2 retry_in=20s" in h.ctrl.logger().warning.call_args.args[0]
+            assert DYNAMIC not in h.tracker._tracking_tasks
+            assert h.ctrl._has_orderbook_subscription(DYNAMIC) is False
+
+        run(scenario())
+
+    def test_one_failing_pair_does_not_block_others_and_retries_are_rate_capped(self):
+        async def scenario():
+            ws = FakeWS()
+            h = _InitHarness(ws)
+            pairs = [f"P{i}-USDT" for i in range(8)]
+            for p in pairs:
+                SYMBOLS[p] = p.replace("-", "")
+            h.ds._snapshot_rate_limit_until = h.clock[0] + 30.0
+            for p in pairs + [DYNAMIC]:
+                h.ctrl._subscribe_to_orderbook(p)
+            await h.settle()
+            assert h.rest_calls == []
+            h.clock[0] += 31.0
+            h.fail_pairs.add(SYMBOLS[pairs[0]])
+            for p in pairs + [DYNAMIC]:
+                h.ctrl._subscribe_to_orderbook(p)
+            await h.settle()
+            # At most 5 retries per 10 s window: no burst after the backoff ends.
+            assert len(h.rest_calls) == 5
+            h.clock[0] += 10.0
+            for p in pairs + [DYNAMIC]:
+                h.ctrl._subscribe_to_orderbook(p)
+            await h.settle()
+            assert len(h.rest_calls) == 9
+            assert len(set(h.rest_calls)) == 9  # never the same pair twice
+            ok = pairs[1:] + [DYNAMIC]
+            assert all(p in h.tracker._order_books for p in ok)
+            assert pairs[0] not in h.tracker._order_books
+            subscribed = {a["instId"] for a in ws.subscribed_args() if a["channel"] == CONSTANTS.PUBLIC_WS_BOOKS}
+            assert subscribed == {SYMBOLS[p] for p in ok}
+            h.stop()
+
+        run(scenario())
+
+    def test_unsubscribe_clears_retry_state(self):
+        async def scenario():
+            h = _InitHarness(FakeWS())
+            h.fail_pairs.add(SYMBOLS[DYNAMIC])
+            h.ctrl._subscribe_to_orderbook(DYNAMIC)
+            await h.settle()
+            assert DYNAMIC in h.ctrl._ob_init_state["failures"]
+            h.ctrl._unsubscribe_from_orderbook = MultiCoinGridController._unsubscribe_from_orderbook.__get__(h.ctrl)
+            h.ctrl._unsubscribe_from_orderbook(DYNAMIC)
+            assert DYNAMIC not in h.ctrl._ob_init_state["failures"]
+            assert DYNAMIC not in h.ctrl._ob_init_state["retry_at"]
+            assert DYNAMIC not in h.tracker._trading_pairs
+
+        run(scenario())
+
+    def test_non_bitget_tracker_keeps_legacy_already_subscribed(self):
+        tracker = MagicMock()
+        tracker._trading_pairs = [DYNAMIC]
+        tracker._order_books = {}
+        tracker._data_source = MagicMock(spec=["resubscribe_pair", "_trading_pairs"])
+        ctrl = _ctrl()
+        ctrl.connector = SimpleNamespace(order_book_tracker=tracker)
+        with patch("multi_coin_grid_pro.controllers.multi_coin_grid_controller.safe_ensure_future") as sef:
+            ctrl._subscribe_to_orderbook(DYNAMIC)
+            sef.assert_not_called()
+        assert ctrl._has_orderbook_subscription(DYNAMIC) is True

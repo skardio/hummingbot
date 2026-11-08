@@ -9628,7 +9628,13 @@ class MultiCoinGridController(ControllerBase):
             tracker = getattr(self.connector, 'order_book_tracker', None)
             if tracker is None:
                 return False
-            return symbol in getattr(tracker, '_trading_pairs', [])
+            if symbol not in getattr(tracker, '_trading_pairs', []):
+                return False
+            # Bitget: a listed pair whose initial snapshot failed is not usable; let the
+            # caller re-enter _subscribe_to_orderbook so the throttled init retry runs.
+            if self._orderbook_init_retryable(tracker):
+                return symbol in getattr(tracker, '_order_books', {})
+            return True
         except Exception:
             return False
 
@@ -10530,6 +10536,10 @@ class MultiCoinGridController(ControllerBase):
 
             # Check if already subscribed (already in trading_pairs)
             if hasattr(tracker, '_trading_pairs') and symbol in tracker._trading_pairs:
+                if self._orderbook_init_retryable(tracker) and symbol not in getattr(tracker, '_order_books', {}):
+                    # Listed but the initial snapshot failed (e.g. shared REST backoff): retry, throttled.
+                    self._schedule_orderbook_init(symbol, tracker)
+                    return
                 self.logger().debug(f"[ORDERBOOK] Already subscribed to {symbol}")
                 return
 
@@ -10546,7 +10556,7 @@ class MultiCoinGridController(ControllerBase):
                 # Trigger immediate snapshot fetch (don't wait for next cycle)
                 if hasattr(tracker, '_order_books') and symbol not in tracker._order_books:
                     # Initialize order book for this pair
-                    safe_ensure_future(self._initialize_orderbook(symbol, tracker))
+                    self._schedule_orderbook_init(symbol, tracker)
             else:
                 self.logger().debug(f"[ORDERBOOK] Tracker has no _trading_pairs for {symbol}")
 
@@ -10554,6 +10564,67 @@ class MultiCoinGridController(ControllerBase):
             self.logger().error(f"[ORDERBOOK] Failed to subscribe to {symbol}: {e}")
             import traceback
             self.logger().debug(traceback.format_exc())
+
+    # Snapshot-init retry for dynamic pairs (Bitget data sources only).
+    _OB_INIT_RETRY_BASE_S = 10.0
+    _OB_INIT_RETRY_MAX_S = 120.0
+    _OB_INIT_RETRY_WINDOW_S = 10.0
+    _OB_INIT_RETRIES_PER_WINDOW = 5
+
+    @staticmethod
+    def _orderbook_init_retryable(tracker) -> bool:
+        data_source = getattr(tracker, '_data_source', None)
+        return hasattr(type(data_source), 'subscribe_to_trading_pair') and hasattr(data_source, '_time')
+
+    def _orderbook_init_state(self) -> dict:
+        state = vars(self).get('_ob_init_state')
+        if state is None:
+            state = {'inflight': set(), 'failures': {}, 'retry_at': {}, 'recent_retries': []}
+            vars(self)['_ob_init_state'] = state
+        return state
+
+    def _schedule_orderbook_init(self, symbol: str, tracker) -> bool:
+        """Start one snapshot init per pair; retries wait for pair + shared backoff and are rate-capped."""
+        state = self._orderbook_init_state()
+        if symbol in state['inflight']:
+            return False
+        if self._orderbook_init_retryable(tracker):
+            data_source = tracker._data_source
+            now = data_source._time()
+            if now < max(state['retry_at'].get(symbol, 0.0),
+                         float(getattr(data_source, '_snapshot_rate_limit_until', 0.0) or 0.0),
+                         float((getattr(data_source, '_snapshot_retry_at', None) or {}).get(symbol, 0.0))):
+                return False
+            recent = [t for t in state['recent_retries'] if now - t < self._OB_INIT_RETRY_WINDOW_S]
+            if len(recent) >= self._OB_INIT_RETRIES_PER_WINDOW:
+                state['recent_retries'] = recent
+                return False
+            recent.append(now)
+            state['recent_retries'] = recent
+            if symbol in state['failures']:
+                self.logger().info(
+                    f"[ORDERBOOK] INIT_RETRY pair={symbol} attempt={state['failures'][symbol] + 1}"
+                )
+        state['inflight'].add(symbol)
+        safe_ensure_future(self._initialize_orderbook(symbol, tracker))
+        return True
+
+    def _record_orderbook_init_result(self, symbol: str, tracker, ok: bool, error: str = "") -> None:
+        state = self._orderbook_init_state()
+        if ok:
+            attempts = state['failures'].pop(symbol, 0)
+            state['retry_at'].pop(symbol, None)
+            if attempts:
+                self.logger().info(f"[ORDERBOOK] INIT_RECOVERED pair={symbol} after_failures={attempts}")
+            return
+        failures = state['failures'].get(symbol, 0) + 1
+        state['failures'][symbol] = failures
+        delay = min(self._OB_INIT_RETRY_BASE_S * 2 ** (failures - 1), self._OB_INIT_RETRY_MAX_S)
+        state['retry_at'][symbol] = tracker._data_source._time() + delay
+        self.logger().warning(
+            f"[ORDERBOOK] INIT_FAILED pair={symbol} attempt={failures} retry_in={delay:.0f}s error={error} "
+            f"(no live book/WS for this pair until retry succeeds; other pairs unaffected)"
+        )
 
     async def _initialize_orderbook(self, symbol: str, tracker) -> None:
         """
@@ -10563,11 +10634,28 @@ class MultiCoinGridController(ControllerBase):
             symbol: Trading pair
             tracker: Order book tracker instance
         """
+        retryable = self._orderbook_init_retryable(tracker)
+        try:
+            await self._initialize_orderbook_once(symbol, tracker, retryable)
+        finally:
+            self._orderbook_init_state()['inflight'].discard(symbol)
+        if symbol in self.monitored_coins and not self._monitoring_market_supported(symbol):
+            await self._resync_monitoring_pool()
+
+    async def _initialize_orderbook_once(self, symbol: str, tracker, retryable: bool) -> None:
         try:
             self.logger().debug(f"[ORDERBOOK] Initializing orderbook for {symbol}...")
 
             # Request initial snapshot
-            order_book = await tracker._initial_order_book_for_trading_pair(symbol)
+            try:
+                order_book = await tracker._initial_order_book_for_trading_pair(symbol)
+            except asyncio.CancelledError:
+                raise
+            except Exception as snap_e:
+                if not retryable:
+                    raise
+                self._record_orderbook_init_result(symbol, tracker, False, str(snap_e))
+                return
 
             if order_book and symbol not in getattr(tracker, '_trading_pairs', [symbol]):
                 self.logger().info(f"[ORDERBOOK] {symbol} was unsubscribed during initialization; discarded")
@@ -10575,6 +10663,11 @@ class MultiCoinGridController(ControllerBase):
             if order_book:
                 tracker._order_books[symbol] = order_book
                 self.logger().info(f"[ORDERBOOK] ✅ Initialized orderbook for {symbol}")
+                if retryable:
+                    self._record_orderbook_init_result(symbol, tracker, True)
+            elif retryable:
+                self._record_orderbook_init_result(symbol, tracker, False, "empty snapshot")
+                return
             else:
                 self.logger().warning(f"[ORDERBOOK] Failed to get initial snapshot for {symbol}")
 
@@ -10606,8 +10699,6 @@ class MultiCoinGridController(ControllerBase):
             self.logger().error(f"[ORDERBOOK] Error initializing {symbol}: {e}")
             import traceback
             self.logger().debug(traceback.format_exc())
-        if symbol in self.monitored_coins and not self._monitoring_market_supported(symbol):
-            await self._resync_monitoring_pool()
 
     def _ensure_book_tracking_task(self, symbol: str, tracker) -> None:
         """Register the tracker queue/task that applies live WS messages for a dynamic pair (idempotent)."""
@@ -10644,6 +10735,10 @@ class MultiCoinGridController(ControllerBase):
                 del tracker._order_books[symbol]
             if hasattr(tracker, '_tracking_message_queues') and symbol in tracker._tracking_message_queues:
                 del tracker._tracking_message_queues[symbol]
+            state = vars(self).get('_ob_init_state')
+            if state is not None:
+                state['failures'].pop(symbol, None)
+                state['retry_at'].pop(symbol, None)
         except Exception as e:
             self.logger().error(f"[ORDERBOOK] Failed to unsubscribe from {symbol}: {e}")
 
