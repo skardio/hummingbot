@@ -3,7 +3,7 @@ import logging
 import math
 import sys
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.core.data_type.common import OrderType, PositionAction, PriceType, TradeType
@@ -167,6 +167,17 @@ class GridExecutor(ExecutorBase):
         self._exchange_min_sell_price: Optional[Decimal] = None
         self._price_rejected_retries = 0
         self._max_price_rejected_retries = 3
+
+        # CLOSE-PRICE FRESHNESS (ICNT incident 2026-11-08): a frozen Bitget book
+        # priced close SELLs at a 3.5h old bid. Fresh REST quote cache + bounded
+        # aggressive-close attempts; see _close_price_unreliable().
+        self._fresh_close_quote: Optional[Dict[str, Any]] = None
+        self._last_fresh_quote_fetch_ts = 0.0
+        self._force_price_refresh_until = 0.0
+        self._aggressive_close_attempts = 0
+        self._aggressive_close_next_ts = 0.0
+        self._close_failure_active = False
+        self._market_close_fallback_used = False
 
         # CRITICAL FIX: Balance mismatch spam prevention
         # Track close order placement attempts when balance < order amount
@@ -1502,6 +1513,14 @@ class GridExecutor(ExecutorBase):
         if inventory <= Decimal("0"):
             return
 
+        if self._close_price_unreliable():
+            if not HAS_LOG_THROTTLE or should_log(f"graceful_stale_{self.config.id}", interval_sec=60):
+                self.logger().error(
+                    f"❌ CLOSE_DEFERRED: {self.config.trading_pair} graceful close waits for a fresh price "
+                    f"(order book stale, no REST quote)"
+                )
+            return
+
         try:
             # Get current price for close order
             close_price = self.get_price(
@@ -1678,6 +1697,18 @@ class GridExecutor(ExecutorBase):
         if inventory <= Decimal("0"):
             return
 
+        now = float(self._strategy.current_timestamp)
+        backoff_s = float(self._close_price_setting("aggressive_close_retry_backoff_s", "10"))
+        max_attempts = int(self._close_price_setting("max_aggressive_close_attempts", "6"))
+        if now < getattr(self, "_aggressive_close_next_ts", 0.0):
+            self._closing_in_progress = False
+            return
+        if getattr(self, "_close_failure_active", False) or getattr(self, "_aggressive_close_attempts", 0) >= max_attempts:
+            self._aggressive_close_next_ts = now + backoff_s
+            self._closing_in_progress = False
+            self._handle_close_failure(inventory)
+            return
+
         # Wait for balance unlock after graceful-order cancellation.
         # _determine_close_order_amount retries up to _close_balance_max_retries
         # times, sleeping _close_balance_retry_interval between each attempt.
@@ -1697,11 +1728,21 @@ class GridExecutor(ExecutorBase):
                 self._closing_in_progress = False
                 return
 
+        # Never price a close order from a stale book: refresh or defer (no blind sell).
+        if not await self._maybe_refresh_close_quote():
+            self._aggressive_close_next_ts = now + backoff_s
+            self._closing_in_progress = False
+            self.logger().error(
+                f"❌ CLOSE_DEFERRED: {self.config.trading_pair} no reliable market price — "
+                f"position {float(inventory):.6f} stays open/visible, retry in {backoff_s:.0f}s"
+            )
+            return
+
         try:
             # Get config for aggressive close
             custom_info = self.config.custom_info or {}
             close_method = custom_info.get('aggressive_close_method', 'MARKET')
-            slippage_guard_pct = custom_info.get('aggressive_close_slippage_guard_pct', Decimal("0.30"))
+            slippage_guard_pct = Decimal(str(custom_info.get('aggressive_close_slippage_guard_pct', "0.30")))
 
             # Quantize amount
             quantized_amount = self.connectors[self.config.connector_name].quantize_order_amount(
@@ -1730,7 +1771,7 @@ class GridExecutor(ExecutorBase):
                     current_price = self.get_price(
                         self.config.connector_name,
                         self.config.trading_pair,
-                        self.close_order_price_type
+                        self._aggressive_close_price_type()
                     )
                 except Exception:
                     current_price = self.mid_price if self.mid_price else Decimal("0")
@@ -1748,7 +1789,39 @@ class GridExecutor(ExecutorBase):
                     guarded_price = self.connectors[self.config.connector_name].quantize_order_price(
                         self.config.trading_pair, guarded_price
                     )
+                    guarded_price = self._clamp_to_exchange_min_sell(guarded_price)
 
+                connector = self.connectors[self.config.connector_name]
+                market_supported = False
+                try:
+                    market_supported = OrderType.MARKET in connector.supported_order_types()
+                except Exception:
+                    market_supported = False
+                price_rejections = getattr(self, "_price_rejected_retries", 0)
+                use_real_market = (
+                    price_rejections >= getattr(self, "_max_price_rejected_retries", 3)
+                    and not getattr(self, "_market_close_fallback_used", False)
+                    and market_supported
+                    and current_price and current_price > Decimal("0")
+                )
+
+                if use_real_market:
+                    self._market_close_fallback_used = True
+                    self.logger().warning(
+                        f"🚨 Story B1: Placing REAL MARKET close order after "
+                        f"{price_rejections} price rejections | "
+                        f"side={self.close_order_side.name} amount={float(quantized_amount):.6f} "
+                        f"ref_price={float(current_price):.6f}"
+                    )
+                    order_id = self.place_order(
+                        connector_name=self.config.connector_name,
+                        trading_pair=self.config.trading_pair,
+                        order_type=OrderType.MARKET,
+                        side=self.close_order_side,
+                        amount=quantized_amount,
+                        price=current_price,
+                    )
+                elif current_price and current_price > Decimal("0"):
                     self.logger().warning(
                         f"🚨 Story B1: Placing MARKET close order (slippage-guarded) | "
                         f"side={self.close_order_side.name} amount={float(quantized_amount):.6f} "
@@ -1766,6 +1839,15 @@ class GridExecutor(ExecutorBase):
                         price=guarded_price,
                     )
                 else:
+                    if self._price_freshness_enabled():
+                        # No reliable price: never place a blind close order.
+                        self._aggressive_close_next_ts = now + backoff_s
+                        self._closing_in_progress = False
+                        self.logger().error(
+                            f"❌ CLOSE_DEFERRED: {self.config.trading_pair} no valid close price — "
+                            f"no blind MARKET order; retry in {backoff_s:.0f}s"
+                        )
+                        return
                     # Fallback: no valid price, use raw MARKET as last resort
                     self.logger().warning(
                         f"🚨 Story B1: Placing raw MARKET close order (no price available) | "
@@ -1787,7 +1869,7 @@ class GridExecutor(ExecutorBase):
                 current_price = self.get_price(
                     self.config.connector_name,
                     self.config.trading_pair,
-                    self.close_order_price_type
+                    self._aggressive_close_price_type()
                 )
 
                 # Apply slippage: For SELL, go below best bid. For BUY, go above best ask.
@@ -1801,6 +1883,7 @@ class GridExecutor(ExecutorBase):
                 aggressive_price = self.connectors[self.config.connector_name].quantize_order_price(
                     self.config.trading_pair, aggressive_price
                 )
+                aggressive_price = self._clamp_to_exchange_min_sell(aggressive_price)
 
                 self.logger().warning(
                     f"🚨 Story B1: Placing IOC close order | "
@@ -1853,6 +1936,7 @@ class GridExecutor(ExecutorBase):
         :return: None
         """
         self.update_grid_levels()
+        await self._maybe_refresh_close_quote()
         self.update_metrics()
         # FASE 1C: runs every tick regardless of status (RUNNING/SHUTTING_DOWN/
         # CLOSING) so post-fill monitoring (from post_fill_sampling_start_fill
@@ -2115,6 +2199,9 @@ class GridExecutor(ExecutorBase):
                         and not self._close_order_id):
                     self.update_position_metrics()
                     remaining = self.position_size_base
+                    if (remaining > Decimal("0")
+                            and self._strategy.current_timestamp < getattr(self, "_aggressive_close_next_ts", 0.0)):
+                        return  # bounded-retry backoff
                     if remaining > Decimal("0"):
                         self.logger().warning(
                             f"🔄 AGGRESSIVE_RETRY: {self.config.trading_pair} | "
@@ -2228,6 +2315,17 @@ class GridExecutor(ExecutorBase):
                 f"reason={unwind_close_reason.name if unwind_close_reason else 'UNKNOWN'}) "
                 f"for {self.config.trading_pair} — routing through the existing unwind instead of "
                 f"placing a competing close order."
+            )
+            self.start_forced_close(mapped_close_type)
+            return
+
+        # FRESH-PRICE GUARD: with a stale book and no fresh quote, route through the
+        # two-phase unwind (which refreshes prices asynchronously) instead of pricing
+        # an immediate close from stale data.
+        if not keep_position and self._close_price_unreliable():
+            self.logger().warning(
+                f"⚠️  early_stop({effective_reason.name if effective_reason else 'UNKNOWN'}) for "
+                f"{self.config.trading_pair}: order book stale — routing through unwind until a fresh price exists"
             )
             self.start_forced_close(mapped_close_type)
             return
@@ -3072,7 +3170,10 @@ class GridExecutor(ExecutorBase):
 
     def _get_close_order_candidate(self, level: GridLevel):
         take_profit_price = self.get_take_profit_price(level)
-        if ((level.side == TradeType.BUY and take_profit_price <= self.current_close_quote) or
+        market_tp_price = self._market_aware_tp_sell_price(level, take_profit_price)
+        if market_tp_price is not None:
+            take_profit_price = market_tp_price
+        elif ((level.side == TradeType.BUY and take_profit_price <= self.current_close_quote) or
                 (level.side == TradeType.SELL and take_profit_price >= self.current_close_quote)):
             take_profit_price = self.current_close_quote * (
                 1 + self.config.safe_extra_spread) if level.side == TradeType.BUY else self.current_close_quote * (
@@ -3122,6 +3223,211 @@ class GridExecutor(ExecutorBase):
             amount=amount,
             price=take_profit_price
         )
+
+    # ------------------------------------------------------------------
+    # Close-price freshness (ICNT incident 2026-11-08)
+    # ------------------------------------------------------------------
+    def _close_price_setting(self, key: str, default: str) -> Decimal:
+        value = (self.config.custom_info or {}).get(key, default)
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return Decimal(default)
+
+    def _aggressive_close_price_type(self) -> PriceType:
+        """Bitget: an urgent SELL must be marketable, so price it from the (fresh) best bid."""
+        if self.close_order_side == TradeType.SELL and self._price_freshness_enabled():
+            return PriceType.BestBid
+        return self.close_order_price_type
+
+    def _price_freshness_enabled(self) -> bool:
+        # Only Bitget book uids are proven server timestamps in ms; Kraken/OKX
+        # keep their existing pricing behaviour unchanged.
+        return str(self.config.connector_name).lower().startswith("bitget")
+
+    def _order_book_age_s(self) -> Optional[float]:
+        if not self._price_freshness_enabled():
+            return None
+        try:
+            book = self.connectors[self.config.connector_name].get_order_book(self.config.trading_pair)
+            uid = max(int(book.snapshot_uid or 0), int(book.last_diff_uid or 0))
+        except Exception:
+            return None
+        if not (10 ** 12 <= uid < 10 ** 14):
+            return None
+        return float(self._strategy.current_timestamp) - uid / 1000.0
+
+    def _is_book_price_stale(self) -> bool:
+        if not self._price_freshness_enabled():
+            return False
+        now = float(self._strategy.current_timestamp)
+        if now < getattr(self, "_force_price_refresh_until", 0.0):
+            return True
+        age = self._order_book_age_s()
+        return age is not None and age > float(self._close_price_setting("close_price_max_age_s", "30"))
+
+    def _valid_fresh_quote(self) -> Optional[Dict[str, Any]]:
+        quote = getattr(self, "_fresh_close_quote", None)
+        if not quote:
+            return None
+        age = float(self._strategy.current_timestamp) - quote["ts"]
+        if age < -5 or age > float(self._close_price_setting("close_price_max_age_s", "30")):
+            return None
+        return quote
+
+    def _close_price_unreliable(self) -> bool:
+        """True when the book is stale and no fresh fallback quote exists."""
+        return self._is_book_price_stale() and self._valid_fresh_quote() is None
+
+    async def _fetch_fresh_quote(self) -> Optional[Dict[str, Any]]:
+        connector = self.connectors[self.config.connector_name]
+        pair = self.config.trading_pair
+        now = float(self._strategy.current_timestamp)
+        max_age = float(self._close_price_setting("close_price_max_age_s", "30"))
+        try:
+            snapshot = await connector.order_book_tracker.data_source._order_book_snapshot(pair)
+            bids = [Decimal(str(row.price)) for row in snapshot.bids if row.amount > 0]
+            asks = [Decimal(str(row.price)) for row in snapshot.asks if row.amount > 0]
+            snap_age = now - float(snapshot.timestamp)
+            if bids and asks and -5 <= snap_age <= max_age:
+                bid, ask = max(bids), min(asks)
+                if Decimal("0") < bid <= ask:
+                    return {"bid": bid, "ask": ask, "mid": (bid + ask) / 2, "ts": now, "source": "rest_snapshot"}
+            self.logger().warning(
+                f"⚠️ FRESH_PRICE: rejected REST snapshot for {pair} "
+                f"(bids={len(bids)} asks={len(asks)} age={snap_age:.1f}s)"
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.logger().warning(f"⚠️ FRESH_PRICE: REST snapshot failed for {pair}: {e}")
+        try:
+            prices = await connector.get_last_traded_prices([pair])
+            last = Decimal(str(prices.get(pair, 0))) if prices else Decimal("0")
+            if last > 0:
+                return {"bid": last, "ask": last, "mid": last, "ts": now, "source": "ticker"}
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.logger().warning(f"⚠️ FRESH_PRICE: ticker failed for {pair}: {e}")
+        return None
+
+    async def _maybe_refresh_close_quote(self) -> bool:
+        """Refresh the fallback quote when the book is stale. Returns True if prices are reliable."""
+        if not self._is_book_price_stale():
+            return True
+        if self._valid_fresh_quote() is not None:
+            return True
+        now = float(self._strategy.current_timestamp)
+        interval = float(self._close_price_setting("close_price_refresh_interval_s", "5"))
+        if now - getattr(self, "_last_fresh_quote_fetch_ts", 0.0) < interval:
+            return False
+        self._last_fresh_quote_fetch_ts = now
+        quote = await self._fetch_fresh_quote()
+        if quote is None:
+            self._fresh_close_quote = None
+            self.logger().error(
+                f"❌ FRESH_PRICE_UNAVAILABLE: {self.config.trading_pair} order book is stale "
+                f"(age={self._order_book_age_s()}) and no fresh REST price — no close order will be placed"
+            )
+            return False
+        self._fresh_close_quote = quote
+        self.logger().warning(
+            f"🔄 FRESH_PRICE: {self.config.trading_pair} stale book (age={self._order_book_age_s()}) → "
+            f"{quote['source']} bid={quote['bid']} ask={quote['ask']}"
+        )
+        return True
+
+    def _market_aware_tp_sell_price(self, level: GridLevel, target: Decimal) -> Optional[Decimal]:
+        """
+        Bitget TP SELL pricing from fresh market data. Returns None to keep the legacy path.
+
+        - No reliable price: use the strategy target only (never a stale book price).
+        - Fresh best bid above target: price at the best bid (marketable, fills at bid or better).
+        - Otherwise: the TP target. Always respects a learned 41117 minimum sell price.
+        """
+        if level.side != TradeType.BUY or not self._price_freshness_enabled():
+            return None
+        price = target
+        if not self._close_price_unreliable():
+            try:
+                best_bid = self._coerce_to_decimal(
+                    self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.BestBid)
+                )
+            except Exception as e:
+                self.logger().warning(f"⚠️ TP_PRICE: best bid unavailable for {self.config.trading_pair}: {e}")
+                best_bid = Decimal("0")
+            if best_bid.is_finite() and best_bid > target:
+                price = self.connectors[self.config.connector_name].quantize_order_price(
+                    self.config.trading_pair, best_bid
+                )
+                self.logger().info(
+                    f"📈 TP_PRICE_IMPROVED: {self.config.trading_pair} best bid {best_bid} > TP target "
+                    f"{target:.6f} → LIMIT SELL @ {price}"
+                )
+        return self._clamp_to_exchange_min_sell(price)
+
+    def _clamp_to_exchange_min_sell(self, price: Decimal) -> Decimal:
+        """Respect the Bitget 41117 minimum sell price learned from the last rejection."""
+        min_sell = getattr(self, "_exchange_min_sell_price", None)
+        if self.close_order_side != TradeType.SELL or not min_sell or price >= min_sell:
+            return price
+        connector = self.connectors[self.config.connector_name]
+        clamped = connector.quantize_order_price(self.config.trading_pair, min_sell * Decimal("1.001"))
+        if clamped < min_sell:
+            clamped += getattr(self.trading_rules, "min_price_increment", Decimal("0"))
+        self.logger().warning(
+            f"⚠️ MIN_SELL_PRICE: {self.config.trading_pair} close price {price} → {clamped} "
+            f"(exchange min {min_sell})"
+        )
+        return clamped
+
+    def _handle_close_failure(self, inventory: Decimal) -> None:
+        """
+        Terminal close-failure state: no further close orders, position stays tracked
+        (executor remains CLOSING, so no new BUYs). Resolves itself when the exchange
+        balance shows the position was closed manually.
+        """
+        base_asset = self.config.trading_pair.split("-")[0]
+        if not getattr(self, "_close_failure_active", False):
+            self._close_failure_active = True
+            self.logger().critical(
+                f"🚨 CLOSE_FAILURE: {self.config.trading_pair} could not be closed after "
+                f"{getattr(self, '_aggressive_close_attempts', 0)} rejected close orders — "
+                f"no further SELL orders; {float(inventory):.6f} {base_asset} remains tracked. "
+                f"Manual intervention required."
+            )
+        try:
+            connector = self.connectors[self.config.connector_name]
+            available = self._coerce_to_decimal(connector.get_available_balance(base_asset))
+            min_size = self.trading_rules.min_order_size
+        except Exception as e:
+            self.logger().warning(f"⚠️ CLOSE_FAILURE: balance check failed for {base_asset}: {e}")
+            return
+        if available < min_size:
+            self.logger().warning(
+                f"✅ CLOSE_FAILURE_RESOLVED: {self.config.trading_pair} available {available} {base_asset} "
+                f"< min order {min_size} — position closed externally (manual sale); shutting down"
+            )
+            self._close_failure_active = False
+            self._status = RunnableStatus.SHUTTING_DOWN
+            self._unwind_phase = "DONE"
+            self._closing_in_progress = False
+
+    def get_price(self, connector_name: str, trading_pair: str, price_type: PriceType = PriceType.MidPrice):
+        if (
+            connector_name == self.config.connector_name
+            and trading_pair == self.config.trading_pair
+            and self._is_book_price_stale()
+        ):
+            quote = self._valid_fresh_quote()
+            if quote is not None:
+                if price_type == PriceType.BestBid:
+                    return quote["bid"]
+                if price_type == PriceType.BestAsk:
+                    return quote["ask"]
+                return quote["mid"]
+        return super().get_price(connector_name, trading_pair, price_type)
 
     def _get_price_with_fallback(self, price_type: PriceType, context: str) -> Decimal:
         try:
@@ -3675,6 +3981,18 @@ class GridExecutor(ExecutorBase):
             current_price=guard_price if guard_price is not None else getattr(self, "mid_price", None),
             stage="place_close_order",
         ):
+            self._closing_in_progress = False
+            if self._status == RunnableStatus.CLOSING:
+                self._status = RunnableStatus.RUNNING
+            return
+
+        # FRESH-PRICE GUARD: never compute a new close order from a stale book.
+        if self.close_order_side == TradeType.SELL and self._close_price_unreliable():
+            if not HAS_LOG_THROTTLE or should_log(f"close_stale_{self.config.id}", interval_sec=60):
+                self.logger().error(
+                    f"❌ CLOSE_DEFERRED: {self.config.trading_pair} {close_type} close blocked — "
+                    f"order book stale and no fresh REST price; position stays tracked"
+                )
             self._closing_in_progress = False
             if self._status == RunnableStatus.CLOSING:
                 self._status = RunnableStatus.RUNNING
@@ -5089,6 +5407,18 @@ class GridExecutor(ExecutorBase):
         self._ensure_buy_cap_state()
         # BITGET FIX: Clear cancel retry tracking when order fails (including "order not found" errors)
         order_id = event.order_id
+        if order_id in getattr(self, "_aggressive_close_orders", set()):
+            # Bounded aggressive close: count rejections and back off before retrying.
+            self._aggressive_close_attempts = getattr(self, "_aggressive_close_attempts", 0) + 1
+            self._aggressive_close_next_ts = (
+                float(self._strategy.current_timestamp)
+                + float(self._close_price_setting("aggressive_close_retry_backoff_s", "10"))
+            )
+            self.logger().warning(
+                f"⚠️ AGGRESSIVE_CLOSE_REJECTED: {self.config.trading_pair} order {order_id} "
+                f"(attempt {self._aggressive_close_attempts}/"
+                f"{int(self._close_price_setting('max_aggressive_close_attempts', '6'))})"
+            )
         if order_id in self._buy_cap_cancel_requested_ids:
             self._buy_cap_cancel_requested_ids.discard(order_id)
             self._emit_decision_telemetry(
@@ -5163,6 +5493,13 @@ class GridExecutor(ExecutorBase):
         is_price_rejected = "selling price cannot be lower" in error_msg
         if is_price_rejected:
             self._price_rejected_retries += 1
+            # The band is relative to the live market: our price source was
+            # probably stale. Force a fresh REST quote before the next attempt.
+            self._fresh_close_quote = None
+            self._force_price_refresh_until = (
+                float(self._strategy.current_timestamp)
+                + float(self._close_price_setting("close_price_max_age_s", "30"))
+            )
             # Parse the minimum price from the error message
             import re
             match = re.search(r'lower than\s+([\d.]+)', error_msg)
