@@ -152,6 +152,7 @@ class GridExecutor(ExecutorBase):
         self._open_fee_in_base = False
 
         self._trailing_stop_trigger_pct: Optional[Decimal] = None
+        self._trailing_peak_pnl_pct: Optional[Decimal] = None
         self._current_retries = 0
         self._max_retries = max_retries
         self._close_balance_retry_interval = 1.0  # seconds between balance refresh attempts
@@ -3279,6 +3280,24 @@ class GridExecutor(ExecutorBase):
         """True when the book is stale and no fresh fallback quote exists."""
         return self._is_book_price_stale() and self._valid_fresh_quote() is None
 
+    def _price_reliable_for_controller(self) -> bool:
+        try:
+            return not self._close_price_unreliable()
+        except Exception:
+            return False
+
+    def _reliable_bid_for_controller(self) -> Optional[Decimal]:
+        """Fresh executable bid (book or REST fallback) for controller emergency checks; Bitget only."""
+        if not self._price_freshness_enabled() or not self._price_reliable_for_controller():
+            return None
+        try:
+            bid = self._coerce_to_decimal(
+                self.get_price(self.config.connector_name, self.config.trading_pair, PriceType.BestBid)
+            )
+        except Exception:
+            return None
+        return bid if bid.is_finite() and bid > 0 else None
+
     async def _fetch_fresh_quote(self) -> Optional[Dict[str, Any]]:
         connector = self.connectors[self.config.connector_name]
         pair = self.config.trading_pair
@@ -3803,6 +3822,9 @@ class GridExecutor(ExecutorBase):
                 return False
             self.close_type = CloseType.TIME_LIMIT
             return True
+        elif self._profit_exit_price_unreliable():
+            # Bitget: profit exits (trailing / global TP) wait for a fresh price; stop-loss above stays active.
+            return False
         elif self.trailing_stop_condition():
             if not self._fee_aware_close_allowed(
                 CloseType.TRAILING_STOP,
@@ -3932,17 +3954,46 @@ class GridExecutor(ExecutorBase):
                 return self.mid_price >= self.config.limit_price
         return False
 
+    def _profit_exit_price_unreliable(self) -> bool:
+        if not self._close_price_unreliable():
+            return False
+        if not HAS_LOG_THROTTLE or should_log(f"profit_exit_paused_{self.config.id}", interval_sec=60):
+            self.logger().warning(
+                f"⏸️ PROFIT_EXIT_PAUSED: {self.config.trading_pair} price unreliable (stale book, no fresh quote) — "
+                f"trailing/TP not evaluated; trigger={self._trailing_stop_trigger_pct} kept"
+            )
+        return True
+
     def trailing_stop_condition(self):
         if self.config.triple_barrier_config.trailing_stop:
+            trailing = self.config.triple_barrier_config.trailing_stop
             net_pnl_pct = self.position_pnl_pct
+            pair = self.config.trading_pair
+            if self._trailing_peak_pnl_pct is None or net_pnl_pct > self._trailing_peak_pnl_pct:
+                self._trailing_peak_pnl_pct = net_pnl_pct
             if not self._trailing_stop_trigger_pct:
-                if net_pnl_pct > self.config.triple_barrier_config.trailing_stop.activation_price:
-                    self._trailing_stop_trigger_pct = net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta
+                if net_pnl_pct > trailing.activation_price:
+                    self._trailing_stop_trigger_pct = net_pnl_pct - trailing.trailing_delta
+                    self.logger().info(
+                        f"🎯 TRAILING_ACTIVATED: {pair} position_pnl={net_pnl_pct:.4%} > activation "
+                        f"{trailing.activation_price:.4%} → trigger={self._trailing_stop_trigger_pct:.4%} "
+                        f"price={self.mid_price}"
+                    )
             else:
                 if net_pnl_pct < self._trailing_stop_trigger_pct:
+                    self.logger().warning(
+                        f"🏁 TRAILING_STOP_HIT: {pair} position_pnl={net_pnl_pct:.4%} < trigger "
+                        f"{self._trailing_stop_trigger_pct:.4%} (peak={self._trailing_peak_pnl_pct:.4%}) "
+                        f"price={self.mid_price}"
+                    )
                     return True
-                if net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta > self._trailing_stop_trigger_pct:
-                    self._trailing_stop_trigger_pct = net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta
+                if net_pnl_pct - trailing.trailing_delta > self._trailing_stop_trigger_pct:
+                    self._trailing_stop_trigger_pct = net_pnl_pct - trailing.trailing_delta
+                    if not HAS_LOG_THROTTLE or should_log(f"trailing_raise_{self.config.id}", interval_sec=60):
+                        self.logger().info(
+                            f"📈 TRAILING_TRIGGER_RAISED: {pair} peak={self._trailing_peak_pnl_pct:.4%} "
+                            f"trigger={self._trailing_stop_trigger_pct:.4%} price={self.mid_price}"
+                        )
         return False
 
     def place_close_order_and_cancel_open_orders(
@@ -4559,6 +4610,7 @@ class GridExecutor(ExecutorBase):
         # Preserve entry_* fields from config.custom_info (set by controller at creation)
         initial_info = self.config.custom_info or {}
         entry_fields = {k: v for k, v in initial_info.items() if k.startswith("entry_")}
+        reliable_bid = self._reliable_bid_for_controller()
         self._ensure_regime_state()
 
         return {
@@ -4587,6 +4639,13 @@ class GridExecutor(ExecutorBase):
             "position_fees_quote": self.position_fees_quote,
             "break_even_price": self.position_break_even_price,
             "position_pnl_quote": self.position_pnl_quote,
+            "position_pnl_pct": getattr(self, "position_pnl_pct", Decimal("0")),
+            "price_reliable": self._price_reliable_for_controller(),
+            "reliable_bid": reliable_bid,
+            "reliable_bid_ts": float(self._strategy.current_timestamp) if reliable_bid is not None else None,
+            "trailing_active": bool(getattr(self, "_trailing_stop_trigger_pct", None)),
+            "trailing_stop_trigger_pct": getattr(self, "_trailing_stop_trigger_pct", None),
+            "trailing_peak_pnl_pct": getattr(self, "_trailing_peak_pnl_pct", None),
             "open_liquidity_placed": self.open_liquidity_placed,
             "close_liquidity_placed": self.close_liquidity_placed,
             # US-006: Early stop reason tracking

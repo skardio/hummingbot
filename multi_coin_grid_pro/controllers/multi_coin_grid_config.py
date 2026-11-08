@@ -485,6 +485,25 @@ class MultiCoinGridConfig(ControllerConfigBase):
         ),
         json_schema_extra={"is_updatable": True}
     )
+    # "legacy": realized PnL / remaining position − 0.31% (pre-2026-11-08 behaviour).
+    # "total_net": (realized net + unrealized net on a fresh executor price − est. exit fee) / deployed
+    # BUY capital; respects hard grace and an active trailing stop. None → total_net for Bitget, legacy otherwise.
+    grid_profit_exit_mode: Optional[str] = Field(
+        default=None,
+        json_schema_extra={"is_updatable": True}
+    )
+
+    @field_validator("grid_profit_exit_mode")
+    @classmethod
+    def _validate_grid_profit_exit_mode(cls, v):
+        if v not in (None, "legacy", "total_net"):
+            raise ValueError("grid_profit_exit_mode must be 'legacy', 'total_net' or null")
+        return v
+    # Strategic option (total_net only): also require the remaining inventory to sell at ≥ break-even after fees.
+    grid_profit_exit_require_remaining_profitable: bool = Field(
+        default=False,
+        json_schema_extra={"is_updatable": True}
+    )
 
     # Startup delay - wait before first trade
     min_startup_wait_seconds: int = Field(

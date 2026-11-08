@@ -12635,6 +12635,134 @@ class MultiCoinGridController(ControllerBase):
             # On error, allow (fail open)
             return True
 
+    def _emergency_reference_price(self, coin: str, trend_price: Decimal) -> Decimal:
+        """
+        Price for emergency/hard-stop checks (Bitget). Returns the lowest of the trend ticker price and the
+        executor's fresh executable bid (order book or REST fallback), so a frozen ticker cannot hide a crash.
+        Never less protective than the ticker alone; Kraken/OKX keep the ticker price unchanged.
+        """
+        if not str(self.config.connector_name).lower().startswith("bitget"):
+            return trend_price
+        now = self.market_data_provider.time()
+        max_age = float(getattr(self.config, "max_price_age_ms", 35000)) / 1000
+        prices = [trend_price]
+        ticker_fresh = False
+        calculator = getattr(self, "trend_calculator", None)
+        cached = getattr(calculator, "_last_price_cache", {}).get(coin) if calculator is not None else None
+        if cached is not None:
+            try:
+                ticker_fresh = 0 <= now - float(cached[1]) <= max_age
+            except (TypeError, ValueError, IndexError):
+                ticker_fresh = False
+        executor_info = self._get_executor_info(self.active_executor_id) if self.active_executor_id else None
+        custom_info = getattr(executor_info, "custom_info", None) or {}
+        bid_fresh = False
+        try:
+            bid = Decimal(str(custom_info.get("reliable_bid")))
+            bid_ts = float(custom_info.get("reliable_bid_ts"))
+            bid_fresh = bid.is_finite() and bid > 0 and 0 <= now - bid_ts <= max_age
+        except Exception:
+            bid_fresh = False
+        if bid_fresh:
+            prices.append(bid)
+        if not ticker_fresh and not bid_fresh:
+            last_log = getattr(self, "_emergency_price_stale_log_ts", {})
+            if now - last_log.get(coin, 0.0) >= 300:
+                last_log[coin] = now
+                self._emergency_price_stale_log_ts = last_log
+                self.logger().critical(
+                    f"🚨 EMERGENCY_PRICE_STALE: {coin} ticker and executor bid older than {max_age:.0f}s — "
+                    f"emergency/hard-stop checks use last known price {trend_price}; "
+                    f"executor will not place a close order without a fresh price"
+                )
+        return min(prices)
+
+    def _grid_profit_exit_mode(self) -> str:
+        mode = getattr(self.config, "grid_profit_exit_mode", None)
+        if mode in ("legacy", "total_net"):
+            return mode
+        return "total_net" if str(self.config.connector_name).lower().startswith("bitget") else "legacy"
+
+    def _total_net_grid_profit(self, custom_info: Dict) -> Optional[Dict[str, Any]]:
+        """
+        Grid PnL on deployed BUY capital. realized_pnl_quote (completed levels) and position_pnl_quote
+        (open inventory) are already net of the fees paid, so only the estimated exit fee is subtracted.
+        """
+        def dec(key: str) -> Decimal:
+            try:
+                value = Decimal(str(custom_info.get(key) or 0))
+            except Exception:
+                return Decimal("0")
+            return value if value.is_finite() else Decimal("0")
+
+        position_size_quote = dec("position_size_quote")
+        position_fees_quote = dec("position_fees_quote")
+        deployed = dec("realized_buy_size_quote") + position_size_quote + position_fees_quote
+        if deployed <= 0:
+            return None
+        fee_cfg = getattr(self.config, "fee_aware_filter", {}) or {}
+        exit_fee_rate = Decimal(str(fee_cfg.get("taker_fee_pct", 0.35))) / Decimal("100")
+        price_reliable = custom_info.get("price_reliable", True) is not False
+        realized = dec("realized_pnl_quote")
+        unrealized = dec("position_pnl_quote") if price_reliable else Decimal("0")
+        # size_base × price = position_size_quote + position_pnl_quote + position_fees_quote
+        exit_value = position_size_quote + position_fees_quote + unrealized
+        exit_fee = max(exit_value, Decimal("0")) * exit_fee_rate
+        total = realized + unrealized - exit_fee
+        return {
+            "deployed": deployed,
+            "realized": realized,
+            "unrealized": unrealized,
+            "exit_fee": exit_fee,
+            "remaining_net": unrealized - exit_fee,
+            "total": total,
+            "total_pct": float(total / deployed * 100),
+            "realized_pct": float(realized / deployed * 100),
+            "price_reliable": price_reliable,
+            "has_position": position_size_quote > 0,
+        }
+
+    def _total_net_grid_profit_decision(
+        self, coin: str, custom_info: Dict, min_grid_profit_pct: float, in_hard_grace_period: bool
+    ) -> Optional[str]:
+        """Returns "exit", "block" (protect grid profit from trend exits) or None."""
+        block_pct = 0.3
+        pnl = self._total_net_grid_profit(custom_info or {})
+        if pnl is None:
+            return None
+        summary = (
+            f"deployed={pnl['deployed']:.4f} realized_net={pnl['realized']:.4f} "
+            f"unrealized_net={pnl['unrealized']:.4f} est_exit_fee={pnl['exit_fee']:.4f} "
+            f"total_net={pnl['total']:.4f} ({pnl['total_pct']:.2f}%) remaining_net={pnl['remaining_net']:.4f}"
+        )
+        if not pnl["price_reliable"] and pnl["has_position"]:
+            self.logger().warning(
+                f"⏸️ {coin} GRID PROFIT EXIT SKIPPED: executor price unreliable (stale book, no fresh quote); "
+                f"{summary}"
+            )
+            return "block" if pnl["realized_pct"] > block_pct else None
+        if pnl["total_pct"] < min_grid_profit_pct:
+            return "block" if pnl["total_pct"] > block_pct else None
+        if in_hard_grace_period:
+            self.logger().info(f"⏸️ {coin} GRID PROFIT EXIT HELD: hard grace period active; {summary}")
+            return "block"
+        if custom_info.get("trailing_active"):
+            self.logger().info(
+                f"⏸️ {coin} GRID PROFIT EXIT DEFERRED to trailing "
+                f"(trigger={custom_info.get('trailing_stop_trigger_pct')}, "
+                f"peak={custom_info.get('trailing_peak_pnl_pct')}); {summary}"
+            )
+            return "block"
+        if (getattr(self.config, "grid_profit_exit_require_remaining_profitable", False)
+                and pnl["has_position"] and pnl["remaining_net"] < 0):
+            self.logger().info(f"⏸️ {coin} GRID PROFIT EXIT HELD: remaining inventory below break-even; {summary}")
+            return "block"
+        self.logger().info(
+            f"[EXIT] 💰 {coin} GRID PROFIT EXIT TRIGGERED (total_net): {pnl['total_pct']:.2f}% "
+            f"≥ {min_grid_profit_pct}%; {summary}"
+        )
+        return "exit"
+
     # PRO EXIT SYSTEM - 5-Layer Stack
     def should_exit_position(self, coin: str) -> Optional[str]:
         """
@@ -12733,11 +12861,16 @@ class MultiCoinGridController(ControllerBase):
             estimated_fees_pct = 0.31
             net_price_change_pct = price_change_pct - estimated_fees_pct
 
+            # Emergency/hard stop use the most conservative fresh price (frozen ticker must not hide a crash)
+            emergency_price = self._emergency_reference_price(coin, current_price)
+            emergency_change_pct = float((emergency_price - entry_price) / entry_price * 100)
+
             # ---------------------------------------
             # LAYER 3: EMERGENCY EXIT (PRIORITY #1)
             # ---------------------------------------
             emergency_exit_pct = getattr(self.config, 'emergency_exit_pct', -12.0)  # Default: -12% (only flash crash)
-            if price_change_pct <= emergency_exit_pct:
+            if emergency_change_pct <= emergency_exit_pct:
+                current_price, price_change_pct = emergency_price, emergency_change_pct
                 self.logger().critical(
                     f"[EXIT] 🚨 {coin} EMERGENCY EXIT TRIGGERED:\n" f"   Entry Price: €{
                         entry_price:.4f}\n" f"   Current Price: €{
@@ -12752,7 +12885,8 @@ class MultiCoinGridController(ControllerBase):
             # LAYER 3: HARD STOP (Fail-safe)
             # ---------------------------------------
             hard_stop_pct = getattr(self.config, 'hard_stop_pct', -15.0)  # Default: -15% (ultimate fail-safe)
-            if price_change_pct <= hard_stop_pct:
+            if emergency_change_pct <= hard_stop_pct:
+                current_price, price_change_pct = emergency_price, emergency_change_pct
                 self.logger().critical(
                     f"[EXIT] 🛑 {coin} HARD STOP TRIGGERED:\n" f"   Entry Price: €{
                         entry_price:.4f}\n" f"   Current Price: €{
@@ -12774,6 +12908,16 @@ class MultiCoinGridController(ControllerBase):
                     None
                 )
                 if executor_info:
+                    custom_info = executor_info.custom_info
+                    min_grid_profit_pct = getattr(self.config, 'min_grid_profit_pct', 0.6)  # Default: 0.6%
+                    if self._grid_profit_exit_mode() == "total_net":
+                        decision = self._total_net_grid_profit_decision(
+                            coin, custom_info, min_grid_profit_pct, in_hard_grace_period
+                        )
+                        if decision == "exit":
+                            return "grid_profit_exit"
+                        grid_profit_blocking_exit = decision == "block"
+                if executor_info and self._grid_profit_exit_mode() == "legacy":
                     # Check realized PnL from custom_info (more accurate for grid executor)
                     custom_info = executor_info.custom_info
                     realized_pnl_quote = custom_info.get("realized_pnl_quote", Decimal("0"))

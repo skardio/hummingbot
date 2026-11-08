@@ -440,3 +440,108 @@ def test_icnt_tp_fill_records_fees_and_net_pnl():
     # Net PnL = real cash result; the cost of the unsellable dust is excluded by design.
     assert ex.realized_pnl_quote == pytest.approx(cash_pnl + dust * ENTRY, abs=Decimal("1e-6"))
     assert ex.realized_pnl_quote > Decimal("1.80")
+
+
+# ---------------------------------------------------------------------------
+# Trailing stop / profit exits only on reliable prices (Bitget); stop-loss always
+# ---------------------------------------------------------------------------
+def _trailing(connector_name="bitget", book_age_s=1.0):
+    from hummingbot.strategy_v2.executors.position_executor.data_types import TrailingStop
+
+    ex, connector, strategy = _make(connector_name=connector_name, book_age_s=book_age_s)
+    ex.config.triple_barrier_config.trailing_stop = TrailingStop(
+        activation_price=Decimal("0.015"), trailing_delta=Decimal("0.010"))
+    ex.config.timestamp = NOW - 600  # not expired (time_limit 3600 s)
+    ex._fee_aware_close_allowed = Mock(return_value=True)
+    return ex, connector, strategy
+
+
+def _tick(ex, pnl_pct):
+    ex.position_pnl_pct = Decimal(str(pnl_pct))
+    return ex.control_triple_barrier()
+
+
+def _feed_down(connector):
+    connector.order_book_tracker.data_source._order_book_snapshot = AsyncMock(side_effect=OSError("429"))
+    connector.get_last_traded_prices = AsyncMock(side_effect=OSError("429"))
+
+
+class TestTrailingPriceValidation:
+    def test_trailing_activates_raises_and_fires_on_fresh_prices(self, caplog):
+        ex, _, _ = _trailing()
+        caplog.set_level("INFO")
+        assert _tick(ex, "0.010") is False and ex._trailing_stop_trigger_pct is None
+        assert _tick(ex, "0.020") is False
+        assert ex._trailing_stop_trigger_pct == Decimal("0.010")
+        assert _tick(ex, "0.035") is False
+        assert ex._trailing_stop_trigger_pct == Decimal("0.025")
+        assert ex._trailing_peak_pnl_pct == Decimal("0.035")
+        assert _tick(ex, "0.024") is True
+        assert ex.close_type == CloseType.TRAILING_STOP
+        assert "TRAILING_ACTIVATED" in caplog.text and "TRAILING_STOP_HIT" in caplog.text
+
+    def test_stale_book_without_fallback_pauses_trailing(self):
+        ex, connector, _ = _trailing(book_age_s=3.5 * 3600)
+        ex._trailing_stop_trigger_pct = Decimal("0.025")
+        _feed_down(connector)
+        assert run(ex._maybe_refresh_close_quote()) is False
+        assert _tick(ex, "0.001") is False  # would have fired on the stale price
+        assert ex._trailing_stop_trigger_pct == Decimal("0.025")
+        assert ex.close_type is None or ex.close_type != CloseType.TRAILING_STOP
+
+    def test_stale_book_with_rest_fallback_evaluates_trailing(self):
+        ex, _, _ = _trailing(book_age_s=3.5 * 3600)
+        ex._trailing_stop_trigger_pct = Decimal("0.025")
+        assert run(ex._maybe_refresh_close_quote()) is True  # fresh REST snapshot 0.37/0.371
+        assert ex.get_price(ex.config.connector_name, PAIR, PriceType.MidPrice) == (FRESH_BID + FRESH_ASK) / 2
+        assert _tick(ex, "0.020") is True
+        assert ex.close_type == CloseType.TRAILING_STOP
+
+    def test_stop_loss_still_fires_during_feed_outage(self):
+        ex, connector, _ = _trailing(book_age_s=3.5 * 3600)
+        _feed_down(connector)
+        run(ex._maybe_refresh_close_quote())
+        assert _tick(ex, "-0.06") is True  # stop_loss 5%
+        assert ex.close_type == CloseType.STOP_LOSS
+
+    def test_price_reliable_flag_for_controller(self):
+        ex, connector, _ = _trailing(book_age_s=3.5 * 3600)
+        _feed_down(connector)
+        run(ex._maybe_refresh_close_quote())
+        assert ex._price_reliable_for_controller() is False
+        ex2, _, _ = _trailing(book_age_s=1.0)
+        assert ex2._price_reliable_for_controller() is True
+
+    @pytest.mark.parametrize("connector_name", ["kraken", "okx"])
+    def test_kraken_okx_trailing_unchanged(self, connector_name):
+        ex, connector, _ = _trailing(connector_name=connector_name, book_age_s=3.5 * 3600)
+        _feed_down(connector)
+        assert ex._price_reliable_for_controller() is True
+        assert _tick(ex, "0.020") is False
+        assert _tick(ex, "0.005") is True
+        assert ex.close_type == CloseType.TRAILING_STOP
+
+
+class TestReliableBidForController:
+    """Executor publishes a fresh executable bid so the controller emergency exit is not ticker-only."""
+
+    def test_stale_book_publishes_rest_fallback_bid(self):
+        ex, _, _ = _make()
+        assert run(ex._maybe_refresh_close_quote()) is True
+        assert ex._reliable_bid_for_controller() == FRESH_BID
+
+    def test_stale_book_without_fallback_publishes_nothing(self):
+        ex, connector, _ = _make()
+        _feed_down(connector)
+        assert run(ex._maybe_refresh_close_quote()) is False
+        assert ex._reliable_bid_for_controller() is None  # never the frozen 0.3178
+
+    def test_fresh_book_publishes_book_bid(self):
+        ex, connector, _ = _make(book_age_s=1.0)
+        connector.get_price_by_type = Mock(return_value=Decimal("0.2761"))
+        assert ex._reliable_bid_for_controller() == Decimal("0.2761")
+
+    @pytest.mark.parametrize("connector_name", ["kraken", "okx"])
+    def test_kraken_okx_publish_nothing(self, connector_name):
+        ex, _, _ = _make(connector_name=connector_name)
+        assert ex._reliable_bid_for_controller() is None
