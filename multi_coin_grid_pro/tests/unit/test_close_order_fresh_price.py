@@ -545,3 +545,56 @@ class TestReliableBidForController:
     def test_kraken_okx_publish_nothing(self, connector_name):
         ex, _, _ = _make(connector_name=connector_name)
         assert ex._reliable_bid_for_controller() is None
+
+
+class TestStaleBookBlocksNewBuys:
+    """New BUY levels are never evaluated on a stale Bitget book without a fresh REST quote."""
+
+    def _sentinel_levels(self, ex):
+        ex._filter_levels_by_activation_bounds = Mock(return_value=["L1"])
+        ex._sort_levels_by_proximity = Mock(side_effect=lambda levels: levels)
+        ex._configured_open_order_cap = Mock(return_value=None)
+        ex._emit_decision_telemetry = Mock()
+
+    def test_stale_book_without_fallback_blocks_buys(self):
+        ex, connector, _ = _make()
+        connector.order_book_tracker.data_source._order_book_snapshot = AsyncMock(side_effect=IOError("down"))
+        connector.get_last_traded_prices = AsyncMock(side_effect=IOError("down"))
+        self._sentinel_levels(ex)
+        assert run(ex._maybe_refresh_close_quote()) is False
+        assert ex.get_open_orders_to_create() == []
+        ex._filter_levels_by_activation_bounds.assert_not_called()
+        ex._emit_decision_telemetry.assert_called_once_with("BUY_DECISION_BLOCK", reason_code="STALE_PRICE")
+        ex.get_open_orders_to_create()
+        assert ex._emit_decision_telemetry.call_count == 1  # deduplicated while still stale
+
+    def test_stale_book_with_fresh_rest_quote_evaluates_buys_on_fresh_price(self):
+        ex, _, _ = _make()
+        self._sentinel_levels(ex)
+        assert run(ex._maybe_refresh_close_quote()) is True
+        assert ex.get_price("bitget", PAIR, PriceType.MidPrice) == (FRESH_BID + FRESH_ASK) / 2
+        assert ex.get_open_orders_to_create() == ["L1"]
+
+    def test_fresh_book_is_not_blocked(self):
+        ex, _, _ = _make(book_age_s=2)
+        self._sentinel_levels(ex)
+        assert ex.get_open_orders_to_create() == ["L1"]
+
+    def test_buys_resume_after_price_becomes_fresh(self):
+        ex, connector, _ = _make()
+        snap = connector.order_book_tracker.data_source._order_book_snapshot
+        connector.order_book_tracker.data_source._order_book_snapshot = AsyncMock(side_effect=IOError("down"))
+        connector.get_last_traded_prices = AsyncMock(side_effect=IOError("down"))
+        self._sentinel_levels(ex)
+        run(ex._maybe_refresh_close_quote())
+        assert ex.get_open_orders_to_create() == []
+        connector.order_book_tracker.data_source._order_book_snapshot = snap
+        ex._last_fresh_quote_fetch_ts = 0.0
+        assert run(ex._maybe_refresh_close_quote()) is True
+        assert ex.get_open_orders_to_create() == ["L1"]
+
+    def test_kraken_okx_never_hit_stale_buy_gate(self):
+        for name in ("kraken", "okx"):
+            ex, _, _ = _make(connector_name=name)
+            self._sentinel_levels(ex)
+            assert ex.get_open_orders_to_create() == ["L1"]

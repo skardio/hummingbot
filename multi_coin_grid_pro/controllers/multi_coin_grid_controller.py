@@ -1432,9 +1432,18 @@ class MultiCoinGridController(ControllerBase):
             )
             return self.max_simultaneous_coins
 
-        # Get current portfolio value
+        # Get current portfolio value. Bitget sizes slots on working capital only:
+        # positions_held are unreconciled history (orphan fills), not tradeable capital.
+        slot_basis = (
+            "working_capital"
+            if str(getattr(self.config, "connector_name", "")).lower().startswith("bitget")
+            else "portfolio"
+        )
         try:
-            account_balance = self._calculate_portfolio_value()
+            if slot_basis == "working_capital":
+                account_balance = self._calculate_drawdown_portfolio()
+            else:
+                account_balance = self._calculate_portfolio_value()
         except Exception as e:
             self.logger().warning(f"Failed to calculate portfolio value for dynamic slots: {e}, using static fallback")
             cached_regime = getattr(self, "_last_detected_regime", None)
@@ -1481,7 +1490,7 @@ class MultiCoinGridController(ControllerBase):
 
         self.logger().info(
             f"[REGIME_ROUTE] source={regime_source} detected={detected_regime or 'None'} "
-            f"normalized={current_regime} slots={dynamic_slots} balance={account_balance}"
+            f"normalized={current_regime} slots={dynamic_slots} balance={account_balance} basis={slot_basis}"
         )
 
         return dynamic_slots
@@ -10572,7 +10581,18 @@ class MultiCoinGridController(ControllerBase):
             # Send live WS subscribe message so the pair receives real-time updates.
             # Without this, the orderbook goes stale immediately after the REST snapshot.
             data_source = getattr(tracker, '_data_source', None)
-            if data_source is not None and hasattr(data_source, 'resubscribe_pair'):
+            if order_book and hasattr(type(data_source), 'subscribe_to_trading_pair'):
+                # Bitget: the tracker must route WS messages for this pair before the
+                # subscription is sent, otherwise live diffs/snapshots are never applied.
+                self._ensure_book_tracking_task(symbol, tracker)
+                if await data_source.subscribe_to_trading_pair(symbol):
+                    self.logger().info(f"[ORDERBOOK] ✅ WS subscribed to {symbol} live updates")
+                else:
+                    self.logger().warning(
+                        f"[ORDERBOOK] WS live subscription not active for {symbol} "
+                        f"(snapshot + executor REST fallback only until next stream connect)"
+                    )
+            elif data_source is not None and hasattr(data_source, 'resubscribe_pair'):
                 try:
                     await data_source.resubscribe_pair(symbol)
                     self.logger().info(f"[ORDERBOOK] ✅ WS subscribed to {symbol} live updates")
@@ -10588,6 +10608,24 @@ class MultiCoinGridController(ControllerBase):
             self.logger().debug(traceback.format_exc())
         if symbol in self.monitored_coins and not self._monitoring_market_supported(symbol):
             await self._resync_monitoring_pool()
+
+    def _ensure_book_tracking_task(self, symbol: str, tracker) -> None:
+        """Register the tracker queue/task that applies live WS messages for a dynamic pair (idempotent)."""
+        queues = getattr(tracker, '_tracking_message_queues', None)
+        tasks = getattr(tracker, '_tracking_tasks', None)
+        if queues is None or tasks is None or not hasattr(tracker, '_track_single_book'):
+            return
+        task = tasks.get(symbol)
+        if symbol in queues and task is not None and not task.done():
+            return
+        if task is not None and not task.done():
+            task.cancel()  # orphaned task from an earlier unsubscribe still holds the old queue
+        saved = getattr(tracker, '_saved_message_queues', None)
+        if saved is not None:
+            saved.pop(symbol, None)  # never replay diffs queued before this snapshot
+        queues[symbol] = asyncio.Queue(maxsize=5000)
+        tasks[symbol] = safe_ensure_future(tracker._track_single_book(symbol))
+        self.logger().info(f"[ORDERBOOK] Live book tracking registered for {symbol}")
 
     def _unsubscribe_from_orderbook(self, symbol: str) -> None:
         """Unsubscribe from orderbook updates for a trading pair."""
@@ -11146,6 +11184,12 @@ class MultiCoinGridController(ControllerBase):
                 tracker._tracking_message_queues[symbol] = asyncio.Queue(maxsize=5000)  # Bounded to prevent memory leak
                 tracker._tracking_tasks[symbol] = safe_ensure_future(tracker._track_single_book(symbol))
                 self.logger().info(f"✅ Order book initialized for {symbol}")
+                data_source = getattr(tracker, '_data_source', None)
+                if hasattr(type(data_source), 'subscribe_to_trading_pair'):
+                    try:
+                        await data_source.subscribe_to_trading_pair(symbol)
+                    except Exception as ws_e:
+                        self.logger().warning(f"[ORDERBOOK] WS live subscription failed for {symbol}: {ws_e}")
 
                 # PAPER TRADING FIX: Also add to paper trading connector's _trading_pairs
                 # This is needed because paper trading connector has its own _trading_pairs dict

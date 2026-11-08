@@ -3649,6 +3649,20 @@ class GridExecutor(ExecutorBase):
         if (self.max_open_creation_timestamp > self._strategy.current_timestamp - self.config.order_frequency or
                 n_open_orders >= self.config.max_open_orders):
             return []
+        if self._close_price_unreliable():
+            # Bitget only: stale book and no fresh REST quote -> never evaluate new BUY levels.
+            signature = ("STALE_PRICE",)
+            if signature != getattr(self, "_decision_last_block_signature", None):
+                self._decision_last_block_signature = signature
+                self._emit_decision_telemetry("BUY_DECISION_BLOCK", reason_code="STALE_PRICE")
+                self.logger().warning(
+                    f"⏸️ BUY_BLOCKED_STALE_PRICE: {self.config.trading_pair} book age="
+                    f"{self._order_book_age_s()}s, no fresh REST quote — no new BUY orders"
+                )
+            return []
+        if getattr(self, "_decision_last_block_signature", None) == ("STALE_PRICE",):
+            self._decision_last_block_signature = None
+            self.logger().info(f"▶️ BUY_PRICE_FRESH_AGAIN: {self.config.trading_pair} new BUY evaluation resumed")
         levels_allowed = self._filter_levels_by_activation_bounds()
         sorted_levels_by_proximity = self._sort_levels_by_proximity(levels_allowed)
         configured_cap = self._configured_open_order_cap()

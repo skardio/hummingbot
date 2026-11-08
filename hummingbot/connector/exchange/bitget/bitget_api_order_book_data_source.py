@@ -44,6 +44,14 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._v3_success_pairs: set[str] = set()
         self._v3_last_failure = ""
         self._route_probe_failures: Dict[str, str] = {}
+        # Live V2 stream state: dynamically added pairs are subscribed on the active
+        # connection; a reconnect resubscribes every pair in self._trading_pairs.
+        self._ws_assistant: Optional[WSAssistant] = None
+        self._ws_subscribed_pairs: set[str] = set()
+        self._ws_subscription_lock = asyncio.Lock()
+        self._ws_subscribed_at: Dict[str, float] = {}
+        self._ws_last_update_ts: Dict[str, float] = {}
+        self._ws_awaiting_first_update: set[str] = set()
 
     def requires_v3_order_book(self, trading_pair: str) -> bool:
         return trading_pair in self._v3_pairs
@@ -188,11 +196,19 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
             if event_message["event"] == "error":
                 message = event_message.get("msg", "Unknown error")
                 error_code = event_message.get("code", "Unknown code")
+                inst_id = (event_message.get("arg") or {}).get("instId")
+                if inst_id:
+                    # A pair-specific rejection must not tear down the stream for all other pairs.
+                    await self._mark_ws_subscription_failed(inst_id, f"{message} ({error_code})")
+                    return
                 raise IOError(f"Failed to subscribe to public channels: {message} ({error_code})")
 
             if event_message["event"] == "subscribe":
-                channel: str = event_message["arg"]["channel"]
-                self.logger().info(f"Subscribed to public channel: {channel.upper()}")
+                arg = event_message.get("arg") or {}
+                channel: str = arg.get("channel", "")
+                self.logger().info(
+                    f"Subscribed to public channel: {channel.upper()} {arg.get('instId', '')}".rstrip()
+                )
         else:
             self.logger().info(f"Message for unknown channel received: {event_message}")
 
@@ -266,6 +282,7 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
             )
 
             message_queue.put_nowait(diff_message)
+            self._record_ws_update(diff_message.trading_pair, "update")
 
     async def _parse_order_book_snapshot_message(
         self,
@@ -285,6 +302,7 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
             )
 
             message_queue.put_nowait(snapshot_message)
+            self._record_ws_update(snapshot_message.trading_pair, "snapshot")
 
     async def _is_v3_symbol(self, symbol: str) -> bool:
         # V2 acknowledgements can uppercase a case-sensitive r-symbol.
@@ -331,36 +349,109 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
         return websocket_assistant
 
+    @staticmethod
+    def _subscription_topics(symbol: str) -> List[Dict[str, str]]:
+        return [
+            {"instType": "SPOT", "channel": channel, "instId": symbol}
+            for channel in [CONSTANTS.PUBLIC_WS_BOOKS, CONSTANTS.PUBLIC_WS_TRADE]
+        ]
+
     async def _subscribe_channels(self, ws: WSAssistant) -> None:
+        async with self._ws_subscription_lock:
+            try:
+                subscription_topics: List[Dict[str, str]] = []
+                pairs = [p for p in dict.fromkeys(self._trading_pairs) if p not in self._v3_pairs]
+
+                for trading_pair in pairs:
+                    symbol: str = await self._connector.exchange_symbol_associated_to_pair(
+                        trading_pair
+                    )
+                    subscription_topics.extend(self._subscription_topics(symbol))
+
+                if subscription_topics:
+                    await ws.send(
+                        WSJSONRequest({
+                            "op": "subscribe",
+                            "args": subscription_topics,
+                        })
+                    )
+                    self.logger().info("Subscribed to public channels...")
+                # A new connection starts with exactly these subscriptions (no stale/duplicate state).
+                now = self._time()
+                self._ws_subscribed_pairs = set(pairs)
+                self._ws_subscribed_at = {pair: now for pair in pairs}
+                self._ws_awaiting_first_update = set(pairs)
+                self._ws_assistant = ws
+                self.logger().info(f"[BITGET_WS] STREAM_SUBSCRIBED pairs={len(pairs)}")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger().exception("Unexpected error occurred subscribing to public channels...")
+                raise
+
+    async def subscribe_to_trading_pair(self, trading_pair: str) -> bool:
+        """
+        Live-subscribe a dynamically added pair on the active V2 stream (idempotent).
+
+        Returns True when the pair is subscribed on the current connection. Without an
+        active stream the pair is kept in self._trading_pairs and is subscribed on the
+        next (re)connect; V3 pairs stay REST-only.
+        """
+        if trading_pair in self._v3_pairs:
+            self.logger().info(f"[BITGET_WS] SUBSCRIBE_SKIPPED pair={trading_pair} reason=v3_rest_only")
+            return False
+        if trading_pair not in self._trading_pairs:
+            self._trading_pairs.append(trading_pair)
+        async with self._ws_subscription_lock:
+            if trading_pair in self._ws_subscribed_pairs:
+                return True
+            ws = self._ws_assistant
+            if ws is None:
+                self.logger().warning(
+                    f"[BITGET_WS] SUBSCRIBE_DEFERRED pair={trading_pair} reason=no_active_stream "
+                    f"(subscribed on next connect)"
+                )
+                return False
+            try:
+                symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair)
+                await ws.send(WSJSONRequest({"op": "subscribe", "args": self._subscription_topics(symbol)}))
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger().warning(f"[BITGET_WS] SUBSCRIBE_FAILED pair={trading_pair} error={e}")
+                return False
+            self._ws_subscribed_pairs.add(trading_pair)
+            self._ws_subscribed_at[trading_pair] = self._time()
+            self._ws_awaiting_first_update.add(trading_pair)
+            self.logger().info(f"[BITGET_WS] SUBSCRIBE_SENT pair={trading_pair} channels=books,trade")
+            return True
+
+    async def _mark_ws_subscription_failed(self, symbol: str, reason: str) -> None:
         try:
-            subscription_topics: List[Dict[str, str]] = []
-
-            for trading_pair in self._trading_pairs:
-                if trading_pair in self._v3_pairs:
-                    continue
-                symbol: str = await self._connector.exchange_symbol_associated_to_pair(
-                    trading_pair
-                )
-                for channel in [CONSTANTS.PUBLIC_WS_BOOKS, CONSTANTS.PUBLIC_WS_TRADE]:
-                    subscription_topics.append({
-                        "instType": "SPOT",
-                        "channel": channel,
-                        "instId": symbol
-                    })
-
-            if subscription_topics:
-                await ws.send(
-                    WSJSONRequest({
-                        "op": "subscribe",
-                        "args": subscription_topics,
-                    })
-                )
-                self.logger().info("Subscribed to public channels...")
-        except asyncio.CancelledError:
-            raise
+            trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol)
         except Exception:
-            self.logger().exception("Unexpected error occurred subscribing to public channels...")
-            raise
+            trading_pair = symbol
+        self._ws_subscribed_pairs.discard(trading_pair)
+        self.logger().error(
+            f"[BITGET_WS] SUBSCRIBE_FAILED pair={trading_pair} reason={reason} "
+            f"(other pairs unaffected; executor REST fallback remains active)"
+        )
+
+    def _record_ws_update(self, trading_pair: str, kind: str) -> None:
+        now = self._time()
+        if trading_pair in self._ws_awaiting_first_update:
+            self._ws_awaiting_first_update.discard(trading_pair)
+            subscribed_at = self._ws_subscribed_at.get(trading_pair)
+            latency = f"{now - subscribed_at:.1f}s" if subscribed_at is not None else "n/a"
+            self.logger().info(
+                f"[BITGET_WS] FIRST_UPDATE pair={trading_pair} type={kind} since_subscribe={latency}"
+            )
+        self._ws_last_update_ts[trading_pair] = now
+
+    def last_ws_update_age(self, trading_pair: str) -> Optional[float]:
+        """Seconds since the last live WS book message for this pair (None if never received)."""
+        last = self._ws_last_update_ts.get(trading_pair)
+        return None if last is None else max(0.0, self._time() - last)
 
     async def _request_order_book_snapshot(self, trading_pair: str) -> Dict[str, Any]:
         lock = self._snapshot_locks.setdefault(trading_pair, asyncio.Lock())
@@ -514,6 +605,8 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 )
                 await self._sleep(1.0)
             finally:
+                self._ws_assistant = None
+                self._ws_subscribed_pairs.clear()
                 if self._ping_task is not None:
                     self._ping_task.cancel()
                     try:
