@@ -6,6 +6,9 @@ nohup python -m multi_coin_grid_pro.services.momentum_signal_service \
   > logs/momentum_live.log 2>&1 &
 echo "PID: $!"
 
+cd /home/mo/repos/hummingbot
+source .venv/bin/activate
+python track_v5_paper.py
 
   > //home/mo/repos/hummingbot/logs/momentum_live.log 2>&1 &  python3 -m pytest multi_coin_grid_pro/tests/unit/ -q
 
