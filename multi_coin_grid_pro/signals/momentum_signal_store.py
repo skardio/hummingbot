@@ -3,13 +3,17 @@
 # JsonSnapshotWriter: atomic JSON snapshot via os.replace.
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from multi_coin_grid_pro.signals import momentum_shadow_archive as shadow_archive
 from multi_coin_grid_pro.signals.momentum_models import MomentumSignal, ScanResult
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Guard: these filenames are exclusively grid-bot databases — never write here.
@@ -113,6 +117,9 @@ CREATE TABLE IF NOT EXISTS signal_outcomes (
     m15_hit_at_seconds       REAL,     -- eerste tick met price <= entry_max*0.985
     mfe_at_seconds           REAL,     -- seconden waarop best_exit_pct zijn (laatst geobserveerde) maximum bereikte
     mae_at_seconds           REAL,     -- seconden waarop worst_drawdown_pct zijn (laatst geobserveerde) minimum bereikte
+    exit_30m_price           REAL,     -- eerste geobserveerde prijs op/na 30 min (finale evaluatietick)
+    exit_30m_pct             REAL,     -- (exit_30m_price / entry_price - 1) * 100
+    exit_30m_at_seconds      REAL,     -- werkelijk verstreken seconden bij die observatie
     FOREIGN KEY (signal_id) REFERENCES signals(id)
 )
 """
@@ -193,6 +200,9 @@ class SignalStore:
             "ALTER TABLE signal_outcomes ADD COLUMN m15_hit_at_seconds REAL",
             "ALTER TABLE signal_outcomes ADD COLUMN mfe_at_seconds REAL",
             "ALTER TABLE signal_outcomes ADD COLUMN mae_at_seconds REAL",
+            "ALTER TABLE signal_outcomes ADD COLUMN exit_30m_price REAL",
+            "ALTER TABLE signal_outcomes ADD COLUMN exit_30m_pct REAL",
+            "ALTER TABLE signal_outcomes ADD COLUMN exit_30m_at_seconds REAL",
         ]
         for stmt in _migrations:
             try:
@@ -200,6 +210,7 @@ class SignalStore:
             except sqlite3.OperationalError:
                 pass  # column already exists
         self._conn.commit()
+        shadow_archive.ensure_schema(self._conn)
 
     def get_or_create_config_version(self, params: Dict) -> int:
         """Return existing config_version id if params unchanged, else insert new row.
@@ -326,8 +337,19 @@ class SignalStore:
         return ids
 
     def purge_old(self, retention_days: int) -> int:
-        """Delete records older than *retention_days*. Returns deleted count."""
-        cutoff = time.time() - retention_days * 86_400
+        """Delete records older than *retention_days*. Returns deleted count.
+
+        Archiveert eerst alle definitieve BUY_NOW-outcomes (shadow-archief). Faalt
+        dat, dan wordt NIETS verwijderd (fail closed voor onderzoeksdata).
+        """
+        now = time.time()
+        try:
+            shadow_archive.backfill(self._conn, now)
+        except sqlite3.Error:
+            logger.exception("[SHADOW_ARCHIVE] backfill failed — purge skipped")
+            self._conn.rollback()
+            return 0
+        cutoff = now - retention_days * 86_400
         cursor = self._conn.execute(
             "DELETE FROM signals WHERE created_at < ?", (cutoff,)
         )

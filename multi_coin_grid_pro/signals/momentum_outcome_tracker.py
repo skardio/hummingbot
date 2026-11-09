@@ -5,6 +5,8 @@ import sqlite3
 import time
 from typing import Dict, Optional, Tuple
 
+from multi_coin_grid_pro.signals import momentum_shadow_archive as shadow_archive
+
 logger = logging.getLogger(__name__)
 
 # Time windows in minutes to track outcome prices
@@ -62,6 +64,13 @@ class OutcomeTracker:
     def __init__(self, db_path: str) -> None:
         self._conn = sqlite3.connect(db_path)
         self._conn.execute("PRAGMA journal_mode=WAL")
+        # Restart recovery: archiveer definitieve BUY_NOW-outcomes die nog niet
+        # in het permanente archief staan (bv. crash tussen outcome- en archive-write).
+        shadow_archive.backfill(self._conn, time.time())
+
+    def start_shadow_cohort(self, now: Optional[float] = None) -> float:
+        """Leg eenmalig het startmoment van de schone shadow-cohort vast (idempotent)."""
+        return shadow_archive.start_cohort_if_absent(self._conn, time.time() if now is None else now)
 
     def update(
         self,
@@ -82,6 +91,8 @@ class OutcomeTracker:
         # Include up to 40-min-old signals so that signals just past the 30-min
         # boundary (e.g., service was briefly down) still get evaluated_at set.
         grace_cutoff = now - 40 * 60
+        shadow_archive.record_scan(self._conn, now)
+        self._conn.commit()
 
         # Pending = BUY_NOW (entry_max required), WATCH or TOO_LATE (price as ref),
         # not yet fully evaluated.
@@ -323,6 +334,13 @@ class OutcomeTracker:
                         if wide_secs is not None:
                             upd["wide_time_to_first_hit_minutes"] = round(wide_secs / 60.0, 2)
 
+                # T+30 exit: eerste geldige prijsobservatie op/na 30 min (deze tick),
+                # nooit max/min. Werkelijk verstreken seconden worden vastgelegd;
+                # door de 40-min grace ligt dit altijd in [1800, 2400) s.
+                upd["exit_30m_price"] = price
+                upd["exit_30m_pct"] = round((price - entry_ref) / entry_ref * 100, 4)
+                upd["exit_30m_at_seconds"] = age_sec
+
                 upd["evaluated_at"] = now
 
             if upd:
@@ -332,6 +350,9 @@ class OutcomeTracker:
                     f"UPDATE signal_outcomes SET {set_clause} WHERE id = ?",  # noqa: S608
                     vals,
                 )
+                # Zelfde transactie als de definitieve outcome-write: atomair archiveren.
+                if label == "BUY_NOW" and "evaluated_at" in upd:
+                    shadow_archive.archive_evaluated(self._conn, sig_id, now)
                 self._conn.commit()
                 updated += 1
                 logger.debug(

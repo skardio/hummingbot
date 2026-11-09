@@ -109,6 +109,8 @@ class MomentumSignalService:
         self._store = SignalStore(db_path=self._db_path)
         self._writer = JsonSnapshotWriter(snapshot_path=self._snapshot_path)
         self._outcome_tracker = OutcomeTracker(db_path=self._db_path)
+        cohort_start = self._outcome_tracker.start_shadow_cohort()
+        logger.info("[SHADOW_ARCHIVE] cohort_start_ts=%.3f", cohort_start)
         params = self._build_config_params()
         self._config_version_id = self._store.get_or_create_config_version(params)
         logger.info("[CONFIG_VERSION] id=%d params=%s", self._config_version_id, params)

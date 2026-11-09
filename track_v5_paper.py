@@ -9,6 +9,9 @@ Frozen v5 rules (do not modify until 100 v5 signals collected):
   - market_breadth_15m >= 40
 
 Run: python track_v5_paper.py
+
+LEGACY: EV-model hieronder waardeert TIMEOUT via MFE (best_exit_pct) en STOP als vaste
+-2.00%. Gebruik track_v5_cohort.py voor de correcte payoff (T+30 exit, echte invalidation).
 """
 import sqlite3
 from datetime import UTC, datetime, timezone

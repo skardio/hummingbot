@@ -132,6 +132,41 @@ grep -E "ERROR|WARNING" data/momentum_service.log | tail -30
 | `data/momentum_service.log`      | Warnings/errors van de service            | Nee, groeit   |
 | `data/momentum_service.pid`      | PID van het achtergrondproces             | Per start     |
 
+`signals` wordt na 7 dagen gepurged (`SignalStore.purge_old`). Definitieve BUY_NOW-outcomes
+staan permanent in `buy_now_shadow_archive` (zelfde DB), zie hieronder.
+
+---
+
+## v5 shadow-archief en schone cohort
+
+- **Archive-write:** `OutcomeTracker` schrijft bij de definitieve evaluatie (≥30 min) van elk
+  BUY_NOW-signaal één rij naar `buy_now_shadow_archive`, in dezelfde SQLite-transactie als de
+  outcome-update. Idempotent (`signal_id` PK, `INSERT OR IGNORE`); rijen worden nooit herschreven.
+- **Recovery:** bij tracker-start en vóór elke `purge_old` archiveert een backfill alles wat nog
+  ontbreekt. Faalt die, dan wordt niets gepurged (fail closed). BUY_NOW die nooit geëvalueerd
+  konden worden (>45 min, geen outcome) krijgen `archive_status='UNEVALUATED'` → gat blijft zichtbaar.
+- **T+30 exit:** `exit_30m_price/pct/at_seconds` = prijs van de eerste tracker-tick op/na 30 min
+  (nooit max/min). Tolerantie: [1800, 2400) s door de 40-min grace; typisch 1800–1900 s.
+  Precisie: `exit_30m_at_seconds` = tracker-tick (einde scan) − signaal-`timestamp` (start scan);
+  de prijs zelf is tijdens die scan opgehaald, dus de werkelijke prijs-leeftijd ligt in
+  [at_seconds − scanduur, at_seconds] (scanduur ~80 s). Dit geldt identiek voor alle `*_hit_at_seconds`
+  en is bewust niet aangepast (zou CURRENT-timing wijzigen).
+- **Historische 69 (pre-fix):** het 30m-venster wordt in de tracker uitsluitend op de finale
+  evaluatietick geschreven (daarna niet meer pending), dus `max_price_30m` = exit-prijs en
+  `evaluated_at − timestamp` = exit-tijd. Geborgd door
+  `test_max_price_30m_written_once_on_evaluation_tick`. Voor gepurgde signalen is de signaaltijd
+  alleen tot op de seconde bekend (ledger `signal_ts`).
+- **v5_pass** wordt bij archiveren berekend met de frozen v5-SQL (`momentum_shadow_archive.V5_SQL`).
+- **Cohort:** de eerste servicestart met deze code legt `cohort_start_ts` + frozen definitie vast in
+  `shadow_archive_meta`. `shadow_scan_coverage` telt tracker-updates per uur (downtime-detectie).
+
+```bash
+python track_v5_cohort.py             # integriteit + CURRENT vs WIDE (bruto/netto)
+python track_v5_cohort.py --legacy69  # dry-run oude 69 shadow-trades met echte T+30
+```
+
+`track_v5_paper.py` is legacy: TIMEOUT = MFE − 0.5 en STOP = vast −2.00 (methodologisch onjuist).
+
 ---
 
 ## CLI opties
