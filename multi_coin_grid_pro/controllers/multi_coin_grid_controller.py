@@ -4752,45 +4752,12 @@ class MultiCoinGridController(ControllerBase):
                     f"⚠️  {best_coin} rejected by {gate} - checking fallbacks..."
                 )
 
-                # Try next best coins from top 10
-                fallback_found = False
-                if hasattr(self.trend_calculator, '_debug_info'):
-                    top_10 = self.trend_calculator._debug_info.get('top_10', [])
-                    for i, (fallback_coin, fallback_trend) in enumerate(top_10[1:], start=2):
-                        # 🔧 FIX: Skip if coin already has active grid
-                        if fallback_coin in self.active_coins:
-                            self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (already active)")
-                            continue
-
-                        if fallback_coin in excluded_coins or fallback_coin in config_blacklist:
-                            self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (blacklist)")
-                            continue
-
-                        # Check SmartEntry for fallback
-                        if self._entry_candidate_allowed(fallback_coin):
-                            # Multi-timeframe buy protection check
-                            if not self._check_multi_timeframe_buy(fallback_coin):
-                                self.logger().warning(f"⏱️  {fallback_coin}: Blocked by multi-timeframe protection")
-                                self._record_entry_rejection(candidate_rejections, fallback_coin, "multi_timeframe")
-                                continue
-
-                            # Also check multi-timeframe if enabled
-                            if not use_multi_timeframe or self._check_multi_timeframe_buy_conditions(fallback_coin):
-                                self.logger().info(
-                                    f"✅ Fallback: {fallback_coin} (#{i}) passes ALL filters! "
-                                    f"Trend: {fallback_trend:+.2f}%"
-                                )
-                                best_coin = fallback_coin
-                                fallback_found = True
-                                break
-                            else:
-                                self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (multi-timeframe)")
-                                self._record_entry_rejection(candidate_rejections, fallback_coin, "multi_timeframe")
-                        else:
-                            gate = self._record_entry_rejection(candidate_rejections, fallback_coin)
-                            self.logger().debug(f"   {i}. {fallback_coin}: REJECTED ({gate})")
-
-                if not fallback_found:
+                fallback_coin = self._select_entry_fallback(
+                    excluded_coins | config_blacklist, use_multi_timeframe, candidate_rejections
+                )
+                if fallback_coin:
+                    best_coin = fallback_coin
+                else:
                     best_coin = None
                     rejection_reason = self._entry_rejection_reason(candidate_rejections)
                     self.logger().warning(f"⚠️  No valid coin found in top 10: {rejection_reason}")
@@ -4801,45 +4768,12 @@ class MultiCoinGridController(ControllerBase):
                     f"⏱️  {best_coin} rejected by multi-timeframe protection - checking fallbacks..."
                 )
 
-                # Try next best coins from top 10
-                fallback_found = False
-                if hasattr(self.trend_calculator, '_debug_info'):
-                    top_10 = self.trend_calculator._debug_info.get('top_10', [])
-                    for i, (fallback_coin, fallback_trend) in enumerate(top_10[1:], start=2):
-                        # 🔧 FIX: Skip if coin already has active grid
-                        if fallback_coin in self.active_coins:
-                            self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (already active)")
-                            continue
-
-                        if fallback_coin in excluded_coins or fallback_coin in config_blacklist:
-                            self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (blacklist)")
-                            continue
-
-                        # Check SmartEntry for fallback
-                        if self._entry_candidate_allowed(fallback_coin):
-                            # Multi-timeframe buy protection check
-                            if not self._check_multi_timeframe_buy(fallback_coin):
-                                self.logger().warning(f"⏱️  {fallback_coin}: Blocked by multi-timeframe protection")
-                                self._record_entry_rejection(candidate_rejections, fallback_coin, "multi_timeframe")
-                                continue
-
-                            # Also check multi-timeframe if enabled
-                            if not use_multi_timeframe or self._check_multi_timeframe_buy_conditions(fallback_coin):
-                                self.logger().info(
-                                    f"✅ Fallback: {fallback_coin} (#{i}) passes ALL filters! "
-                                    f"Trend: {fallback_trend:+.2f}%"
-                                )
-                                best_coin = fallback_coin
-                                fallback_found = True
-                                break
-                            else:
-                                self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (multi-timeframe)")
-                                self._record_entry_rejection(candidate_rejections, fallback_coin, "multi_timeframe")
-                        else:
-                            gate = self._record_entry_rejection(candidate_rejections, fallback_coin)
-                            self.logger().debug(f"   {i}. {fallback_coin}: REJECTED ({gate})")
-
-                if not fallback_found:
+                fallback_coin = self._select_entry_fallback(
+                    excluded_coins | config_blacklist, use_multi_timeframe, candidate_rejections
+                )
+                if fallback_coin:
+                    best_coin = fallback_coin
+                else:
                     best_coin = None
                     rejection_reason = self._entry_rejection_reason(candidate_rejections)
                     self.logger().warning(f"⚠️  No valid coin found in top 10: {rejection_reason}")
@@ -4906,26 +4840,16 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().warning(
                         f"❌ {best_coin} does not meet multi-timeframe buy conditions - trying fallbacks..."
                     )
-                    # Fallback loop: try remaining top-10 coins before giving up
+                    # Fallback: same full entry validation as the other fallback paths
                     mtf_fallback_found = False
-                    if hasattr(self.trend_calculator, '_debug_info'):
-                        top_10 = self.trend_calculator._debug_info.get('top_10', [])
-                        _fb_config_blacklist = self.config.get_effective_blacklist(self.config.connector_name)
-                        _fb_excluded = _fb_config_blacklist | self.auto_blacklisted_coins
-                        for _i, (_fb_coin, _fb_trend) in enumerate(top_10[1:], start=2):
-                            if _fb_coin in _fb_excluded:
-                                continue
-                            if self._check_multi_timeframe_buy_conditions(_fb_coin):
-                                self.logger().info(
-                                    f"✅ MTF Fallback: {_fb_coin} (#{_i}) passes conditions! "
-                                    f"Trend: {_fb_trend:+.2f}%"
-                                )
-                                best_coin = _fb_coin
-                                rejection_reason = None
-                                mtf_fallback_found = True
-                                break
-                            else:
-                                self.logger().debug(f"   MTF fallback #{_i} {_fb_coin}: REJECTED (MTF)")
+                    fallback_coin = self._select_entry_fallback(
+                        excluded_coins | config_blacklist, use_multi_timeframe, candidate_rejections
+                    )
+                    if fallback_coin:
+                        self.logger().info(f"✅ MTF Fallback: {fallback_coin} passes ALL entry filters")
+                        best_coin = fallback_coin
+                        rejection_reason = None
+                        mtf_fallback_found = True
                     if not mtf_fallback_found:
                         self.logger().warning(
                             "⚠️  No fallback coin passes MTF conditions - will retry next cycle"
@@ -8382,6 +8306,39 @@ class MultiCoinGridController(ControllerBase):
             return False
         self._last_entry_gate_rejection = None
         return True
+
+    def _select_entry_fallback(self, excluded_coins: set, use_multi_timeframe: bool,
+                               candidate_rejections: list) -> Optional[str]:
+        """First top-10 fallback (rank #2 onward) passing risk_budget, SmartEntry (incl. ATR fee edge),
+        MTF protection and, if enabled, the MTF buy conditions (Downtrend Gate)."""
+        if not hasattr(self.trend_calculator, '_debug_info'):
+            return None
+        top_10 = self.trend_calculator._debug_info.get('top_10', [])
+        for i, (fallback_coin, fallback_trend) in enumerate(top_10[1:], start=2):
+            if fallback_coin in self.active_coins:
+                self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (already active)")
+                continue
+            if fallback_coin in excluded_coins:
+                self.logger().debug(f"   {i}. {fallback_coin}: SKIPPED (blacklist)")
+                continue
+            if not self._entry_candidate_allowed(fallback_coin):
+                gate = self._record_entry_rejection(candidate_rejections, fallback_coin)
+                self.logger().debug(f"   {i}. {fallback_coin}: REJECTED ({gate})")
+                continue
+            if not self._check_multi_timeframe_buy(fallback_coin):
+                self.logger().warning(f"⏱️  {fallback_coin}: Blocked by multi-timeframe protection")
+                self._record_entry_rejection(candidate_rejections, fallback_coin, "multi_timeframe")
+                continue
+            if use_multi_timeframe and not self._check_multi_timeframe_buy_conditions(fallback_coin):
+                self.logger().debug(f"   {i}. {fallback_coin}: REJECTED (multi-timeframe)")
+                self._record_entry_rejection(candidate_rejections, fallback_coin, "multi_timeframe")
+                continue
+            self.logger().info(
+                f"✅ Fallback: {fallback_coin} (#{i}) passes ALL filters! "
+                f"Trend: {fallback_trend:+.2f}%"
+            )
+            return fallback_coin
+        return None
 
     def _record_entry_rejection(self, candidate_rejections: list, symbol: str, filter_name: Optional[str] = None) -> str:
         """Append a funnel rejection; defaults to the gate that rejected the last _entry_candidate_allowed call."""

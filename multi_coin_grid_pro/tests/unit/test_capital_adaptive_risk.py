@@ -464,8 +464,90 @@ class TestSelectionOnlyPicksFundableCoins:
         import inspect
         source = inspect.getsource(MultiCoinGridController.determine_executor_actions)
         assert "self._check_smart_entry_filter(" not in source
-        assert source.count("self._entry_candidate_allowed(") == 4
+        assert source.count("self._entry_candidate_allowed(") == 2  # primary pick + multi-slot path
+        # SmartEntry, MTF-protection and MTF-downtrend fallbacks share the full entry validation
+        assert source.count("self._select_entry_fallback(") == 3
+        assert "_fb_coin" not in source
         assert source.count("self._release_capital_skipped_monitoring(best_coin)") == 2
+
+
+class TestEntryFallbackUsesFullValidation:
+    """Bitget 13 Nov: NEAR selected via MTF fallback after Q-USDT Downtrend Gate, without SmartEntry/ATR/risk_budget."""
+
+    TOP_10 = [("Q-USDT", 6.97), ("NEAR-USDT", 5.86), ("DOT-USDT", 4.29)]
+
+    def _ctrl(self):
+        ctrl = TestSelectionOnlyPicksFundableCoins()._ctrl()
+        ctrl.pair_volumes["NEAR-USDT"] = 40_000_000
+        ctrl.pair_spreads["NEAR-USDT"] = 0.0002
+        ctrl.trend_calculator._debug_info = {"top_10": list(self.TOP_10)}
+        ctrl._check_multi_timeframe_buy = Mock(return_value=True)
+        ctrl._check_multi_timeframe_buy_conditions = Mock(return_value=True)  # Downtrend Gate passes
+        return ctrl
+
+    def test_mtf_passing_candidate_rejected_by_smart_entry_is_skipped(self):
+        ctrl = self._ctrl()
+        ctrl._check_smart_entry_filter.side_effect = lambda s: s != "NEAR-USDT"  # e.g. ATR_BELOW_FEE_EDGE
+        rejections = []
+        assert ctrl._select_entry_fallback(set(), True, rejections) == "DOT-USDT"
+        assert {"symbol": "NEAR-USDT", "filter": "smart_entry"} in rejections
+        ctrl._check_multi_timeframe_buy_conditions.assert_called_once_with("DOT-USDT")
+
+    def test_mtf_passing_candidate_rejected_by_risk_budget_is_skipped(self):
+        ctrl = self._ctrl()
+        ctrl.trend_calculator._debug_info = {"top_10": [("Q-USDT", 6.97), ("JCT-USDT", 5.0)]}
+        rejections = []
+        assert ctrl._select_entry_fallback(set(), True, rejections) is None
+        assert rejections == [{"symbol": "JCT-USDT", "filter": "risk_budget"}]
+        ctrl._check_smart_entry_filter.assert_not_called()
+
+    def test_candidate_passing_all_checks_is_selected(self):
+        ctrl = self._ctrl()
+        rejections = []
+        assert ctrl._select_entry_fallback(set(), True, rejections) == "NEAR-USDT"
+        assert rejections == []
+        ctrl._check_smart_entry_filter.assert_called_once_with("NEAR-USDT")
+        ctrl._check_multi_timeframe_buy.assert_called_once_with("NEAR-USDT")
+        ctrl._check_multi_timeframe_buy_conditions.assert_called_once_with("NEAR-USDT")
+
+    def test_downtrend_gate_still_rejects_after_entry_checks(self):
+        ctrl = self._ctrl()
+        ctrl._check_multi_timeframe_buy_conditions.side_effect = lambda s: s != "NEAR-USDT"
+        rejections = []
+        assert ctrl._select_entry_fallback(set(), True, rejections) == "DOT-USDT"
+        assert {"symbol": "NEAR-USDT", "filter": "multi_timeframe"} in rejections
+
+    def test_determine_executor_actions_downtrend_fallback_skips_smart_entry_reject(self):
+        ctrl = self._ctrl()
+        for symbol in ("Q-USDT", "DOT-USDT"):
+            ctrl.pair_volumes[symbol] = 40_000_000
+            ctrl.pair_spreads[symbol] = 0.0002
+        ctrl._sync_risk_state = MagicMock()
+        ctrl._check_professional_exit_signals = MagicMock(return_value=[])
+        ctrl.monitored_coins = [c for c, _ in self.TOP_10]
+        ctrl.trend_calculator.get_top_n_coins.return_value = ["Q-USDT"]
+        ctrl.trend_calculator.get_trend.return_value = SimpleNamespace(
+            trend_60m=0.35, trend_240m=-1.25, trend_1440m=10.95, long_trend_warmup=False)
+        ctrl._check_smart_entry_filter.side_effect = lambda s: s != "NEAR-USDT"
+        ctrl._check_multi_timeframe_buy_conditions.side_effect = lambda s: s != "Q-USDT"  # Downtrend Gate
+        ctrl._log_selection_trace = Mock(side_effect=RuntimeError("stop after selection"))
+
+        ctrl.determine_executor_actions()
+
+        kwargs = ctrl._log_selection_trace.call_args.kwargs
+        assert kwargs["best_coin"] == "DOT-USDT"
+        assert kwargs["rejection_reason"] is None
+        assert {"symbol": "NEAR-USDT", "filter": "smart_entry"} in kwargs["candidate_rejections"]
+        assert [c.args[0] for c in ctrl._check_smart_entry_filter.call_args_list] == [
+            "Q-USDT", "NEAR-USDT", "DOT-USDT"]
+        assert [c.args[0] for c in ctrl._check_multi_timeframe_buy_conditions.call_args_list] == [
+            "Q-USDT", "DOT-USDT"]
+
+    def test_active_and_excluded_coins_are_never_selected(self):
+        ctrl = self._ctrl()
+        ctrl.active_coins = {"NEAR-USDT": object()}
+        assert ctrl._select_entry_fallback({"DOT-USDT"}, True, []) is None
+        ctrl._check_smart_entry_filter.assert_not_called()
 
 
 class TestRiskBudgetObservability:
