@@ -2,7 +2,7 @@ import asyncio
 import logging
 import math
 import sys
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from hummingbot.connector.connector_base import ConnectorBase
@@ -956,7 +956,7 @@ class GridExecutor(ExecutorBase):
         InFlightOrder on the TrackedOrder. If that event never comes (network issue,
         Kraken API dropped the request), the TrackedOrder.order stays None and the
         grid level is stuck in CLOSE_ORDER_PLACED forever — blocking ALL future close
-        orders (since get_close_orders_to_create returns [] when any close is pending).
+        orders (get_close_orders_to_create returns [] while any close is unconfirmed).
 
         This watchdog resets such zombie orders after _zombie_order_watchdog_sec (60s)
         so the level returns to OPEN_ORDER_FILLED and gets a fresh close order.
@@ -2763,6 +2763,8 @@ class GridExecutor(ExecutorBase):
     def adjust_and_place_close_order(self, level: GridLevel):
         order_candidate = self._get_close_order_candidate(level)
         self.adjust_order_candidates(self.config.connector_name, [order_candidate])
+        if order_candidate.amount > 0 and not self._cap_additional_close_amount(level, order_candidate):
+            return
 
         # ==============================================================================
         # BALANCE VALIDATION before placing close order
@@ -2873,6 +2875,47 @@ class GridExecutor(ExecutorBase):
                         f"(was: {self._balance_mismatch_attempts})"
                     )
                     self._balance_mismatch_attempts = 0
+
+    def _cap_additional_close_amount(self, level: GridLevel, order_candidate) -> bool:
+        """Cap a TP placed while other level TPs are open to inventory that is neither reserved by those
+        TPs nor locked on the exchange. Returns False to defer this level to a later tick."""
+        other_close_orders = [
+            lvl.active_close_order
+            for lvl in self.levels_by_state.get(GridLevelStates.CLOSE_ORDER_PLACED, [])
+            if lvl is not level and lvl.active_close_order is not None
+        ]
+        if not other_close_orders:
+            return True
+        reserved = sum((co.order.amount for co in other_close_orders if co.order is not None), Decimal("0"))
+        base_asset = self.config.trading_pair.split("-")[0]
+        try:
+            available = self._coerce_to_decimal(
+                self._strategy.connectors[self.config.connector_name].get_available_balance(base_asset)
+            )
+        except Exception:
+            available = Decimal("0")
+        amount = min(order_candidate.amount, self.position_size_base - reserved, available)
+        rules = self.trading_rules
+        increment = getattr(rules, "min_base_amount_increment", None)
+        if increment and increment > 0 and amount > 0:
+            amount = (amount / increment).to_integral_value(rounding=ROUND_DOWN) * increment
+        min_size = getattr(rules, "min_order_size", None) or Decimal("0")
+        min_notional = getattr(rules, "min_notional_size", None) or Decimal("0")
+        if amount <= 0 or amount < min_size or amount * order_candidate.price < min_notional:
+            if not HAS_LOG_THROTTLE or should_log(f"tp_deferred_{self.config.id}", interval_sec=60):
+                self.logger().info(
+                    f"⏳ TP_DEFERRED {self.config.trading_pair}: sellable {amount} {base_asset} "
+                    f"(position={self.position_size_base}, reserved_by_open_tps={reserved}, available={available}) "
+                    f"below exchange minimum; level stays covered by stop-loss"
+                )
+            return False
+        if amount < order_candidate.amount:
+            self.logger().info(
+                f"✂️ TP amount capped {self.config.trading_pair}: {order_candidate.amount} → {amount} {base_asset} "
+                f"(reserved_by_open_tps={reserved}, available={available})"
+            )
+        order_candidate.amount = amount
+        return True
 
     def _get_fee_rates(self) -> tuple:
         """Return (maker_fee_decimal, taker_fee_decimal) from the connector's fee schema.
@@ -3713,8 +3756,11 @@ class GridExecutor(ExecutorBase):
         This method is responsible for controlling the take profit. It will check if the net pnl percentage is greater
         than the take profit percentage and place the close order.
 
-        CRITICAL FIX: Limits close orders to 1 per batch to prevent "Insufficient funds" race conditions
-        when multiple levels try to sell the same inventory simultaneously.
+        Every filled level gets its own take-profit, placed sequentially: at most one new close order per
+        tick, and only once every previously submitted close order is confirmed by the exchange (so the
+        balance refresh before the next placement reflects its lock). Unconfirmed orders are reset by the
+        zombie watchdog, so a confirmed TP never blocks the remaining filled levels (NEAR 2026-11-16).
+        adjust_and_place_close_order() caps each additional TP to the unreserved, available inventory.
 
         EXCHANGE BALANCE SYNC FIX: Waits for balance_sync_delay (3s) after BUY fill before placing SELL.
         This prevents "Insufficient funds" errors on Kraken, Bitget, and other exchanges where the
@@ -3725,14 +3771,11 @@ class GridExecutor(ExecutorBase):
         close_orders_proposal = []
         open_orders_filled = self.levels_by_state[GridLevelStates.OPEN_ORDER_FILLED]
 
-        # Count existing close orders being processed
-        n_close_orders_pending = len(
-            [level.active_close_order for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
-        )
-
-        # CRITICAL: Only allow 1 close order at a time to prevent balance race conditions
-        # If we already have a close order pending, don't create more
-        if n_close_orders_pending >= 1:
+        # Serialize submissions: wait while any submitted close order is still unconfirmed.
+        if any(
+            level.active_close_order is not None and level.active_close_order.order is None
+            for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]
+        ):
             return []
 
         current_time = self._strategy.current_timestamp
@@ -3765,8 +3808,7 @@ class GridExecutor(ExecutorBase):
 
             close_orders_proposal.append(level)
 
-        # CRITICAL: Return max 1 close order at a time (serialize close orders)
-        # This prevents race conditions where multiple levels try to sell same inventory
+        # Max 1 new close order per tick (sequential placement)
         return close_orders_proposal[:1] if close_orders_proposal else []
 
     def get_open_order_ids_to_cancel(self):
