@@ -45,6 +45,8 @@ class FakeExchange:
         self.pending = {}
         self.confirmed = {}
         self.held = Decimal("0")
+        self.extra_locked = Decimal("0")  # base locked outside this executor (temporary)
+        self.stale_available = None  # simulate a delayed balance update
         self.sell_count = 0
         self.connector = connector
         connector._order_tracker = MagicMock()
@@ -63,7 +65,9 @@ class FakeExchange:
         )
 
     def available(self) -> Decimal:
-        return self.held - self.locked()
+        if self.stale_available is not None:
+            return self.stale_available
+        return self.held - self.locked() - self.extra_locked
 
     def _sell(self, connector_name, trading_pair, amount, order_type, price, position_action=PositionAction.NIL):
         self.sell_count += 1
@@ -147,6 +151,15 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
             self.ex.confirmed[oid] = self.ex.pending.pop(oid)
             self.executor.process_order_created_event(None, None, SellOrderCreatedEvent(
                 self.clock[0], OrderType.LIMIT, PAIR, order.amount, order.price, oid, 0))
+
+    def confirm_cancel(self, oid: str):
+        self.ex.confirmed[oid].current_state = OrderState.CANCELED
+        self.executor.process_order_canceled_event(None, None, OrderCancelledEvent(self.clock[0], oid))
+
+    def tracked_position(self) -> Decimal:
+        self.executor.update_grid_levels()
+        self.executor.update_position_metrics()
+        return self.executor.position_size_base
 
     async def tick(self, seconds: float = 6.0):
         self.clock[0] += seconds
@@ -296,3 +309,141 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         close_sell = self.ex.sells()[close_order.order_id]
         self.assertEqual(close_sell.amount, Decimal("13.68"))
         self.assertEqual(close_sell.amount, self.ex.held)
+
+    # ---------------------------------------------------------- reduced TP (risk 1)
+    async def _two_levels_first_tp_open(self):
+        self.fill("BUY-1", Decimal("6.84"))
+        await self.tick()
+        self.confirm_sells()
+        self.fill("BUY-2", Decimal("6.84"))
+
+    async def test_temporary_lock_defers_tp_instead_of_stranding_inventory(self):
+        await self._two_levels_first_tp_open()
+        self.ex.extra_locked = Decimal("0.05")  # exchange holds 13.68, 0.05 briefly unavailable
+        for _ in range(2):
+            await self.tick()
+        self.assertEqual(self.ex.sell_count, 1, "temporary shortfall must not create a reduced TP")
+        level2 = self.buy_levels[1]
+        self.executor.update_grid_levels()
+        self.assertEqual(level2.state, GridLevelStates.OPEN_ORDER_FILLED)
+        self.assertEqual(self.tracked_position(), Decimal("13.68"))
+
+        self.ex.extra_locked = Decimal("0")
+        await self.tick()
+        self.confirm_sells()
+        self.assertEqual(self.ex.confirmed["SELL-2"].amount, Decimal("6.84"))
+        self.fill("SELL-2", Decimal("6.84"))
+        self.executor.update_grid_levels()
+        self.assertEqual(level2.state, GridLevelStates.NOT_ACTIVE)
+        self.assertEqual(self.tracked_position(), Decimal("6.84"))
+        self.assertEqual(self.tracked_position(), self.ex.held)
+
+    async def test_real_dust_shortfall_caps_tp_and_residual_is_cost_not_sale(self):
+        await self._two_levels_first_tp_open()
+        self.ex.held -= Decimal("0.05")  # exchange really holds 0.05 less (unsellable: notional < 1)
+        await self.tick()
+        self.confirm_sells()
+        tp2 = self.ex.confirmed["SELL-2"]
+        self.assertEqual(tp2.amount, Decimal("6.79"))
+        self.fill("SELL-2", Decimal("6.79"))
+        level2 = self.buy_levels[1]
+        self.executor.update_grid_levels()
+        self.assertEqual(level2.state, GridLevelStates.NOT_ACTIVE)
+        self.assertEqual(self.tracked_position(), Decimal("6.84"))
+        self.assertEqual(self.tracked_position(), self.ex.held, "tracked inventory equals exchange inventory")
+        self.assertEqual(self.executor._retained_residual_base, Decimal("0.05"))
+        self.assertEqual(self.executor._held_residual_base, Decimal("0"), "exchange never held it: not inventory")
+        self.executor.update_realized_pnl_metrics()
+        sold = [o for o in self.executor._filled_orders if o["trade_type"] == TradeType.SELL.name]
+        self.assertEqual([Decimal(o["executed_amount_base"]) for o in sold], [Decimal("6.79")])
+        self.assertEqual(self.executor.realized_sell_size_quote, Decimal("6.79") * tp2.price)
+        self.assertEqual(self.executor.realized_buy_size_quote, Decimal("6.84") * self.buy_levels[1].price)
+
+    async def test_temporarily_reduced_tp_fully_filled_keeps_residual_tracked(self):
+        # Delayed balance credit: exchange total/available briefly show 0.05 NEAR less, so the
+        # 2nd TP is sized 6.79 although the level holds 6.84. The credit then arrives.
+        await self._two_levels_first_tp_open()
+        self.ex.held -= Decimal("0.05")
+        await self.tick()
+        self.confirm_sells()
+        tp2 = self.ex.confirmed["SELL-2"]
+        self.assertEqual(tp2.amount, Decimal("6.79"))
+        self.ex.held += Decimal("0.05")
+        self.assertEqual(self.ex.held, Decimal("13.68"))
+
+        self.fill("SELL-2", Decimal("6.79"))
+        level2 = self.buy_levels[1]
+        self.assertEqual(self.ex.held, Decimal("6.89"))
+        self.assertEqual(self.tracked_position(), Decimal("6.89"), "0.05 still held: must stay in the position")
+        self.assertEqual(self.tracked_position(), self.ex.held)
+        self.assertEqual(level2.state, GridLevelStates.NOT_ACTIVE, "level is free for a new grid cycle")
+        self.assertEqual(self.executor._held_residual_base, Decimal("0.05"))
+        level1 = self.buy_levels[0]
+        self.assertEqual(self.executor.position_break_even_price,
+                         (Decimal("6.84") * level1.price + Decimal("0.05") * level2.price) / Decimal("6.89"))
+
+        self.executor.update_realized_pnl_metrics()
+        sold = [Decimal(o["executed_amount_base"]) for o in self.executor._filled_orders
+                if o["trade_type"] == TradeType.SELL.name]
+        self.assertEqual(sold, [Decimal("6.79")], "only the 6.79 actually sold is booked as a sale")
+        self.assertEqual(self.executor.realized_sell_size_quote, Decimal("6.79") * tp2.price)
+        self.assertEqual(self.executor.realized_buy_size_quote, Decimal("6.79") * level2.price,
+                         "cost of the held 0.05 stays with the open position, not in realized P&L")
+
+        # Eventual handling: the stop/close sells the residual together with the remaining position.
+        self.executor.close_type = CloseType.STOP_LOSS
+        self.executor._status = RunnableStatus.SHUTTING_DOWN
+        await self.tick()
+        self.confirm_cancel("SELL-1")
+        self.confirm_cancel("BUY-3")
+        self.confirm_cancel("BUY-4")
+        with patch.object(GridExecutor, "_close_price_unreliable", return_value=False), patch("time.sleep"):
+            await self.tick()
+        close_sell = self.ex.sells()[self.executor._close_order.order_id]
+        self.assertEqual(close_sell.amount, Decimal("6.89"))
+        self.assertEqual(close_sell.amount, self.ex.held)
+
+    async def test_material_real_shortfall_defers_tp(self):
+        await self._two_levels_first_tp_open()
+        self.ex.held -= Decimal("2")  # sellable amount missing: do not shrink the TP, keep level under SL
+        for _ in range(2):
+            await self.tick()
+        self.assertEqual(self.ex.sell_count, 1)
+        self.assertEqual(self.executor.status, RunnableStatus.RUNNING)
+
+    # ------------------------------------------------- partial TP fill + stop (risk 2)
+    async def test_partial_tp_fills_are_deducted_and_stop_closes_only_remainder(self):
+        for oid in ("BUY-1", "BUY-2", "BUY-3"):
+            self.fill(oid, Decimal("6.84"))
+        for _ in range(3):
+            await self.tick()
+            self.confirm_sells()
+        self.assertEqual(self.ex.held, Decimal("20.52"))
+
+        self.fill("SELL-1", Decimal("3.00"))
+        self.assertEqual(self.tracked_position(), Decimal("17.52"), "partial TP sale leaves the position")
+
+        self.executor.close_type = CloseType.STOP_LOSS
+        self.executor._status = RunnableStatus.SHUTTING_DOWN
+        await self.tick()
+        cancelled = {c.kwargs.get("order_id") for c in self.strategy.cancel.call_args_list}
+        self.assertEqual(cancelled, {"SELL-1", "SELL-2", "SELL-3", "BUY-4"})
+
+        self.fill("SELL-2", Decimal("2.00"))  # fill while the cancel is in flight
+        for oid in ("SELL-2", "SELL-3", "BUY-4"):
+            self.confirm_cancel(oid)
+        self.assertEqual(self.tracked_position(), Decimal("15.52"))
+        self.ex.stale_available = Decimal("20.52")  # balance update still pending
+
+        with patch.object(GridExecutor, "_close_price_unreliable", return_value=False), patch("time.sleep"):
+            await self.tick()
+            self.assertIsNone(self.executor._close_order, "SELL-1 still open on the exchange: wait for cancel")
+
+            self.confirm_cancel("SELL-1")
+            await self.tick()
+        close_sell = self.ex.sells()[self.executor._close_order.order_id]
+        self.assertEqual(close_sell.amount, Decimal("15.52"))
+        self.assertEqual(close_sell.amount, self.ex.held)
+        sold = sorted(Decimal(o["executed_amount_base"]) for o in self.executor._filled_orders
+                      if o["trade_type"] == TradeType.SELL.name)
+        self.assertEqual(sold, [Decimal("2.00"), Decimal("3.00")], "partial TP sales archived once each")

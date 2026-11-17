@@ -127,6 +127,12 @@ class GridExecutor(ExecutorBase):
         self.levels_by_state = {state: [] for state in GridLevelStates}
         self._close_order: Optional[TrackedOrder] = None
         self._filled_orders = []
+        # Base already sold by cancelled, partially filled TPs of a still-open level (level.id -> base).
+        self._level_close_sold_base: Dict[str, Decimal] = {}
+        # Base a completed level kept because its TP sold less than the level held (reduced TP): base, entry cost.
+        self._retained_residual_base = Decimal("0")
+        self._retained_residual_cost_quote = Decimal("0")
+        self._held_residual_base = Decimal("0")
         self._failed_orders = []
         self._canceled_orders = []
 
@@ -2468,12 +2474,40 @@ class GridExecutor(ExecutorBase):
                 close_order = level.active_close_order.order.to_json()
                 self._filled_orders.append(open_order)
                 self._filled_orders.append(close_order)
+                self._retain_level_residual(level)
                 self.levels_by_state[GridLevelStates.COMPLETE].remove(level)
+                self._level_close_sold_base.pop(level.id, None)
                 level.reset_level()
                 self.levels_by_state[GridLevelStates.NOT_ACTIVE].append(level)
 
                 # STORY A1: Update last_progress_timestamp (completed level = progress)
                 self._last_progress_timestamp = self._strategy.current_timestamp
+
+    def _retain_level_residual(self, level: GridLevel):
+        """Keep base a completed level still holds when its TP sold less than the level's sellable amount."""
+        open_order = level.active_open_order
+        sellable = open_order.executed_amount_base
+        if self._open_fee_in_base:
+            sellable -= open_order.cum_fees_base
+        residual = (sellable - self._level_close_sold_base.get(level.id, Decimal("0"))
+                    - level.active_close_order.executed_amount_base)
+        if residual > 0:
+            self._retained_residual_base += residual
+            self._retained_residual_cost_quote += residual * open_order.order.price
+
+    def _held_retained_residual(self, levels_position_base: Decimal) -> Decimal:
+        """Retained residual the exchange demonstrably still holds beyond the tracked level position.
+
+        A real shortfall (the exchange never held it) resolves to 0, so unsellable dust is not tracked as inventory."""
+        if getattr(self, "_retained_residual_base", Decimal("0")) <= 0:
+            return Decimal("0")
+        try:
+            total = self._coerce_to_decimal(
+                self._strategy.connectors[self.config.connector_name].get_balance(self.config.trading_pair.split("-")[0])
+            )
+        except Exception:
+            return Decimal("0")
+        return max(Decimal("0"), min(self._retained_residual_base, total - levels_position_base))
 
     async def control_shutdown_process(self):
         """
@@ -2877,8 +2911,12 @@ class GridExecutor(ExecutorBase):
                     self._balance_mismatch_attempts = 0
 
     def _cap_additional_close_amount(self, level: GridLevel, order_candidate) -> bool:
-        """Cap a TP placed while other level TPs are open to inventory that is neither reserved by those
-        TPs nor locked on the exchange. Returns False to defer this level to a later tick."""
+        """Size a TP placed while other level TPs are open; returns False to defer the level to a later tick.
+
+        A shortfall caused only by locked/unsynced balance (exchange total still covers the amount) is temporary:
+        the TP is deferred so no sellable inventory is stranded. A real shortfall (the exchange holds less than
+        tracked) is accepted by capping only when the missing part is unsellable dust; otherwise it is deferred.
+        Deferred levels stay OPEN_ORDER_FILLED and covered by stop-loss."""
         other_close_orders = [
             lvl.active_close_order
             for lvl in self.levels_by_state.get(GridLevelStates.CLOSE_ORDER_PLACED, [])
@@ -2886,33 +2924,51 @@ class GridExecutor(ExecutorBase):
         ]
         if not other_close_orders:
             return True
-        reserved = sum((co.order.amount for co in other_close_orders if co.order is not None), Decimal("0"))
+        reserved = sum(
+            (co.order.amount - co.order.executed_amount_base for co in other_close_orders if co.order is not None),
+            Decimal("0"),
+        )
         base_asset = self.config.trading_pair.split("-")[0]
+        connector = self._strategy.connectors[self.config.connector_name]
         try:
-            available = self._coerce_to_decimal(
-                self._strategy.connectors[self.config.connector_name].get_available_balance(base_asset)
-            )
+            available = self._coerce_to_decimal(connector.get_available_balance(base_asset))
+            total = self._coerce_to_decimal(connector.get_balance(base_asset))
         except Exception:
-            available = Decimal("0")
-        amount = min(order_candidate.amount, self.position_size_base - reserved, available)
+            available = total = Decimal("0")
+        wanted = order_candidate.amount
+        held_free = min(self.position_size_base, total) - reserved
+        amount = min(wanted, held_free, available)
         rules = self.trading_rules
         increment = getattr(rules, "min_base_amount_increment", None)
         if increment and increment > 0 and amount > 0:
             amount = (amount / increment).to_integral_value(rounding=ROUND_DOWN) * increment
         min_size = getattr(rules, "min_order_size", None) or Decimal("0")
         min_notional = getattr(rules, "min_notional_size", None) or Decimal("0")
-        if amount <= 0 or amount < min_size or amount * order_candidate.price < min_notional:
+
+        def _sellable(qty: Decimal) -> bool:
+            return qty > 0 and qty >= min_size and qty * order_candidate.price >= min_notional
+
+        shortfall = wanted - amount
+        reason = None
+        if not _sellable(amount):
+            reason = "below exchange minimum"
+        elif shortfall > 0 and held_free >= wanted:
+            reason = "temporarily locked/unsynced balance"
+        elif _sellable(shortfall):
+            reason = "material shortfall vs tracked inventory"
+        if reason is not None:
             if not HAS_LOG_THROTTLE or should_log(f"tp_deferred_{self.config.id}", interval_sec=60):
                 self.logger().info(
-                    f"⏳ TP_DEFERRED {self.config.trading_pair}: sellable {amount} {base_asset} "
-                    f"(position={self.position_size_base}, reserved_by_open_tps={reserved}, available={available}) "
-                    f"below exchange minimum; level stays covered by stop-loss"
+                    f"⏳ TP_DEFERRED {self.config.trading_pair}: {reason}; wanted={wanted} sellable={amount} "
+                    f"{base_asset} (position={self.position_size_base}, exchange_total={total}, "
+                    f"reserved_by_open_tps={reserved}, available={available}); level stays covered by stop-loss"
                 )
             return False
-        if amount < order_candidate.amount:
-            self.logger().info(
-                f"✂️ TP amount capped {self.config.trading_pair}: {order_candidate.amount} → {amount} {base_asset} "
-                f"(reserved_by_open_tps={reserved}, available={available})"
+        if shortfall > 0:
+            self.logger().warning(
+                f"✂️ TP amount capped {self.config.trading_pair}: {wanted} → {amount} {base_asset}; "
+                f"unsellable dust residual {shortfall} {base_asset} not held on exchange "
+                f"(exchange_total={total}, reserved_by_open_tps={reserved}); booked as cost, not as sale"
             )
         order_candidate.amount = amount
         return True
@@ -3249,6 +3305,7 @@ class GridExecutor(ExecutorBase):
             self._open_fee_in_base = True
         else:
             amount = level.active_open_order.executed_amount_base
+        amount -= self._level_close_sold_base.get(level.id, Decimal("0"))
         if self.is_perpetual:
             return PerpetualOrderCandidate(
                 trading_pair=self.config.trading_pair,
@@ -5455,7 +5512,10 @@ class GridExecutor(ExecutorBase):
                 level.reset_open_order()
         for level in levels_close_order_placed:
             if event.order_id == level.active_close_order.order_id:
-                self._archive_partial_fill(level.active_close_order)
+                if self._archive_partial_fill(level.active_close_order):
+                    self._level_close_sold_base[level.id] = (
+                        self._level_close_sold_base.get(level.id, Decimal("0"))
+                        + level.active_close_order.executed_amount_base)
                 self._canceled_orders.append(level.active_close_order.order_id)
                 self.max_close_creation_timestamp = 0
                 level.reset_close_order()
@@ -5798,11 +5858,25 @@ class GridExecutor(ExecutorBase):
             self.position_break_even_price = sum(
                 [level.active_open_order.order.price * level.active_open_order.order.amount
                  for level in open_filled_levels]) / executed_amount_base
+            gross_open_base = executed_amount_base
             if self._open_fee_in_base:
                 executed_amount_base -= sum([level.active_open_order.cum_fees_base for level in open_filled_levels])
             close_order_size_base = self._close_order.executed_amount_base if self._close_order and self._close_order.is_done else Decimal(
                 "0")
-            self.position_size_base = executed_amount_base - close_order_size_base
+            # Base already sold by level TPs that are still open/partial or were cancelled after a partial fill.
+            level_close_sold_base = sum(
+                [(level.active_close_order.executed_amount_base if level.active_close_order else Decimal("0"))
+                 + self._level_close_sold_base.get(level.id, Decimal("0"))
+                 for level in open_filled_levels], Decimal("0"))
+            levels_position_base = executed_amount_base - level_close_sold_base
+            # Residual of a reduced, fully filled TP rides along with the open position (sold by the stop/close).
+            self._held_residual_base = self._held_retained_residual(levels_position_base)
+            if self._held_residual_base > 0:
+                residual_cost = self._retained_residual_cost_quote * self._held_residual_base / self._retained_residual_base
+                self.position_break_even_price = (
+                    self.position_break_even_price * gross_open_base + residual_cost
+                ) / (gross_open_base + self._held_residual_base)
+            self.position_size_base = levels_position_base + self._held_residual_base - close_order_size_base
             if self.position_size_base < Decimal("0"):
                 self.position_size_base = Decimal("0")
             self.position_size_quote = self.position_size_base * self.position_break_even_price
@@ -5822,7 +5896,11 @@ class GridExecutor(ExecutorBase):
             self.position_pnl_quote = side_multiplier * ((self.mid_price - self.position_break_even_price) / self.position_break_even_price) * self.position_size_quote - self.position_fees_quote
             self.position_pnl_pct = self.position_pnl_quote / self.position_size_quote if self.position_size_quote > 0 else Decimal(
                 "0")
-            self.close_liquidity_placed = sum([level.amount_quote for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED] if level.active_close_order and level.active_close_order.executed_amount_base == Decimal("0")])
+            self.close_liquidity_placed = sum([
+                level.amount_quote for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]
+                if level.active_close_order and (
+                    level.active_close_order.executed_amount_base == Decimal("0")
+                    or (level.active_close_order.order is not None and not level.active_close_order.order.is_done))])
         if len(self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]) > 0:
             self.open_liquidity_placed = sum([level.amount_quote for level in self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED] if level.active_open_order and level.active_open_order.executed_amount_base == Decimal("0")])
         else:
@@ -5878,9 +5956,12 @@ class GridExecutor(ExecutorBase):
             )
             residual_base = total_buy_base - base_fee_base - total_sell_base
             min_order_size = self.trading_rules.min_order_size
-            if Decimal("0") < residual_base < min_order_size:
+            # A held residual of a reduced TP is still inventory: its cost stays with the open position.
+            held_residual = min(residual_base, getattr(self, "_held_residual_base", Decimal("0")))
+            removable = residual_base if Decimal("0") < residual_base < min_order_size else held_residual
+            if removable > 0:
                 avg_entry = self.realized_buy_size_quote / total_buy_base
-                residual_cost = residual_base * avg_entry
+                residual_cost = removable * avg_entry
                 self.realized_buy_size_quote -= residual_cost
 
         # Cost of the units actually received; fees stay fully registered, so gross = net + fees
