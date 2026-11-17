@@ -57,8 +57,8 @@ class Checked(base.TestGridExecutorMultiTakeProfit):
             if o is not None and o.order is not None and o.executed_amount_base > 0:
                 open_part_b += o.executed_amount_base - o.cum_fees_base
                 open_part_q += o.executed_amount_quote
-        standalone = e._held_residual_base if not filled_lv else Z
-        standalone_cost = e._held_residual_cost_quote if not filled_lv else Z
+        standalone = e._held_residual_base if not filled_lv and e.position_size_base == 0 else Z
+        standalone_cost = e._held_residual_cost_quote if not filled_lv and e.position_size_base == 0 else Z
         close_partial = Z
         if e._close_order is not None and e._close_order.order is not None and not e._close_order.is_done:
             close_partial = e._close_order.executed_amount_base
