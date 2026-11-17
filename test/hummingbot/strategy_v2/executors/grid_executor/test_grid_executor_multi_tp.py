@@ -361,7 +361,7 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         self.assertEqual(self.executor.realized_sell_size_quote, Decimal("6.79") * tp2.price)
         self.assertEqual(self.executor.realized_buy_size_quote, Decimal("6.84") * self.buy_levels[1].price)
 
-    async def test_partial_buy_fill_is_not_counted_as_retained_residual(self):
+    async def test_cancelled_partial_buy_is_position_once_and_sold_on_close(self):
         await self._two_levels_first_tp_open()
         self.ex.held -= Decimal("0.05")  # real shortfall: the exchange never holds this 0.05
         await self.tick()
@@ -369,20 +369,68 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         self.fill("SELL-2", Decimal("6.79"))
         self.assertEqual(self.executor._retained_residual_base, Decimal("0.05"))
 
-        self.fill("BUY-3", Decimal("2.00"))  # open BUY partially filled: its base is not residual
+        fee = Decimal("0.01")
+        self.fill("BUY-3", Decimal("2.00"), fee)  # open partial BUY: not yet position
         self.assertEqual(self.tracked_position(), Decimal("6.84"))
-        self.assertEqual(self.executor._held_residual_base, Decimal("0"))
-        self.confirm_cancel("BUY-3")  # cancelled after the partial fill
-        self.assertEqual(self.tracked_position(), Decimal("6.84"))
-        self.assertEqual(self.executor._held_residual_base, Decimal("0"))
-        self.assertEqual(self.ex.held, self.tracked_position() + Decimal("2.00"),
-                         "exchange = level position + cancelled partial BUY; no residual")
+        self.confirm_cancel("BUY-3")
+        self.assertEqual(self.tracked_position(), Decimal("8.83"), "level 6.84 + net partial BUY 1.99")
+        self.assertEqual(self.tracked_position(), self.ex.held)
+        self.confirm_cancel("BUY-3")  # duplicate cancel event: counted once
+        self.assertEqual(self.tracked_position(), Decimal("8.83"))
+        entry1, entry3 = self.buy_levels[0].price, self.buy_levels[2].price
+        self.assertEqual(self.executor.position_break_even_price,
+                         (Decimal("6.84") * entry1 + Decimal("1.99") * entry3) / Decimal("8.83"))
+        self.assert_reconciles(Decimal("3.23"))
 
         self.fill("SELL-1", Decimal("6.84"))
-        self.assertEqual(self.tracked_position(), Decimal("0"))
-        self.assertEqual(self.ex.held, Decimal("2.00"))
-        self.assertEqual(self.executor._held_residual_base, Decimal("0"))
-        self.assertEqual(self._snapshot(Decimal("3.23"))["residual_dust_base"], Decimal("0"))
+        self.assertEqual(self.executor._held_residual_base, Decimal("1.99"))
+        await self._stop_with_no_filled_levels()
+        close_sell = self.ex.sells()[self.executor._close_order.order_id]
+        self.assertEqual(close_sell.amount, Decimal("1.99"))
+        self.confirm_sells()
+        self.fill(close_sell.client_order_id, Decimal("1.99"))
+        with patch.object(GridExecutor, "_close_price_unreliable", return_value=False), patch("time.sleep"):
+            for _ in range(2):
+                await self.tick()
+        self.assertEqual(self.executor.status, RunnableStatus.TERMINATED)
+        self.assertEqual(self.ex.held, Decimal("0"))
+        self.assertEqual(self.ex.sell_count, 3, "partial BUY sold exactly once")
+        self.assertEqual(self.executor.get_custom_info()["residual_dust_base"], Decimal("0"))
+        fees = sum((Decimal(o["cumulative_fee_paid_quote"]) for o in self.executor._filled_orders), Decimal("0"))
+        self.assertEqual(self.executor.realized_fees_quote, fees, "every fill fee booked once")
+        self.assert_reconciles(Decimal("3.23"))
+
+    async def test_cancelled_partial_buy_is_in_final_settlement(self):
+        fee = Decimal("0.01")
+        self.fill("BUY-1", Decimal("6.84"))
+        await self.tick()
+        self.confirm_sells()
+        self.fill("BUY-2", Decimal("2.00"), fee)
+        self.confirm_cancel("BUY-2")
+        self.fill("SELL-1", Decimal("6.84"))
+        self.assertEqual(self.ex.held, Decimal("1.99"))
+
+        await self._stop_with_no_filled_levels()
+        self.assertIsNotNone(self.executor._close_order, "stop must create a close order for the bought 1.99")
+        close_sell = self.ex.sells()[self.executor._close_order.order_id]
+        self.assertEqual(close_sell.amount, Decimal("1.99"))
+        self.confirm_sells()
+        self.fill(close_sell.client_order_id, Decimal("1.99"))
+        with patch.object(GridExecutor, "_close_price_unreliable", return_value=False), patch("time.sleep"):
+            for _ in range(2):
+                await self.tick()
+        self.assertEqual(self.executor.status, RunnableStatus.TERMINATED)
+        self.assertEqual(self.ex.held, Decimal("0"))
+        self.assertEqual(self.ex.sell_count, 2)
+        self.assert_reconciles(Decimal("3.23"))
+
+    async def test_unsellable_cancelled_partial_buy_is_registered_as_dust(self):
+        self.fill("BUY-1", Decimal("0.20"))  # 0.20 x 3.23 < min notional 1
+        self.confirm_cancel("BUY-1")
+        await self._stop_with_no_filled_levels()
+        self.assertEqual(self.executor.status, RunnableStatus.TERMINATED)
+        self.assertEqual(self.ex.sell_count, 0, "unsellable partial BUY is not sold")
+        self.assertEqual(self.executor.get_custom_info()["residual_dust_base"], Decimal("0.20"))
 
     async def test_temporarily_reduced_tp_fully_filled_keeps_residual_tracked(self):
         # Delayed balance credit: exchange total/available briefly show 0.05 NEAR less, so the

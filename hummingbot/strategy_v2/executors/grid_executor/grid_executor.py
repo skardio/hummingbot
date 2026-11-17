@@ -135,6 +135,8 @@ class GridExecutor(ExecutorBase):
         self._held_residual_base = Decimal("0")
         self._residual_dust_base = Decimal("0")
         self._cancelled_open_fill_base = Decimal("0")
+        self._cancelled_open_fill_cost_quote = Decimal("0")
+        self._held_residual_cost_quote = Decimal("0")
         self._failed_orders = []
         self._canceled_orders = []
 
@@ -2498,10 +2500,16 @@ class GridExecutor(ExecutorBase):
             self._retained_residual_cost_quote += residual * open_order.order.price
 
     def _held_retained_residual(self, levels_position_base: Decimal) -> Decimal:
-        """Retained residual the exchange demonstrably still holds beyond the tracked level position.
+        """Residual base (cancelled partial BUYs first, then reduced-TP residual) the exchange demonstrably
+        still holds beyond the tracked level position; sets ``_held_residual_cost_quote`` for that base.
 
         A real shortfall (the exchange never held it) resolves to 0, so unsellable dust is not tracked as inventory."""
-        if getattr(self, "_retained_residual_base", Decimal("0")) <= 0:
+        self._held_residual_cost_quote = Decimal("0")
+        pools = [(getattr(self, "_cancelled_open_fill_base", Decimal("0")),
+                  getattr(self, "_cancelled_open_fill_cost_quote", Decimal("0"))),
+                 (getattr(self, "_retained_residual_base", Decimal("0")),
+                  getattr(self, "_retained_residual_cost_quote", Decimal("0")))]
+        if all(base <= 0 for base, _ in pools):
             return Decimal("0")
         try:
             total = self._coerce_to_decimal(
@@ -2509,12 +2517,18 @@ class GridExecutor(ExecutorBase):
             )
         except Exception:
             return Decimal("0")
-        accounted = levels_position_base + self._open_fill_base_outside_levels()
-        return max(Decimal("0"), min(self._retained_residual_base, total - accounted))
+        room = total - levels_position_base - self._open_fill_base_outside_levels()
+        held = Decimal("0")
+        for base, cost in pools:
+            take = max(Decimal("0"), min(base, room - held))
+            if take > 0:
+                held += take
+                self._held_residual_cost_quote += cost * take / base
+        return held
 
     def _open_fill_base_outside_levels(self) -> Decimal:
-        """Net base received by BUYs outside filled levels: partial fills of open and of cancelled BUYs."""
-        base = getattr(self, "_cancelled_open_fill_base", Decimal("0"))
+        """Net base received by partial fills of still-open BUYs (not yet a filled level)."""
+        base = Decimal("0")
         for level in self.levels_by_state.get(GridLevelStates.OPEN_ORDER_PLACED, []):
             order = level.active_open_order
             if order is not None and order.order is not None:
@@ -2538,7 +2552,7 @@ class GridExecutor(ExecutorBase):
         self._residual_dust_base = Decimal("0")
         if held <= 0:
             return
-        unit_cost = self._retained_residual_cost_quote / self._retained_residual_base
+        unit_cost = self._held_residual_cost_quote / held
         price = self.mid_price if self.mid_price and self.mid_price.is_finite() and self.mid_price > 0 else unit_cost
         rules = self.trading_rules
         min_size = getattr(rules, "min_order_size", Decimal("0")) or Decimal("0")
@@ -5590,9 +5604,13 @@ class GridExecutor(ExecutorBase):
             if event.order_id == level.active_open_order.order_id:
                 if self._archive_partial_fill(level.active_open_order):
                     open_order = level.active_open_order
-                    self._cancelled_open_fill_base = getattr(self, "_cancelled_open_fill_base", Decimal("0")) + (
-                        open_order.executed_amount_base
-                        - (open_order.cum_fees_base if self._open_fee_in_base else Decimal("0")))
+                    # Bought base stays inventory at its fill cost (once: archive dedups by client_order_id).
+                    net = open_order.executed_amount_base - (
+                        open_order.cum_fees_base if self._open_fee_in_base else Decimal("0"))
+                    if net > 0:
+                        self._cancelled_open_fill_base = getattr(self, "_cancelled_open_fill_base", Decimal("0")) + net
+                        self._cancelled_open_fill_cost_quote = getattr(
+                            self, "_cancelled_open_fill_cost_quote", Decimal("0")) + net * open_order.average_executed_price
                 self._canceled_orders.append(level.active_open_order.order_id)
                 self.max_open_creation_timestamp = 0
                 level.reset_open_order()
@@ -5964,7 +5982,7 @@ class GridExecutor(ExecutorBase):
             # Residual of a reduced, fully filled TP rides along with the open position (sold by the stop/close).
             self._held_residual_base = self._held_retained_residual(levels_position_base)
             if self._held_residual_base > 0 and remaining_base > 0:
-                residual_cost = self._retained_residual_cost_quote * self._held_residual_base / self._retained_residual_base
+                residual_cost = self._held_residual_cost_quote
                 self.position_break_even_price = (remaining_cost + residual_cost) / (remaining_base + self._held_residual_base)
             self.position_size_base = levels_position_base + self._held_residual_base - close_order_size_base
             if self.position_size_base < Decimal("0"):
@@ -6035,10 +6053,10 @@ class GridExecutor(ExecutorBase):
             held_residual = min(residual_base, getattr(self, "_held_residual_base", Decimal("0")))
             removable = residual_base if Decimal("0") < residual_base < min_order_size else held_residual
             if removable > 0:
-                retained = getattr(self, "_retained_residual_base", Decimal("0"))
-                if removable == held_residual and retained > 0:
+                held_base = getattr(self, "_held_residual_base", Decimal("0"))
+                if removable == held_residual and held_base > 0:
                     # Same unit cost as the position break-even of the held residual.
-                    residual_cost = self._retained_residual_cost_quote * removable / retained
+                    residual_cost = getattr(self, "_held_residual_cost_quote", Decimal("0")) * removable / held_base
                 else:
                     residual_cost = removable * self.realized_buy_size_quote / total_buy_base
                 self.realized_buy_size_quote -= residual_cost
