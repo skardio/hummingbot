@@ -133,6 +133,8 @@ class GridExecutor(ExecutorBase):
         self._retained_residual_base = Decimal("0")
         self._retained_residual_cost_quote = Decimal("0")
         self._held_residual_base = Decimal("0")
+        self._residual_dust_base = Decimal("0")
+        self._cancelled_open_fill_base = Decimal("0")
         self._failed_orders = []
         self._canceled_orders = []
 
@@ -2507,7 +2509,85 @@ class GridExecutor(ExecutorBase):
             )
         except Exception:
             return Decimal("0")
-        return max(Decimal("0"), min(self._retained_residual_base, total - levels_position_base))
+        accounted = levels_position_base + self._open_fill_base_outside_levels()
+        return max(Decimal("0"), min(self._retained_residual_base, total - accounted))
+
+    def _open_fill_base_outside_levels(self) -> Decimal:
+        """Net base received by BUYs outside filled levels: partial fills of open and of cancelled BUYs."""
+        base = getattr(self, "_cancelled_open_fill_base", Decimal("0"))
+        for level in self.levels_by_state.get(GridLevelStates.OPEN_ORDER_PLACED, []):
+            order = level.active_open_order
+            if order is not None and order.order is not None:
+                base += order.executed_amount_base - (order.cum_fees_base if self._open_fee_in_base else Decimal("0"))
+        return base
+
+    def _level_sold_base(self, level: GridLevel) -> Decimal:
+        """Base a level's TPs already sold: cancelled partial TPs plus the executed part of its current TP."""
+        sold = getattr(self, "_level_close_sold_base", {}).get(level.id, Decimal("0"))
+        if level.active_close_order is not None:
+            sold += level.active_close_order.executed_amount_base
+        return sold
+
+    def _update_standalone_residual(self, close_order_size_base: Decimal, side_multiplier: int):
+        """Retained residual held while no level is filled.
+
+        Neutral at cost while running (it never drives stop/trailing on its own). Once the executor closes, a
+        sellable residual becomes the position so the close order sells it; unsellable dust is registered apart."""
+        held = self._held_retained_residual(Decimal("0"))
+        self._held_residual_base = held
+        self._residual_dust_base = Decimal("0")
+        if held <= 0:
+            return
+        unit_cost = self._retained_residual_cost_quote / self._retained_residual_base
+        price = self.mid_price if self.mid_price and self.mid_price.is_finite() and self.mid_price > 0 else unit_cost
+        rules = self.trading_rules
+        min_size = getattr(rules, "min_order_size", Decimal("0")) or Decimal("0")
+        min_notional = getattr(rules, "min_notional_size", Decimal("0")) or Decimal("0")
+        if held < min_size or held * price < min_notional:
+            self._residual_dust_base = held
+            return
+        if self.close_type is None or self.close_type == CloseType.POSITION_HOLD:
+            return
+        self.position_size_base = max(Decimal("0"), held - close_order_size_base)
+        if self.position_size_base <= 0:
+            return
+        self.position_break_even_price = unit_cost
+        self.position_size_quote = self.position_size_base * unit_cost
+        self.position_pnl_quote = side_multiplier * (price - unit_cost) * self.position_size_base
+        self.position_pnl_pct = self.position_pnl_quote / self.position_size_quote
+
+    def _open_level_sales(self, archived_ids: set) -> Dict[str, Decimal]:
+        """TP sales of levels whose BUY is not archived yet, matched with the cost and fees of the units sold."""
+        totals = {key: Decimal("0") for key in (
+            "sell_quote", "sell_fees", "buy_quote", "buy_fees", "base_fee_quote", "archived_sold_base")}
+        sold_states = (GridLevelStates.OPEN_ORDER_FILLED, GridLevelStates.CLOSE_ORDER_PLACED, GridLevelStates.COMPLETE)
+        for level in getattr(self, "grid_levels", None) or []:
+            open_tracked = level.active_open_order
+            if (getattr(level, "state", None) not in sold_states or open_tracked is None
+                    or open_tracked.order is None or open_tracked.order_id in archived_ids):
+                continue
+            archived_sold = getattr(self, "_level_close_sold_base", {}).get(level.id, Decimal("0"))
+            sold = archived_sold
+            close = level.active_close_order
+            if (close is not None and close.order is not None and close.order_id not in archived_ids
+                    and close.executed_amount_base > 0):
+                close_json = close.order.to_json()
+                sold += close.executed_amount_base
+                totals["sell_quote"] += Decimal(close_json["executed_amount_quote"])
+                totals["sell_fees"] += Decimal(close_json["cumulative_fee_paid_quote"])
+            if sold <= 0:
+                continue
+            open_json = open_tracked.order.to_json()
+            fee_base, fee_quote = self._buy_base_fee_deducted([open_json])
+            received = Decimal(open_json["executed_amount_base"]) - fee_base
+            if received <= 0:
+                continue
+            sold = min(sold, received)
+            totals["buy_quote"] += Decimal(open_json["executed_amount_quote"]) * sold / received
+            totals["buy_fees"] += Decimal(open_json["cumulative_fee_paid_quote"]) * sold / received
+            totals["base_fee_quote"] += fee_quote * sold / received
+            totals["archived_sold_base"] += archived_sold
+        return totals
 
     async def control_shutdown_process(self):
         """
@@ -4761,6 +4841,8 @@ class GridExecutor(ExecutorBase):
             "trailing_peak_pnl_pct": getattr(self, "_trailing_peak_pnl_pct", None),
             "open_liquidity_placed": self.open_liquidity_placed,
             "close_liquidity_placed": self.close_liquidity_placed,
+            # Retained base no level holds any more that is below the exchange minimum (not sellable).
+            "residual_dust_base": getattr(self, "_residual_dust_base", Decimal("0")),
             # US-006: Early stop reason tracking
             "early_stop_reason": self._early_stop_reason.name if self._early_stop_reason else None,
             "early_stop_reason_code": self._early_stop_reason.value if self._early_stop_reason else None,
@@ -5506,7 +5588,11 @@ class GridExecutor(ExecutorBase):
         levels_close_order_placed = [level for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
         for level in levels_open_order_placed:
             if event.order_id == level.active_open_order.order_id:
-                self._archive_partial_fill(level.active_open_order)
+                if self._archive_partial_fill(level.active_open_order):
+                    open_order = level.active_open_order
+                    self._cancelled_open_fill_base = getattr(self, "_cancelled_open_fill_base", Decimal("0")) + (
+                        open_order.executed_amount_base
+                        - (open_order.cum_fees_base if self._open_fee_in_base else Decimal("0")))
                 self._canceled_orders.append(level.active_open_order.order_id)
                 self.max_open_creation_timestamp = 0
                 level.reset_open_order()
@@ -5847,6 +5933,8 @@ class GridExecutor(ExecutorBase):
             GridLevelStates.CLOSE_ORDER_PLACED, [])
         side_multiplier = 1 if self.config.side == TradeType.BUY else -1
         executed_amount_base = Decimal(sum([level.active_open_order.order.amount for level in open_filled_levels]))
+        close_order_size_base = self._close_order.executed_amount_base if self._close_order and self._close_order.is_done else Decimal(
+            "0")
         if executed_amount_base == Decimal("0"):
             self.position_size_base = Decimal("0")
             self.position_size_quote = Decimal("0")
@@ -5854,33 +5942,34 @@ class GridExecutor(ExecutorBase):
             self.position_pnl_quote = Decimal("0")
             self.position_pnl_pct = Decimal("0")
             self.close_liquidity_placed = Decimal("0")
+            self._update_standalone_residual(close_order_size_base, side_multiplier)
         else:
-            self.position_break_even_price = sum(
-                [level.active_open_order.order.price * level.active_open_order.order.amount
-                 for level in open_filled_levels]) / executed_amount_base
-            gross_open_base = executed_amount_base
-            if self._open_fee_in_base:
-                executed_amount_base -= sum([level.active_open_order.cum_fees_base for level in open_filled_levels])
-            close_order_size_base = self._close_order.executed_amount_base if self._close_order and self._close_order.is_done else Decimal(
-                "0")
-            # Base already sold by level TPs that are still open/partial or were cancelled after a partial fill.
-            level_close_sold_base = sum(
-                [(level.active_close_order.executed_amount_base if level.active_close_order else Decimal("0"))
-                 + self._level_close_sold_base.get(level.id, Decimal("0"))
-                 for level in open_filled_levels], Decimal("0"))
-            levels_position_base = executed_amount_base - level_close_sold_base
+            # Per level: units still held after its TPs sold (open/partial or cancelled after a partial fill).
+            # Break-even and open fees cover only those remaining units; sold units are realized with their cost.
+            remaining_cost = remaining_base = remaining_fees_quote = Decimal("0")
+            gross_cost = Decimal("0")
+            for level in open_filled_levels:
+                open_order = level.active_open_order
+                fee_base = open_order.cum_fees_base if self._open_fee_in_base else Decimal("0")
+                net_base = open_order.order.amount - fee_base
+                remaining = max(Decimal("0"), net_base - self._level_sold_base(level))
+                gross_cost += open_order.order.price * open_order.order.amount
+                remaining_cost += open_order.order.price * remaining
+                remaining_base += remaining
+                if net_base > 0:
+                    remaining_fees_quote += open_order.cum_fees_quote * remaining / net_base
+            self.position_break_even_price = (
+                remaining_cost / remaining_base if remaining_base > 0 else gross_cost / executed_amount_base)
+            levels_position_base = remaining_base
             # Residual of a reduced, fully filled TP rides along with the open position (sold by the stop/close).
             self._held_residual_base = self._held_retained_residual(levels_position_base)
-            if self._held_residual_base > 0:
+            if self._held_residual_base > 0 and remaining_base > 0:
                 residual_cost = self._retained_residual_cost_quote * self._held_residual_base / self._retained_residual_base
-                self.position_break_even_price = (
-                    self.position_break_even_price * gross_open_base + residual_cost
-                ) / (gross_open_base + self._held_residual_base)
+                self.position_break_even_price = (remaining_cost + residual_cost) / (remaining_base + self._held_residual_base)
             self.position_size_base = levels_position_base + self._held_residual_base - close_order_size_base
             if self.position_size_base < Decimal("0"):
                 self.position_size_base = Decimal("0")
             self.position_size_quote = self.position_size_base * self.position_break_even_price
-            total_open_fees_quote = Decimal(sum([level.active_open_order.cum_fees_quote for level in open_filled_levels]))
             dust_threshold = self._position_dust_threshold()
             if self.position_size_base <= dust_threshold:
                 self.position_size_base = Decimal("0")
@@ -5890,9 +5979,10 @@ class GridExecutor(ExecutorBase):
                 self.position_pnl_pct = Decimal("0")
                 self.close_liquidity_placed = Decimal("0")
 
-            remaining_ratio = self.position_size_base / executed_amount_base if executed_amount_base > Decimal("0") else Decimal("0")
+            # Residual units carry no open fee of their own (it was paid by their completed level).
+            remaining_ratio = self.position_size_base / levels_position_base if levels_position_base > Decimal("0") else Decimal("0")
             remaining_ratio = max(Decimal("0"), min(Decimal("1"), remaining_ratio))
-            self.position_fees_quote = total_open_fees_quote * remaining_ratio
+            self.position_fees_quote = remaining_fees_quote * remaining_ratio
             self.position_pnl_quote = side_multiplier * ((self.mid_price - self.position_break_even_price) / self.position_break_even_price) * self.position_size_quote - self.position_fees_quote
             self.position_pnl_pct = self.position_pnl_quote / self.position_size_quote if self.position_size_quote > 0 else Decimal(
                 "0")
@@ -5910,33 +6000,23 @@ class GridExecutor(ExecutorBase):
         """
         Calculate the realized pnl in quote asset, excluding held positions
         """
-        if len(self._filled_orders) == 0:
-            self._reset_metrics()
-            return
         # Calculate metrics only for fully closed trades (not held positions)
         regular_filled_orders = [order for order in self._filled_orders
                                  if order not in self._held_position_orders]
-        if len(regular_filled_orders) == 0:
+        archived_ids = {order.get("client_order_id") for order in self._filled_orders}
+        open_sales = self._open_level_sales(archived_ids)
+        if len(regular_filled_orders) == 0 and open_sales["sell_quote"] == 0 and open_sales["buy_quote"] == 0:
             self._reset_metrics()
             return
-        self.realized_buy_size_quote = sum([
-            Decimal(order["executed_amount_quote"])
-            for order in regular_filled_orders if order["trade_type"] == TradeType.BUY.name
-        ])
-        self.realized_sell_size_quote = sum([
-            Decimal(order["executed_amount_quote"])
-            for order in regular_filled_orders if order["trade_type"] == TradeType.SELL.name
-        ])
-        self.realized_imbalance_quote = self.realized_buy_size_quote - self.realized_sell_size_quote
-        self.realized_buy_fees_quote = sum([
-            Decimal(order["cumulative_fee_paid_quote"])
-            for order in regular_filled_orders if order["trade_type"] == TradeType.BUY.name
-        ])
-        self.realized_sell_fees_quote = sum([
-            Decimal(order["cumulative_fee_paid_quote"])
-            for order in regular_filled_orders if order["trade_type"] == TradeType.SELL.name
-        ])
-        self.realized_fees_quote = self.realized_buy_fees_quote + self.realized_sell_fees_quote
+
+        def total(side: TradeType, key: str) -> Decimal:
+            return sum((Decimal(order[key]) for order in regular_filled_orders
+                        if order["trade_type"] == side.name), Decimal("0"))
+
+        self.realized_buy_size_quote = total(TradeType.BUY, "executed_amount_quote")
+        self.realized_sell_size_quote = total(TradeType.SELL, "executed_amount_quote")
+        self.realized_buy_fees_quote = total(TradeType.BUY, "cumulative_fee_paid_quote")
+        self.realized_sell_fees_quote = total(TradeType.SELL, "cumulative_fee_paid_quote")
 
         # Buy fee charged in the base token (deduct_base_fees) is already netted out of the
         # quantity we sell, so it is embedded in (sell - buy); it is still registered as a fee.
@@ -5946,23 +6026,31 @@ class GridExecutor(ExecutorBase):
         # unsellable base residual (< min_order_size), remove its proportional
         # cost from realized_buy_size_quote so TAKE_PROFIT PnL is not negative.
         if self.close_type != CloseType.POSITION_HOLD and self.realized_buy_size_quote > 0:
-            total_buy_base = sum(
-                Decimal(order["executed_amount_base"])
-                for order in regular_filled_orders if order["trade_type"] == TradeType.BUY.name
-            )
-            total_sell_base = sum(
-                Decimal(order["executed_amount_base"])
-                for order in regular_filled_orders if order["trade_type"] == TradeType.SELL.name
-            )
+            total_buy_base = total(TradeType.BUY, "executed_amount_base")
+            # Archived partial TP sales of still-open levels are matched below, not against archived BUYs.
+            total_sell_base = total(TradeType.SELL, "executed_amount_base") - open_sales["archived_sold_base"]
             residual_base = total_buy_base - base_fee_base - total_sell_base
             min_order_size = self.trading_rules.min_order_size
             # A held residual of a reduced TP is still inventory: its cost stays with the open position.
             held_residual = min(residual_base, getattr(self, "_held_residual_base", Decimal("0")))
             removable = residual_base if Decimal("0") < residual_base < min_order_size else held_residual
             if removable > 0:
-                avg_entry = self.realized_buy_size_quote / total_buy_base
-                residual_cost = removable * avg_entry
+                retained = getattr(self, "_retained_residual_base", Decimal("0"))
+                if removable == held_residual and retained > 0:
+                    # Same unit cost as the position break-even of the held residual.
+                    residual_cost = self._retained_residual_cost_quote * removable / retained
+                else:
+                    residual_cost = removable * self.realized_buy_size_quote / total_buy_base
                 self.realized_buy_size_quote -= residual_cost
+
+        # Sales by TPs of levels still open: proceeds plus the matching share of their BUY cost and fees.
+        self.realized_sell_size_quote += open_sales["sell_quote"]
+        self.realized_sell_fees_quote += open_sales["sell_fees"]
+        self.realized_buy_size_quote += open_sales["buy_quote"]
+        self.realized_buy_fees_quote += open_sales["buy_fees"]
+        base_fee_quote += open_sales["base_fee_quote"]
+        self.realized_imbalance_quote = self.realized_buy_size_quote - self.realized_sell_size_quote
+        self.realized_fees_quote = self.realized_buy_fees_quote + self.realized_sell_fees_quote
 
         # Cost of the units actually received; fees stay fully registered, so gross = net + fees
         # is the pure price-move result for both base-fee (Bitget) and quote-fee (Kraken) exchanges.

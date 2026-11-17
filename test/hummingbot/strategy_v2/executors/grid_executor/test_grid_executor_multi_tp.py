@@ -361,6 +361,29 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         self.assertEqual(self.executor.realized_sell_size_quote, Decimal("6.79") * tp2.price)
         self.assertEqual(self.executor.realized_buy_size_quote, Decimal("6.84") * self.buy_levels[1].price)
 
+    async def test_partial_buy_fill_is_not_counted_as_retained_residual(self):
+        await self._two_levels_first_tp_open()
+        self.ex.held -= Decimal("0.05")  # real shortfall: the exchange never holds this 0.05
+        await self.tick()
+        self.confirm_sells()
+        self.fill("SELL-2", Decimal("6.79"))
+        self.assertEqual(self.executor._retained_residual_base, Decimal("0.05"))
+
+        self.fill("BUY-3", Decimal("2.00"))  # open BUY partially filled: its base is not residual
+        self.assertEqual(self.tracked_position(), Decimal("6.84"))
+        self.assertEqual(self.executor._held_residual_base, Decimal("0"))
+        self.confirm_cancel("BUY-3")  # cancelled after the partial fill
+        self.assertEqual(self.tracked_position(), Decimal("6.84"))
+        self.assertEqual(self.executor._held_residual_base, Decimal("0"))
+        self.assertEqual(self.ex.held, self.tracked_position() + Decimal("2.00"),
+                         "exchange = level position + cancelled partial BUY; no residual")
+
+        self.fill("SELL-1", Decimal("6.84"))
+        self.assertEqual(self.tracked_position(), Decimal("0"))
+        self.assertEqual(self.ex.held, Decimal("2.00"))
+        self.assertEqual(self.executor._held_residual_base, Decimal("0"))
+        self.assertEqual(self._snapshot(Decimal("3.23"))["residual_dust_base"], Decimal("0"))
+
     async def test_temporarily_reduced_tp_fully_filled_keeps_residual_tracked(self):
         # Delayed balance credit: exchange total/available briefly show 0.05 NEAR less, so the
         # 2nd TP is sized 6.79 although the level holds 6.84. The credit then arrives.
@@ -450,97 +473,132 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
                       if o["trade_type"] == TradeType.SELL.name)
         self.assertEqual(sold, [Decimal("2.00"), Decimal("3.00")], "partial TP sales archived once each")
 
-    def _profit_exit_snapshots(self, price):
-        """Compare live metrics with cash flows for a 3 NEAR partial sale of BUY-1."""
+    # ------------------------------------------- partial TP P&L, exits and residuals
+    def _snapshot(self, price):
         self.executor.mid_price = price
         self.tracked_position()
         self.executor.update_realized_pnl_metrics()
-        observed = {
-            key: getattr(self.executor, key) for key in (
-                "realized_pnl_quote", "realized_buy_size_quote", "position_size_quote",
-                "position_fees_quote", "position_pnl_quote",
-            )
-        }
-        sold = Decimal("3")
-        entry1, entry2 = (level.price for level in self.buy_levels[:2])
-        remaining_cost = (Decimal("6.84") - sold) * entry1 + Decimal("6.84") * entry2
-        corrected = {
-            **observed,
-            "realized_buy_size_quote": sold * entry1,
-            "realized_pnl_quote": sold * (self.ex.confirmed["SELL-1"].price - entry1),
-            "position_size_quote": remaining_cost,
-            "position_pnl_quote": self.ex.held * price - remaining_cost,
-        }
+        return self.executor.get_custom_info()
+
+    def assert_reconciles(self, price):
+        """Tracked inventory equals the exchange and net P&L equals the cash flows of all fills."""
+        self._snapshot(price)
+        orders = list({**self.ex.pending, **self.ex.confirmed}.values())
+        sells = sum((o.executed_amount_quote for o in orders if o.trade_type == TradeType.SELL), Decimal("0"))
+        buys = sum((o.executed_amount_quote for o in orders if o.trade_type == TradeType.BUY), Decimal("0"))
+        self.assertEqual(self.executor.position_size_base, self.ex.held)
+        total = self.executor.realized_pnl_quote + self.executor.position_pnl_quote
+        self.assertAlmostEqual(total, sells - buys + self.ex.held * price, places=12)
+        return sells, buys
+
+    def _controller(self):
         ctrl = MultiCoinGridController.__new__(MultiCoinGridController)
         ctrl.config = SimpleNamespace(
             fee_aware_filter={"taker_fee_pct": Decimal("0.20")},
             grid_profit_exit_require_remaining_profitable=False,
         )
-        return ctrl, observed, corrected
+        return ctrl
 
-    async def test_open_partial_tp_can_delay_grid_profit_exit_reproduction(self):
+    def _entries(self):
+        return tuple(level.price for level in self.buy_levels[:2])
+
+    async def _three_sold_from_first_tp(self):
         await self._two_levels_first_tp_open()
         await self.tick()
         self.confirm_sells()
         self.fill("SELL-1", Decimal("3"))
-        ctrl, observed, corrected = self._profit_exit_snapshots(Decimal("3.25"))
+        entry1, entry2 = self._entries()
+        return entry1, entry2, Decimal("3.84") * entry1 + Decimal("6.84") * entry2
 
-        self.assertEqual(observed["realized_pnl_quote"], Decimal("0"))
-        self.assertLess(ctrl._total_net_grid_profit(observed)["total_pct"], 0.6)
-        self.assertGreater(ctrl._total_net_grid_profit(corrected)["total_pct"], 0.6)
-        self.assertNotEqual(ctrl._total_net_grid_profit_decision(PAIR, observed, 0.6, False), "exit")
-        self.assertEqual(ctrl._total_net_grid_profit_decision(PAIR, corrected, 0.6, False), "exit")
+    async def test_open_partial_tp_sale_is_realized_with_its_cost_for_profit_exit(self):
+        entry1, _, remaining_cost = await self._three_sold_from_first_tp()
+        sell1 = self.ex.confirmed["SELL-1"].price
+        info = self._snapshot(Decimal("3.25"))
 
-    async def test_cancelled_partial_tp_can_exit_grid_too_early_reproduction(self):
-        await self._two_levels_first_tp_open()
-        await self.tick()
-        self.confirm_sells()
-        self.fill("SELL-1", Decimal("3"))
+        self.assertEqual(self.executor.realized_sell_size_quote, Decimal("3") * sell1)
+        self.assertEqual(self.executor.realized_buy_size_quote, Decimal("3") * entry1)
+        self.assertEqual(self.executor.realized_pnl_quote, Decimal("3") * (sell1 - entry1))
+        self.assertEqual(self.executor.position_size_base, Decimal("10.68"))
+        self.assertAlmostEqual(self.executor.position_size_quote, remaining_cost, places=12)
+        self.assert_reconciles(Decimal("3.25"))
+        self.assertEqual(self._controller()._total_net_grid_profit_decision(PAIR, info, 0.6, False), "exit")
+
+    async def test_cancelled_partial_tp_and_replacement_book_cost_once(self):
+        entry1, _, _ = await self._three_sold_from_first_tp()
+        sell1 = self.ex.confirmed["SELL-1"].price
         self.confirm_cancel("SELL-1")
-        ctrl, observed, corrected = self._profit_exit_snapshots(Decimal("3.23"))
+        info = self._snapshot(Decimal("3.23"))
 
-        self.assertEqual(observed["realized_buy_size_quote"], Decimal("0"))
-        self.assertEqual(observed["realized_pnl_quote"], Decimal("3") * self.ex.confirmed["SELL-1"].price)
-        self.assertGreater(ctrl._total_net_grid_profit(observed)["total_pct"], 0.6)
-        self.assertLess(ctrl._total_net_grid_profit(corrected)["total_pct"], 0.6)
-        self.assertEqual(ctrl._total_net_grid_profit_decision(PAIR, observed, 0.6, False), "exit")
-        self.assertNotEqual(ctrl._total_net_grid_profit_decision(PAIR, corrected, 0.6, False), "exit")
+        self.assertEqual(self.executor.realized_buy_size_quote, Decimal("3") * entry1)
+        self.assertEqual(self.executor.realized_pnl_quote, Decimal("3") * (sell1 - entry1))
+        self.assert_reconciles(Decimal("3.23"))
+        self.assertNotEqual(self._controller()._total_net_grid_profit_decision(PAIR, info, 0.6, False), "exit")
 
-    async def test_stop_and_trailing_do_not_read_realized_partial_tp_pnl(self):
-        await self._two_levels_first_tp_open()
-        self.fill("SELL-1", Decimal("3"))
-        self.executor.mid_price = Decimal("3.10")
+        await self.tick()
+        self.confirm_sells()
+        replacement = self.ex.confirmed[f"SELL-{self.ex.sell_count}"]
+        self.assertEqual(replacement.amount, Decimal("3.84"))
+        self.fill(replacement.client_order_id, Decimal("3.84"))
+        self._snapshot(Decimal("3.23"))
+        self.assertEqual(self.executor.realized_buy_size_quote, Decimal("6.84") * entry1)
+        self.assertEqual(self.executor.realized_sell_size_quote,
+                         Decimal("3") * sell1 + Decimal("3.84") * replacement.price)
+        archived_ids = [o["client_order_id"] for o in self.executor._filled_orders]
+        self.assertEqual(len(archived_ids), len(set(archived_ids)), "no order archived twice")
+        self.assert_reconciles(Decimal("3.23"))
+
+    async def test_trailing_stop_uses_cost_of_remaining_units(self):
+        _, _, remaining_cost = await self._three_sold_from_first_tp()
+        remaining_entry = remaining_cost / Decimal("10.68")
         self.tracked_position()
+        self.assertEqual(self.executor.position_break_even_price, remaining_entry)
         self.executor.config.triple_barrier_config.trailing_stop = TrailingStop(
-            activation_price=Decimal("0.01"), trailing_delta=Decimal("0.005"))
-        position_pnl = self.executor.position_pnl_pct
-        for realized in (Decimal("-100"), Decimal("0"), Decimal("100")):
-            self.executor.realized_pnl_quote = realized
-            self.executor._trailing_stop_trigger_pct = Decimal("0.005")
-            self.assertTrue(self.executor.stop_loss_condition())
-            self.assertTrue(self.executor.trailing_stop_condition())
-            self.assertEqual(self.executor.position_pnl_pct, position_pnl)
+            activation_price=Decimal("0.003"), trailing_delta=Decimal("0.002"))
+        self.executor._trailing_stop_trigger_pct = None
+        self.executor._trailing_peak_pnl_pct = None
+        gross_entry = sum(self._entries()) / 2  # entry incl. units already sold
 
-    async def test_partial_tp_entry_weight_can_trigger_stop_too_early_reproduction(self):
-        await self._two_levels_first_tp_open()
-        self.fill("SELL-1", Decimal("3"))
-        self.tracked_position()
-        entry1, entry2 = (level.price for level in self.buy_levels[:2])
-        remaining_cost = Decimal("3.84") * entry1 + Decimal("6.84") * entry2
-        remaining_entry = remaining_cost / self.ex.held
-        reported_entry = self.executor.position_break_even_price
-        self.assertGreater(reported_entry, remaining_entry, "sold top-level units still weight the entry")
-        stop = self.executor.config.triple_barrier_config.stop_loss
-        self.executor.mid_price = (reported_entry + remaining_entry) / 2 * (1 - stop)
+        # Activates at 0.33% on the remaining units, although only ~0.27% above the gross entry.
+        self.executor.mid_price = remaining_entry * Decimal("1.0033")
+        self.assertLess(self.executor.mid_price / gross_entry - 1, Decimal("0.003"))
         self.executor.update_position_metrics()
-        actual_remaining_pnl_pct = self.executor.mid_price / remaining_entry - 1
-        self.assertGreater(actual_remaining_pnl_pct, -stop)
-        self.assertLess(self.executor.position_pnl_pct, -stop)
-        self.assertTrue(self.executor.stop_loss_condition())
-        self.assertTrue(self.executor.control_triple_barrier())
-        self.assertEqual(self.executor.close_type, CloseType.STOP_LOSS)
+        self.assertAlmostEqual(self.executor.position_pnl_pct, Decimal("0.0033"), places=12)
+        self.assertFalse(self.executor.trailing_stop_condition())
+        self.assertIsNotNone(self.executor._trailing_stop_trigger_pct)
 
-    async def test_aggregate_sellable_residual_is_untracked_after_last_level_reproduction(self):
+        self.executor.mid_price = remaining_entry * Decimal("1.0011")
+        self.executor.update_position_metrics()
+        for realized in (Decimal("-100"), Decimal("100")):
+            self.executor.realized_pnl_quote = realized
+            self.assertTrue(self.executor.trailing_stop_condition())
+
+    async def test_stop_loss_uses_cost_of_remaining_units(self):
+        _, _, remaining_cost = await self._three_sold_from_first_tp()
+        self.tracked_position()
+        remaining_entry = remaining_cost / Decimal("10.68")
+        stop = self.executor.config.triple_barrier_config.stop_loss
+
+        self.executor.mid_price = remaining_entry * (1 - stop) * Decimal("1.0001")
+        self.executor.update_position_metrics()
+        self.assertGreater(self.executor.position_pnl_pct, -stop)
+        self.assertFalse(self.executor.stop_loss_condition())
+        self.assertFalse(self.executor.control_triple_barrier())
+        self.assertIsNone(self.executor.close_type)
+
+        self.executor.mid_price = remaining_entry * (1 - stop) * Decimal("0.9999")
+        self.executor.update_position_metrics()
+        self.assertTrue(self.executor.stop_loss_condition())
+
+    async def _stop_with_no_filled_levels(self):
+        for oid, order in list(self.ex.confirmed.items()):
+            if order.trade_type == TradeType.BUY and order.current_state == OrderState.OPEN:
+                self.confirm_cancel(oid)
+        self.executor.close_type = CloseType.STOP_LOSS
+        self.executor._status = RunnableStatus.SHUTTING_DOWN
+        with patch.object(GridExecutor, "_close_price_unreliable", return_value=False), patch("time.sleep"):
+            await self.tick()
+
+    async def test_aggregate_sellable_residual_is_sold_after_last_level_closes(self):
         await self._two_levels_first_tp_open()
         self.ex.held -= Decimal("0.20")
         await self.tick()
@@ -548,8 +606,6 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         self.assertEqual(self.ex.confirmed["SELL-2"].amount, Decimal("6.64"))
         self.ex.held += Decimal("0.20")
         self.fill("SELL-2", Decimal("6.64"))
-        self.assertEqual(self.tracked_position(), Decimal("7.04"))
-
         self.fill("BUY-3", Decimal("6.84"))
         self.ex.held -= Decimal("0.40")
         await self.tick()
@@ -557,19 +613,71 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         self.assertEqual(self.ex.confirmed["SELL-3"].amount, Decimal("6.64"))
         self.ex.held += Decimal("0.40")
         self.fill("SELL-3", Decimal("6.64"))
-        self.assertEqual(self.tracked_position(), Decimal("7.24"))
         self.fill("SELL-1", Decimal("6.84"))
-        self.assertEqual(self.tracked_position(), Decimal("0"), "reproduces ignored standalone residual")
-        self.assertEqual(self.executor._retained_residual_base, Decimal("0.40"))
-        self.assertEqual(self.ex.available(), Decimal("0.40"))
-        self.assertGreaterEqual(self.ex.available(), self.executor.trading_rules.min_order_size)
-        self.assertGreaterEqual(
-            self.ex.available() * Decimal("3.23"), self.executor.trading_rules.min_notional_size)
-        self.assertEqual(self.ex.sell_count, 3, "no sell submitted for the now-sellable aggregate")
-        self.confirm_cancel("BUY-4")
+
+        self.assertEqual(self.tracked_position(), Decimal("0"), "residual alone does not drive stops while running")
+        self.assertEqual(self.executor._held_residual_base, Decimal("0.40"))
+        self.assertEqual(self.ex.held, Decimal("0.40"))
+        self._snapshot(Decimal("3.23"))
+        residual_cost = Decimal("0.20") * (self.buy_levels[1].price + self.buy_levels[2].price)
+        orders = list(self.ex.confirmed.values())
+        sells = sum((o.executed_amount_quote for o in orders if o.trade_type == TradeType.SELL), Decimal("0"))
+        buys = sum((o.executed_amount_quote for o in orders if o.trade_type == TradeType.BUY), Decimal("0"))
+        self.assertEqual(self.executor.realized_buy_size_quote, buys - residual_cost, "residual held at cost")
+        self.assertAlmostEqual(self.executor.realized_pnl_quote, sells - buys + residual_cost, places=12)
+
+        await self._stop_with_no_filled_levels()
+        self.assertEqual(self.ex.sell_count, 4)
+        close_sell = self.ex.sells()[self.executor._close_order.order_id]
+        self.assertEqual(close_sell.amount, Decimal("0.40"))
+        self.confirm_sells()
+        self.fill(close_sell.client_order_id, Decimal("0.40"))
+        with patch.object(GridExecutor, "_close_price_unreliable", return_value=False), patch("time.sleep"):
+            for _ in range(2):  # CLOSING -> SHUTTING_DOWN -> TERMINATED
+                await self.tick()
+        self.assertEqual(self.executor.status, RunnableStatus.TERMINATED)
+        self.assertEqual(self.ex.held, Decimal("0"))
+        self.assertEqual(self.ex.sell_count, 4, "residual sold exactly once")
+        self.assert_reconciles(Decimal("3.23"))
+
+    async def test_unsellable_residual_dust_is_registered_separately(self):
+        await self._two_levels_first_tp_open()
+        self.ex.held -= Decimal("0.05")
+        await self.tick()
+        self.confirm_sells()
+        self.ex.held += Decimal("0.05")
+        self.fill("SELL-2", Decimal("6.79"))
+        self.fill("SELL-1", Decimal("6.84"))
+
+        self.assertEqual(self.tracked_position(), Decimal("0"))
+        info = self._snapshot(Decimal("3.23"))
+        self.assertEqual(info["residual_dust_base"], Decimal("0.05"))
+        await self._stop_with_no_filled_levels()
+        self.assertEqual(self.executor.status, RunnableStatus.TERMINATED)
+        self.assertEqual(self.ex.sell_count, 2, "unsellable dust (0.05 x 3.23 < min notional 1) is not sold")
+        self.assertEqual(self.executor.get_custom_info()["residual_dust_base"], Decimal("0.05"))
+
+    async def test_inventory_and_pnl_reconcile_with_base_fees_through_partial_tp_and_stop(self):
+        fee = Decimal("0.01")
+        self.fill("BUY-1", Decimal("6.84"), fee)
+        await self.tick()
+        self.confirm_sells()
+        self.fill("BUY-2", Decimal("6.84"), fee)
+        await self.tick()
+        self.confirm_sells()
+        self.assertEqual(self.ex.confirmed["SELL-1"].amount, Decimal("6.83"))
+        self.fill("SELL-1", Decimal("3"))
+        self.assertEqual(self.tracked_position(), Decimal("10.66"))
+        self.assert_reconciles(Decimal("3.21"))
+
         self.executor.close_type = CloseType.STOP_LOSS
+        self.executor.cancel_open_orders()
         self.executor._status = RunnableStatus.SHUTTING_DOWN
         await self.tick()
-        self.assertEqual(self.executor.status, RunnableStatus.TERMINATED)
-        self.assertEqual(self.ex.held, Decimal("0.40"), "executor terminates with sellable inventory remaining")
-        self.assertEqual(self.ex.sell_count, 3)
+        for oid in ("SELL-1", "SELL-2", "BUY-3", "BUY-4"):
+            self.confirm_cancel(oid)
+        with patch.object(GridExecutor, "_close_price_unreliable", return_value=False), patch("time.sleep"):
+            await self.tick()
+        close_sell = self.ex.sells()[self.executor._close_order.order_id]
+        self.assertEqual(close_sell.amount, Decimal("10.66"))
+        self.assert_reconciles(Decimal("3.21"))
