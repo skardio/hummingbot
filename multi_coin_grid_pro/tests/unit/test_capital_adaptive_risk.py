@@ -524,6 +524,7 @@ class TestEntryFallbackUsesFullValidation:
             ctrl.pair_spreads[symbol] = 0.0002
         ctrl._sync_risk_state = MagicMock()
         ctrl._check_professional_exit_signals = MagicMock(return_value=[])
+        ctrl.time_based_filter = None  # schedule window uses the wall clock; not under test here
         ctrl.monitored_coins = [c for c, _ in self.TOP_10]
         ctrl.trend_calculator.get_top_n_coins.return_value = ["Q-USDT"]
         ctrl.trend_calculator.get_trend.return_value = SimpleNamespace(
