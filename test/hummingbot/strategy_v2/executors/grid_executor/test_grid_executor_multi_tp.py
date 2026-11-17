@@ -13,6 +13,7 @@ handlers; a small fake exchange confirms orders via connector._order_tracker.
 from decimal import Decimal
 from test.isolated_asyncio_wrapper_test_case import IsolatedAsyncioWrapperTestCase
 from test.logger_mixin_for_test import LoggerMixinForTest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 from hummingbot.connector.exchange_py_base import ExchangePyBase
@@ -27,10 +28,11 @@ from hummingbot.core.event.events import (
     OrderFilledEvent,
     SellOrderCreatedEvent,
 )
+from hummingbot.multi_coin_grid_controllers.multi_coin_grid_controller import MultiCoinGridController
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig, GridLevelStates
 from hummingbot.strategy_v2.executors.grid_executor.grid_executor import GridExecutor
-from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
+from hummingbot.strategy_v2.executors.position_executor.data_types import TrailingStop, TripleBarrierConfig
 from hummingbot.strategy_v2.models.base import RunnableStatus
 from hummingbot.strategy_v2.models.executors import CloseType, TrackedOrder
 
@@ -447,3 +449,127 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         sold = sorted(Decimal(o["executed_amount_base"]) for o in self.executor._filled_orders
                       if o["trade_type"] == TradeType.SELL.name)
         self.assertEqual(sold, [Decimal("2.00"), Decimal("3.00")], "partial TP sales archived once each")
+
+    def _profit_exit_snapshots(self, price):
+        """Compare live metrics with cash flows for a 3 NEAR partial sale of BUY-1."""
+        self.executor.mid_price = price
+        self.tracked_position()
+        self.executor.update_realized_pnl_metrics()
+        observed = {
+            key: getattr(self.executor, key) for key in (
+                "realized_pnl_quote", "realized_buy_size_quote", "position_size_quote",
+                "position_fees_quote", "position_pnl_quote",
+            )
+        }
+        sold = Decimal("3")
+        entry1, entry2 = (level.price for level in self.buy_levels[:2])
+        remaining_cost = (Decimal("6.84") - sold) * entry1 + Decimal("6.84") * entry2
+        corrected = {
+            **observed,
+            "realized_buy_size_quote": sold * entry1,
+            "realized_pnl_quote": sold * (self.ex.confirmed["SELL-1"].price - entry1),
+            "position_size_quote": remaining_cost,
+            "position_pnl_quote": self.ex.held * price - remaining_cost,
+        }
+        ctrl = MultiCoinGridController.__new__(MultiCoinGridController)
+        ctrl.config = SimpleNamespace(
+            fee_aware_filter={"taker_fee_pct": Decimal("0.20")},
+            grid_profit_exit_require_remaining_profitable=False,
+        )
+        return ctrl, observed, corrected
+
+    async def test_open_partial_tp_can_delay_grid_profit_exit_reproduction(self):
+        await self._two_levels_first_tp_open()
+        await self.tick()
+        self.confirm_sells()
+        self.fill("SELL-1", Decimal("3"))
+        ctrl, observed, corrected = self._profit_exit_snapshots(Decimal("3.25"))
+
+        self.assertEqual(observed["realized_pnl_quote"], Decimal("0"))
+        self.assertLess(ctrl._total_net_grid_profit(observed)["total_pct"], 0.6)
+        self.assertGreater(ctrl._total_net_grid_profit(corrected)["total_pct"], 0.6)
+        self.assertNotEqual(ctrl._total_net_grid_profit_decision(PAIR, observed, 0.6, False), "exit")
+        self.assertEqual(ctrl._total_net_grid_profit_decision(PAIR, corrected, 0.6, False), "exit")
+
+    async def test_cancelled_partial_tp_can_exit_grid_too_early_reproduction(self):
+        await self._two_levels_first_tp_open()
+        await self.tick()
+        self.confirm_sells()
+        self.fill("SELL-1", Decimal("3"))
+        self.confirm_cancel("SELL-1")
+        ctrl, observed, corrected = self._profit_exit_snapshots(Decimal("3.23"))
+
+        self.assertEqual(observed["realized_buy_size_quote"], Decimal("0"))
+        self.assertEqual(observed["realized_pnl_quote"], Decimal("3") * self.ex.confirmed["SELL-1"].price)
+        self.assertGreater(ctrl._total_net_grid_profit(observed)["total_pct"], 0.6)
+        self.assertLess(ctrl._total_net_grid_profit(corrected)["total_pct"], 0.6)
+        self.assertEqual(ctrl._total_net_grid_profit_decision(PAIR, observed, 0.6, False), "exit")
+        self.assertNotEqual(ctrl._total_net_grid_profit_decision(PAIR, corrected, 0.6, False), "exit")
+
+    async def test_stop_and_trailing_do_not_read_realized_partial_tp_pnl(self):
+        await self._two_levels_first_tp_open()
+        self.fill("SELL-1", Decimal("3"))
+        self.executor.mid_price = Decimal("3.10")
+        self.tracked_position()
+        self.executor.config.triple_barrier_config.trailing_stop = TrailingStop(
+            activation_price=Decimal("0.01"), trailing_delta=Decimal("0.005"))
+        position_pnl = self.executor.position_pnl_pct
+        for realized in (Decimal("-100"), Decimal("0"), Decimal("100")):
+            self.executor.realized_pnl_quote = realized
+            self.executor._trailing_stop_trigger_pct = Decimal("0.005")
+            self.assertTrue(self.executor.stop_loss_condition())
+            self.assertTrue(self.executor.trailing_stop_condition())
+            self.assertEqual(self.executor.position_pnl_pct, position_pnl)
+
+    async def test_partial_tp_entry_weight_can_trigger_stop_too_early_reproduction(self):
+        await self._two_levels_first_tp_open()
+        self.fill("SELL-1", Decimal("3"))
+        self.tracked_position()
+        entry1, entry2 = (level.price for level in self.buy_levels[:2])
+        remaining_cost = Decimal("3.84") * entry1 + Decimal("6.84") * entry2
+        remaining_entry = remaining_cost / self.ex.held
+        reported_entry = self.executor.position_break_even_price
+        self.assertGreater(reported_entry, remaining_entry, "sold top-level units still weight the entry")
+        stop = self.executor.config.triple_barrier_config.stop_loss
+        self.executor.mid_price = (reported_entry + remaining_entry) / 2 * (1 - stop)
+        self.executor.update_position_metrics()
+        actual_remaining_pnl_pct = self.executor.mid_price / remaining_entry - 1
+        self.assertGreater(actual_remaining_pnl_pct, -stop)
+        self.assertLess(self.executor.position_pnl_pct, -stop)
+        self.assertTrue(self.executor.stop_loss_condition())
+        self.assertTrue(self.executor.control_triple_barrier())
+        self.assertEqual(self.executor.close_type, CloseType.STOP_LOSS)
+
+    async def test_aggregate_sellable_residual_is_untracked_after_last_level_reproduction(self):
+        await self._two_levels_first_tp_open()
+        self.ex.held -= Decimal("0.20")
+        await self.tick()
+        self.confirm_sells()
+        self.assertEqual(self.ex.confirmed["SELL-2"].amount, Decimal("6.64"))
+        self.ex.held += Decimal("0.20")
+        self.fill("SELL-2", Decimal("6.64"))
+        self.assertEqual(self.tracked_position(), Decimal("7.04"))
+
+        self.fill("BUY-3", Decimal("6.84"))
+        self.ex.held -= Decimal("0.40")
+        await self.tick()
+        self.confirm_sells()
+        self.assertEqual(self.ex.confirmed["SELL-3"].amount, Decimal("6.64"))
+        self.ex.held += Decimal("0.40")
+        self.fill("SELL-3", Decimal("6.64"))
+        self.assertEqual(self.tracked_position(), Decimal("7.24"))
+        self.fill("SELL-1", Decimal("6.84"))
+        self.assertEqual(self.tracked_position(), Decimal("0"), "reproduces ignored standalone residual")
+        self.assertEqual(self.executor._retained_residual_base, Decimal("0.40"))
+        self.assertEqual(self.ex.available(), Decimal("0.40"))
+        self.assertGreaterEqual(self.ex.available(), self.executor.trading_rules.min_order_size)
+        self.assertGreaterEqual(
+            self.ex.available() * Decimal("3.23"), self.executor.trading_rules.min_notional_size)
+        self.assertEqual(self.ex.sell_count, 3, "no sell submitted for the now-sellable aggregate")
+        self.confirm_cancel("BUY-4")
+        self.executor.close_type = CloseType.STOP_LOSS
+        self.executor._status = RunnableStatus.SHUTTING_DOWN
+        await self.tick()
+        self.assertEqual(self.executor.status, RunnableStatus.TERMINATED)
+        self.assertEqual(self.ex.held, Decimal("0.40"), "executor terminates with sellable inventory remaining")
+        self.assertEqual(self.ex.sell_count, 3)
