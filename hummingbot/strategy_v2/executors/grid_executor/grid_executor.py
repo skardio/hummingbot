@@ -3455,6 +3455,9 @@ class GridExecutor(ExecutorBase):
     def _is_book_price_stale(self) -> bool:
         if not self._price_freshness_enabled():
             return False
+        tracker = getattr(self.connectors[self.config.connector_name], "order_book_tracker", None)
+        if hasattr(type(tracker), "is_order_book_valid") and not tracker.is_order_book_valid(self.config.trading_pair):
+            return True
         now = float(self._strategy.current_timestamp)
         if now < getattr(self, "_force_price_refresh_until", 0.0):
             return True

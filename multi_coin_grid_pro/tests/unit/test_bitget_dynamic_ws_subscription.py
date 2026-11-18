@@ -109,9 +109,17 @@ async def _until(cond, timeout=2.0):
 def run(coro):
     # Private loop: asyncio.run() would reset the global loop to None and break later tests.
     loop = asyncio.new_event_loop()
+
+    async def cleanup():
+        pending = asyncio.all_tasks() - {asyncio.current_task()}
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
     try:
         return loop.run_until_complete(coro)
     finally:
+        loop.run_until_complete(cleanup())
         loop.close()
 
 
@@ -178,18 +186,30 @@ class TestDynamicPairLiveFeed:
 
         run(scenario())
 
-    def test_without_tracking_task_ws_diffs_never_reach_the_book(self):
-        """Documents the second half of the root cause: WS data alone does not update a dynamic book."""
+    def test_missing_tracking_task_invalidates_and_recovers_the_book(self):
         async def scenario():
             ws = FakeWS()
             h = _Harness([ws])
             h.start()
             await _until(lambda: h.ds._ws_assistant is ws)
             h.tracker._order_books[DYNAMIC] = _book(0.3178, 0.3180, T0_MS)
+            old_book = h.tracker._order_books[DYNAMIC]
+            h.tracker._trading_pairs.append(DYNAMIC)
+            gate = asyncio.Event()
+
+            async def snapshot(pair):
+                await gate.wait()
+                return _book(0.38, 0.381, T0_MS + 180_000)
+
+            h.ds.get_new_order_book = AsyncMock(side_effect=snapshot)
             await h.ds.subscribe_to_trading_pair(DYNAMIC)
             ws.inbox.put_nowait(_books_msg("ICNTUSDT", "update", 0.3700, 0.3710, T0_MS + 120_000))
             await _until(lambda: len(h.tracker._saved_message_queues[DYNAMIC]) == 1)
-            assert h.tracker._order_books[DYNAMIC].get_price(False) == 0.3178
+            assert DYNAMIC not in h.tracker.order_books
+            assert list(old_book.bid_entries()) == []
+            gate.set()
+            await _until(lambda: h.tracker.is_order_book_valid(DYNAMIC))
+            assert h.tracker.order_books[DYNAMIC].get_price(False) == 0.38
             await h.stop()
 
         run(scenario())
@@ -303,6 +323,45 @@ class TestSubscribeToTradingPair:
 
 
 class TestControllerSubscriptionWiring:
+    def test_unsubscribe_resubscribe_uses_tracker_lifecycle(self):
+        async def scenario():
+            ds = _data_source(pairs=(STATIC, DYNAMIC))
+            tracker = OrderBookTracker(ds, [STATIC, DYNAMIC])
+            ds.get_new_order_book = AsyncMock(side_effect=lambda pair: _book(1, 2, T0_MS))
+            ctrl = _ctrl()
+            ctrl.connector = SimpleNamespace(order_book_tracker=tracker)
+            await MultiCoinGridController._initialize_orderbook(ctrl, DYNAMIC, tracker)
+            old_consumer = tracker._tracking_tasks[DYNAMIC]
+            MultiCoinGridController._unsubscribe_from_orderbook(ctrl, DYNAMIC)
+            await asyncio.sleep(0)
+            assert old_consumer.cancelled()
+            assert DYNAMIC not in tracker._tracking_message_queues
+            assert DYNAMIC not in tracker.order_books
+            tracker._trading_pairs.append(DYNAMIC)
+            ds._trading_pairs.append(DYNAMIC)
+            await MultiCoinGridController._initialize_orderbook(ctrl, DYNAMIC, tracker)
+            assert tracker.is_order_book_valid(DYNAMIC)
+            assert tracker._tracking_tasks[DYNAMIC] is not old_consumer
+
+        run(scenario())
+
+    def test_bitget_parsers_wait_for_bounded_output_instead_of_losing_updates(self):
+        async def scenario():
+            ds = _data_source()
+            for action, parser in (("update", ds._parse_order_book_diff_message),
+                                   ("snapshot", ds._parse_order_book_snapshot_message)):
+                queue = asyncio.Queue(maxsize=1)
+                queue.put_nowait("busy")
+                task = asyncio.create_task(parser(
+                    _books_msg("BTCUSDT", action, 10, 11, T0_MS), queue))
+                await asyncio.sleep(0)
+                assert not task.done()
+                assert queue.get_nowait() == "busy"
+                await task
+                assert queue.get_nowait().update_id == T0_MS
+
+        run(scenario())
+
     def test_tracking_task_registered_before_subscribe_is_sent(self):
         async def scenario():
             ds = _data_source()

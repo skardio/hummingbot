@@ -16,9 +16,13 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
+from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.core.data_type.common import OrderType, PriceType, TradeType
+from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.order_book_row import OrderBookRow
+from hummingbot.core.data_type.order_book_tracker import OrderBookTracker
+from hummingbot.data_feed.market_data_provider import MarketDataProvider
 from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
 from hummingbot.strategy_v2.executors.grid_executor.grid_executor import GridExecutor
 from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
@@ -555,6 +559,64 @@ class TestStaleBookBlocksNewBuys:
         ex._sort_levels_by_proximity = Mock(side_effect=lambda levels: levels)
         ex._configured_open_order_cap = Mock(return_value=None)
         ex._emit_decision_telemetry = Mock()
+
+    def test_invalid_book_is_not_fresh_data_or_a_buy_price_until_snapshot_recovery(self):
+        async def scenario():
+            ex, connector, strategy = _make(book_age_s=1)
+            source = MagicMock()
+            source._trading_pairs = [PAIR]
+            tracker = OrderBookTracker(source, [PAIR])
+            connector.order_book_tracker = tracker
+            connector.get_order_book = lambda pair: ExchangePyBase.get_order_book(connector, pair)
+            gate = asyncio.Event()
+
+            def fresh_book():
+                result = OrderBook()
+                uid = int(NOW * 1000)
+                result.apply_snapshot([OrderBookRow(0.37, 10, uid)], [OrderBookRow(0.371, 10, uid)], uid)
+                return result
+
+            source.get_new_order_book = AsyncMock(side_effect=lambda pair: fresh_book())
+            await tracker.initialize_order_book(PAIR)
+            provider = MarketDataProvider({"bitget": connector})
+            provider.mark_data_update = Mock()
+            try:
+                cached = provider.get_order_book("bitget", PAIR)
+                assert not ex._is_book_price_stale()
+                provider.mark_data_update.reset_mock()
+
+                async def recover(pair):
+                    await gate.wait()
+                    return fresh_book()
+
+                source.get_new_order_book.side_effect = recover
+                tracker._invalidate_order_book(PAIR, "full pair queue", int(NOW * 1000))
+                with pytest.raises(ValueError, match="No order book"):
+                    provider.get_order_book("bitget", PAIR)
+                provider.mark_data_update.assert_not_called()
+                assert list(cached.bid_entries()) == []
+                assert ex._is_book_price_stale()
+                self._sentinel_levels(ex)
+                assert ex.get_open_orders_to_create() == []
+                ex._filter_levels_by_activation_bounds.assert_not_called()
+                strategy.buy.assert_not_called()
+
+                gate.set()
+                for _ in range(20):
+                    await asyncio.sleep(0)
+                assert tracker.is_order_book_valid(PAIR)
+                assert not ex._is_book_price_stale()
+                assert ex.get_open_orders_to_create() == ["L1"]
+                # The existing age guard still applies after a successful recovery.
+                strategy.current_timestamp = NOW + 61
+                assert ex._is_book_price_stale()
+                assert ex.get_open_orders_to_create() == []
+            finally:
+                tasks = list(tracker._tracking_tasks.values()) + list(tracker._book_recovery_tasks.values())
+                tracker.stop()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        run(scenario())
 
     def test_stale_book_without_fallback_blocks_buys(self):
         ex, connector, _ = _make()

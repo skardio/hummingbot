@@ -401,6 +401,24 @@ class BitgetAPIOrderBookDataSourceUnitTests(IsolatedAsyncioWrapperTestCase):
         await self.data_source._parse_order_book_snapshot_message(self.ws_order_book_snapshot_mock_response(), output)
         self.assertTrue(output.empty())
 
+    async def test_v2_books_pseq_mismatch_marks_sequence_gap_and_snapshot_resets_chain(self):
+        output = asyncio.Queue()
+
+        def push(action, seq, pseq):
+            raw = self.ws_order_book_snapshot_mock_response()
+            raw["action"] = action
+            raw["data"][0].update({"seq": seq, "pseq": pseq})
+            return raw
+
+        await self.data_source._parse_order_book_snapshot_message(push("snapshot", 100, 0), output)
+        await self.data_source._parse_order_book_diff_message(push("update", 105, 100), output)
+        await self.data_source._parse_order_book_diff_message(push("update", 120, 110), output)  # 105→110 lost
+        await self.data_source._parse_order_book_diff_message(push("update", 125, 120), output)
+        await self.data_source._parse_order_book_snapshot_message(push("snapshot", 200, 0), output)
+        await self.data_source._parse_order_book_diff_message(push("update", 210, 200), output)
+        flags = [output.get_nowait().content.get("sequence_gap", False) for _ in range(output.qsize())]
+        self.assertEqual([False, False, True, False, False, False], flags)
+
     async def test_uppercase_v2_symbol_cannot_update_case_sensitive_v3_pair(self):
         self.connector._set_trading_pair_symbol_map(bidict({"rSPYUSDT": "rSPY-USDT"}))
         self.data_source._v3_pairs.add("rSPY-USDT")

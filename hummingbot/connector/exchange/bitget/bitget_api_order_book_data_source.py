@@ -52,6 +52,7 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._ws_subscribed_at: Dict[str, float] = {}
         self._ws_last_update_ts: Dict[str, float] = {}
         self._ws_awaiting_first_update: set[str] = set()
+        self._book_seq: Dict[str, int] = {}
 
     def requires_v3_order_book(self, trading_pair: str) -> bool:
         return trading_pair in self._v3_pairs
@@ -280,8 +281,10 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 symbol=symbol,
                 message_type=OrderBookMessageType.DIFF
             )
+            if self._book_sequence_broken(diff_message.trading_pair, diff, is_snapshot=False):
+                diff_message.content["sequence_gap"] = True
 
-            message_queue.put_nowait(diff_message)
+            await message_queue.put(diff_message)
             self._record_ws_update(diff_message.trading_pair, "update")
 
     async def _parse_order_book_snapshot_message(
@@ -300,9 +303,20 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 symbol=symbol,
                 message_type=OrderBookMessageType.SNAPSHOT
             )
+            self._book_sequence_broken(snapshot_message.trading_pair, snapshot, is_snapshot=True)
 
-            message_queue.put_nowait(snapshot_message)
+            await message_queue.put(snapshot_message)
             self._record_ws_update(snapshot_message.trading_pair, "snapshot")
+
+    def _book_sequence_broken(self, trading_pair: str, data: Dict[str, Any], is_snapshot: bool) -> bool:
+        """Bitget V2 books chain: an update's pseq must equal the previous push's seq; otherwise updates were lost."""
+        if "seq" not in data:
+            return False
+        previous = self._book_seq.get(trading_pair)
+        self._book_seq[trading_pair] = int(data["seq"])
+        if is_snapshot or previous is None or "pseq" not in data:
+            return False
+        return int(data["pseq"]) != previous
 
     async def _is_v3_symbol(self, symbol: str) -> bool:
         # V2 acknowledgements can uppercase a case-sensitive r-symbol.
@@ -381,6 +395,7 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 self._ws_subscribed_pairs = set(pairs)
                 self._ws_subscribed_at = {pair: now for pair in pairs}
                 self._ws_awaiting_first_update = set(pairs)
+                self._book_seq.clear()  # A new connection restarts every chain with a snapshot.
                 self._ws_assistant = ws
                 self.logger().info(f"[BITGET_WS] STREAM_SUBSCRIBED pairs={len(pairs)}")
             except asyncio.CancelledError:
@@ -423,6 +438,7 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
             self._ws_subscribed_pairs.add(trading_pair)
             self._ws_subscribed_at[trading_pair] = self._time()
             self._ws_awaiting_first_update.add(trading_pair)
+            self._book_seq.pop(trading_pair, None)
             self.logger().info(f"[BITGET_WS] SUBSCRIBE_SENT pair={trading_pair} channels=books,trade")
             return True
 

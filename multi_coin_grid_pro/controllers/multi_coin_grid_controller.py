@@ -10605,7 +10605,10 @@ class MultiCoinGridController(ControllerBase):
 
             # Request initial snapshot
             try:
-                order_book = await tracker._initial_order_book_for_trading_pair(symbol)
+                if hasattr(type(tracker), 'initialize_order_book'):
+                    order_book = await tracker.initialize_order_book(symbol)
+                else:
+                    order_book = await tracker._initial_order_book_for_trading_pair(symbol)
             except asyncio.CancelledError:
                 raise
             except Exception as snap_e:
@@ -10618,7 +10621,8 @@ class MultiCoinGridController(ControllerBase):
                 self.logger().info(f"[ORDERBOOK] {symbol} was unsubscribed during initialization; discarded")
                 return
             if order_book:
-                tracker._order_books[symbol] = order_book
+                if not hasattr(type(tracker), 'initialize_order_book'):
+                    tracker._order_books[symbol] = order_book
                 self.logger().info(f"[ORDERBOOK] ✅ Initialized orderbook for {symbol}")
                 if retryable:
                     self._record_orderbook_init_result(symbol, tracker, True)
@@ -10659,6 +10663,9 @@ class MultiCoinGridController(ControllerBase):
 
     def _ensure_book_tracking_task(self, symbol: str, tracker) -> None:
         """Register the tracker queue/task that applies live WS messages for a dynamic pair (idempotent)."""
+        if hasattr(type(tracker), 'ensure_tracking_task'):
+            tracker.ensure_tracking_task(symbol)
+            return
         queues = getattr(tracker, '_tracking_message_queues', None)
         tasks = getattr(tracker, '_tracking_tasks', None)
         if queues is None or tasks is None or not hasattr(tracker, '_track_single_book'):
@@ -10683,6 +10690,8 @@ class MultiCoinGridController(ControllerBase):
             tracker = getattr(self.connector, 'order_book_tracker', None)
             if tracker is None:
                 return
+            if hasattr(type(tracker), 'remove_trading_pair'):
+                tracker.remove_trading_pair(symbol)
             if hasattr(tracker, '_trading_pairs') and symbol in tracker._trading_pairs:
                 tracker._trading_pairs.remove(symbol)
             if hasattr(tracker, '_data_source') and hasattr(tracker._data_source, '_trading_pairs'):
@@ -11231,10 +11240,16 @@ class MultiCoinGridController(ControllerBase):
             # Initialize order book for this pair (use private attributes)
             if symbol not in tracker._order_books:
                 self.logger().info(f"📚 Initializing order book for {symbol}...")
-                order_book = await tracker._initial_order_book_for_trading_pair(symbol)
-                tracker._order_books[symbol] = order_book
-                tracker._tracking_message_queues[symbol] = asyncio.Queue(maxsize=5000)  # Bounded to prevent memory leak
-                tracker._tracking_tasks[symbol] = safe_ensure_future(tracker._track_single_book(symbol))
+                if hasattr(type(tracker), 'initialize_order_book'):
+                    order_book = await tracker.initialize_order_book(symbol)
+                    if order_book is None:
+                        self.logger().warning(f"Order book initialization superseded for {symbol}")
+                        return False
+                else:
+                    order_book = await tracker._initial_order_book_for_trading_pair(symbol)
+                    tracker._order_books[symbol] = order_book
+                    tracker._tracking_message_queues[symbol] = asyncio.Queue(maxsize=5000)
+                    tracker._tracking_tasks[symbol] = safe_ensure_future(tracker._track_single_book(symbol))
                 self.logger().info(f"✅ Order book initialized for {symbol}")
                 data_source = getattr(tracker, '_data_source', None)
                 if hasattr(type(data_source), 'subscribe_to_trading_pair'):
