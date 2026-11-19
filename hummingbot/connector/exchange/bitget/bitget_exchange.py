@@ -754,6 +754,9 @@ class BitgetExchange(ExchangePyBase):
                         f"There was an error parsing a trading pair information ({exception})"
                     )
         self._set_trading_pair_symbol_map(mapping)
+        reconcile = getattr(getattr(self, "_orderbook_ds", None), "reconcile_symbol_map", None)
+        if mapping and reconcile is not None:
+            reconcile(mapping.values())
 
     async def _format_trading_rules(
         self,

@@ -12,6 +12,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from bidict import bidict
+
 from hummingbot.connector.exchange.bitget import bitget_constants as CONSTANTS
 from hummingbot.connector.exchange.bitget.bitget_api_order_book_data_source import BitgetAPIOrderBookDataSource
 from hummingbot.core.data_type.order_book import OrderBook
@@ -55,6 +57,8 @@ def _connector():
     connector.exchange_symbol_associated_to_pair = AsyncMock(side_effect=lambda pair: SYMBOLS[pair])
     reverse = {v: k for k, v in SYMBOLS.items()}
     connector.trading_pair_associated_to_exchange_symbol = AsyncMock(side_effect=lambda s: reverse[s])
+    symbol_map = bidict(reverse)
+    connector.trading_pair_symbol_map = AsyncMock(return_value=symbol_map)
     return connector
 
 

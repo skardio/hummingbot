@@ -17,6 +17,7 @@ from hummingbot.connector.exchange.bitget.bitget_exchange import BitgetExchange
 from hummingbot.connector.test_support.network_mocking_assistant import NetworkMockingAssistant
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.order_book_message import OrderBookMessage, OrderBookMessageType
+from hummingbot.core.data_type.order_book_tracker import OrderBookTracker
 
 
 class BitgetAPIOrderBookDataSourceUnitTests(IsolatedAsyncioWrapperTestCase):
@@ -427,6 +428,112 @@ class BitgetAPIOrderBookDataSourceUnitTests(IsolatedAsyncioWrapperTestCase):
         output = asyncio.Queue()
         await self.data_source._parse_order_book_diff_message(raw, output)
         self.assertTrue(output.empty())
+
+    def _refresh_symbol_map(self, extra_symbol: str, extra_base: str, extra_online: bool) -> None:
+        self.connector._initialize_trading_pair_symbols_from_exchange_info({"data": [
+            {"symbol": self.exchange_trading_pair, "baseCoin": self.base_asset,
+             "quoteCoin": self.quote_asset, "status": "online"},
+            {"symbol": extra_symbol, "baseCoin": extra_base, "quoteCoin": self.quote_asset,
+             "status": "online" if extra_online else "offline"},
+        ]})
+
+    async def test_unmapped_v3_pair_does_not_block_known_diff_snapshot_or_trade(self):
+        # 19-11 incident: rBITO-USDT left the symbol map but stayed in V3 state; every push raised KeyError.
+        self.data_source._v3_pairs.add("rBITO-USDT")
+        books, trades = asyncio.Queue(), asyncio.Queue()
+        await self.data_source._parse_order_book_diff_message(self.ws_order_book_diff_mock_response(), books)
+        await self.data_source._parse_order_book_snapshot_message(self.ws_order_book_snapshot_mock_response(), books)
+        await self.data_source._parse_trade_message(self.ws_trade_mock_response(), trades)
+        messages = [books.get_nowait() for _ in range(books.qsize())]
+        self.assertEqual([OrderBookMessageType.DIFF, OrderBookMessageType.SNAPSHOT], [m.type for m in messages])
+        self.assertEqual({self.trading_pair}, {m.content["trading_pair"] for m in messages})
+        self.assertEqual(2, trades.qsize())
+        self.assertEqual(self.trading_pair, trades.get_nowait().content["trading_pair"])
+        self.assertIsNotNone(self.data_source.last_ws_update_age(self.trading_pair))
+
+    async def test_unknown_incoming_symbol_is_skipped_with_bounded_warning(self):
+        books, trades = asyncio.Queue(), asyncio.Queue()
+        unknown_diff = self.ws_order_book_diff_mock_response()
+        unknown_diff["arg"]["instId"] = "GHOSTUSDT"
+        unknown_trade = self.ws_trade_mock_response()
+        unknown_trade["arg"]["instId"] = "GHOSTUSDT"
+        for _ in range(3):
+            await self.data_source._parse_order_book_diff_message(unknown_diff, books)
+            await self.data_source._parse_trade_message(unknown_trade, trades)
+        await self.data_source._parse_order_book_diff_message(self.ws_order_book_diff_mock_response(), books)
+        await self.data_source._parse_trade_message(self.ws_trade_mock_response(), trades)
+        self.assertEqual(1, books.qsize())
+        self.assertEqual(self.trading_pair, books.get_nowait().content["trading_pair"])
+        self.assertEqual({self.trading_pair}, {trades.get_nowait().content["trading_pair"] for _ in range(2)})
+        self.assertTrue(trades.empty())
+        warnings = [r for r in self.log_records if "UNKNOWN_SYMBOL" in r.getMessage()]
+        self.assertEqual(1, len(warnings))
+        self.assertIsNone(self.data_source.last_ws_update_age("GHOST-USDT"))
+
+    @aioresponses()
+    async def test_symbol_map_refresh_forgets_delisted_pair_and_reclassifies_it_on_return(self, mock_get):
+        pair, symbol = "rBITO-USDT", "rBITOUSDT"
+        self.connector._orderbook_ds = self.data_source
+        self._refresh_symbol_map(symbol, "rBITO", extra_online=True)
+        self.data_source._v3_pairs.add(pair)
+        self.data_source._snapshot_disabled_pairs.add(pair)
+        self.data_source._ws_subscribed_pairs.update({pair, self.trading_pair})
+        self.data_source._book_seq.update({pair: 5, self.trading_pair: 7})
+        self.data_source._v2_pairs.add(self.trading_pair)
+
+        self._refresh_symbol_map(symbol, "rBITO", extra_online=False)
+        for state in (self.data_source._v2_pairs, self.data_source._v3_pairs, self.data_source._snapshot_disabled_pairs,
+                      self.data_source._ws_subscribed_pairs, self.data_source._book_seq):
+            self.assertNotIn(pair, state)
+        self.assertEqual("v2", self.data_source.order_book_route(self.trading_pair))
+        self.assertEqual(7, self.data_source._book_seq[self.trading_pair])
+        self.assertIn(self.trading_pair, self.data_source._ws_subscribed_pairs)
+
+        # Reconnect while the delisted pair is still tracked: other pairs are subscribed, no KeyError.
+        self.data_source._trading_pairs.append(pair)
+        ws = AsyncMock()
+        await self.data_source._subscribe_channels(ws)
+        self.assertEqual([self.exchange_trading_pair] * 2,
+                         [arg["instId"] for arg in ws.send.call_args[0][0].payload["args"]])
+        self.assertEqual({self.trading_pair}, self.data_source._ws_subscribed_pairs)
+        books = asyncio.Queue()
+        await self.data_source._parse_order_book_diff_message(self.ws_order_book_diff_mock_response(), books)
+        self.assertEqual(1, books.qsize())
+
+        # The pair returns: route is negotiated again instead of staying disabled.
+        self._refresh_symbol_map(symbol, "rBITO", extra_online=True)
+        mock_get.get(self.snapshot_url(), status=400, payload={"code": "40502"})
+        mock_get.get(self.snapshot_url(v3=True), payload=self.v3_snapshot_response())
+        self.assertEqual("v3", await self.data_source.classify_order_book_route(pair))
+        self.assertNotIn(pair, self.data_source._snapshot_disabled_pairs)
+        trades = asyncio.Queue()
+        uppercase_trade = self.ws_trade_mock_response()
+        uppercase_trade["arg"]["instId"] = "RBITOUSDT"
+        await self.data_source._parse_trade_message(uppercase_trade, trades)
+        self.assertTrue(trades.empty())
+
+    async def test_unsubscribe_resubscribe_routes_pair_again_with_gap_detection(self):
+        tracker = OrderBookTracker(data_source=self.data_source, trading_pairs=[self.trading_pair])
+        self.data_source._v3_pairs.add("rBITO-USDT")  # unmapped foreign V3 state must not interfere
+        self.data_source._ws_assistant = AsyncMock()
+        books = asyncio.Queue()
+
+        def push(action, seq, pseq):
+            raw = self.ws_order_book_snapshot_mock_response()
+            raw["action"] = action
+            raw["data"][0].update({"seq": seq, "pseq": pseq})
+            return raw
+
+        tracker.remove_trading_pair(self.trading_pair)
+        self.assertNotIn(self.trading_pair, self.data_source._trading_pairs)
+        self.assertTrue(await self.data_source.subscribe_to_trading_pair(self.trading_pair))
+        self.assertIn(self.trading_pair, self.data_source._trading_pairs)
+        self.assertNotIn(self.trading_pair, self.data_source._book_seq)
+        await self.data_source._parse_order_book_snapshot_message(push("snapshot", 100, 0), books)
+        await self.data_source._parse_order_book_diff_message(push("update", 105, 100), books)
+        await self.data_source._parse_order_book_diff_message(push("update", 120, 110), books)
+        flags = [books.get_nowait().content.get("sequence_gap", False) for _ in range(books.qsize())]
+        self.assertEqual([False, False, True], flags)
 
     @aioresponses()
     async def test_periodic_v3_refresh_updates_tracker_owned_book_then_invalidates_on_failure(self, mock_get):

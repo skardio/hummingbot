@@ -1,6 +1,6 @@
 import asyncio
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, NoReturn, Optional
 
 from hummingbot.connector.exchange.bitget import bitget_constants as CONSTANTS, bitget_web_utils as web_utils
 from hummingbot.core.data_type.common import TradeType
@@ -53,6 +53,9 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._ws_last_update_ts: Dict[str, float] = {}
         self._ws_awaiting_first_update: set[str] = set()
         self._book_seq: Dict[str, int] = {}
+        self._casefold_index_source: Optional[Any] = None
+        self._casefold_index: Dict[str, List[str]] = {}
+        self._unknown_symbol_log: Dict[str, List[float]] = {}
 
     def requires_v3_order_book(self, trading_pair: str) -> bool:
         return trading_pair in self._v3_pairs
@@ -235,18 +238,18 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
     async def _parse_any_order_book_message(
         self,
         data: Dict[str, Any],
-        symbol: str,
+        trading_pair: str,
         message_type: OrderBookMessageType,
     ) -> OrderBookMessage:
         """
         Parse a WebSocket message into an OrderBookMessage for snapshots or diffs.
 
-        :param raw_message: The raw WebSocket message.
+        :param data: One book entry of the WebSocket push.
+        :param trading_pair: The already resolved trading pair of the push.
         :param message_type: The type of order book message (SNAPSHOT or DIFF).
 
         :return: The parsed order book message.
         """
-        trading_pair: str = await self._connector.trading_pair_associated_to_exchange_symbol(symbol)
         if trading_pair in self._v3_pairs:
             raise IOError(f"V2 depth cannot update REST-only V3 order book {trading_pair}")
         update_id: int = int(data["ts"])
@@ -271,14 +274,16 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         message_queue: asyncio.Queue
     ) -> None:
         diffs_data: Dict[str, Any] = raw_message["data"]
-        symbol: str = raw_message["arg"]["instId"]
+        trading_pair = await self._v2_stream_pair(raw_message["arg"]["instId"])
+        if trading_pair is None:
+            return
 
         for diff in diffs_data:
-            if await self._is_v3_symbol(symbol):
+            if trading_pair in self._v3_pairs:
                 return
             diff_message: OrderBookMessage = await self._parse_any_order_book_message(
                 data=diff,
-                symbol=symbol,
+                trading_pair=trading_pair,
                 message_type=OrderBookMessageType.DIFF
             )
             if self._book_sequence_broken(diff_message.trading_pair, diff, is_snapshot=False):
@@ -293,14 +298,16 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         message_queue: asyncio.Queue
     ) -> None:
         snapshot_data: Dict[str, Any] = raw_message["data"]
-        symbol: str = raw_message["arg"]["instId"]
+        trading_pair = await self._v2_stream_pair(raw_message["arg"]["instId"])
+        if trading_pair is None:
+            return
 
         for snapshot in snapshot_data:
-            if await self._is_v3_symbol(symbol):
+            if trading_pair in self._v3_pairs:
                 return
             snapshot_message: OrderBookMessage = await self._parse_any_order_book_message(
                 data=snapshot,
-                symbol=symbol,
+                trading_pair=trading_pair,
                 message_type=OrderBookMessageType.SNAPSHOT
             )
             self._book_sequence_broken(snapshot_message.trading_pair, snapshot, is_snapshot=True)
@@ -318,12 +325,59 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
             return False
         return int(data["pseq"]) != previous
 
-    async def _is_v3_symbol(self, symbol: str) -> bool:
+    async def _v2_stream_pair(self, symbol: str) -> Optional[str]:
+        """
+        Trading pair of a public V2 push, or None when the push must be skipped: the symbol
+        belongs to a REST-only V3 pair, or it is not in the current exchange symbol map.
+        Only the incoming symbol is looked up, so stale state of other pairs cannot fail it.
+        """
+        symbol_map = await self._connector.trading_pair_symbol_map()
+        if symbol_map is not self._casefold_index_source:
+            index: Dict[str, List[str]] = {}
+            for exchange_symbol, pair in symbol_map.items():
+                index.setdefault(exchange_symbol.casefold(), []).append(pair)
+            self._casefold_index_source, self._casefold_index = symbol_map, index
         # V2 acknowledgements can uppercase a case-sensitive r-symbol.
-        for pair in self._v3_pairs:
-            if (await self._connector.exchange_symbol_associated_to_pair(pair)).casefold() == symbol.casefold():
-                return True
-        return False
+        if any(pair in self._v3_pairs for pair in self._casefold_index.get(symbol.casefold(), ())):
+            return None
+        trading_pair = symbol_map.get(symbol)
+        if trading_pair is None:
+            self._log_unknown_stream_symbol(symbol)
+        return trading_pair
+
+    def _log_unknown_stream_symbol(self, symbol: str) -> None:
+        now = self._time()
+        state = self._unknown_symbol_log.setdefault(symbol, [float("-inf"), 0])
+        state[1] += 1
+        if now - state[0] >= CONSTANTS.UNKNOWN_WS_SYMBOL_LOG_INTERVAL_SECONDS:
+            self.logger().warning(
+                f"[BITGET_WS] UNKNOWN_SYMBOL symbol={symbol} skipped={int(state[1])} "
+                f"reason=not_in_symbol_map (other pairs unaffected)"
+            )
+            state[0], state[1] = now, 0
+
+    def reconcile_symbol_map(self, mapped_pairs: Iterable[str]) -> None:
+        """
+        Forget per-session route, sequence and subscription state of pairs that left the
+        exchange symbol map, so a returning pair is negotiated and subscribed again.
+        """
+        mapped = set(mapped_pairs)
+        stale = (
+            self._v2_pairs | self._v3_pairs | self._snapshot_disabled_pairs | self._ws_subscribed_pairs
+            | set(self._book_seq) | set(self._v3_books)
+        ) - mapped
+        for pair in stale:
+            book = self._v3_books.pop(pair, None)
+            if book is not None:
+                # Consumers must not mistake the last REST-only snapshot for live depth.
+                book.apply_snapshot([], [], book.snapshot_uid)
+            for pairs in (self._v2_pairs, self._v3_pairs, self._snapshot_disabled_pairs, self._v3_success_pairs,
+                          self._ws_subscribed_pairs, self._ws_awaiting_first_update):
+                pairs.discard(pair)
+            for state in (self._book_seq, self._snapshot_retry_at, self._route_probe_failures, self._ws_subscribed_at):
+                state.pop(pair, None)
+        if stale:
+            self.logger().info(f"[BITGET_WS] SYMBOL_MAP_RECONCILED forgotten_pairs={sorted(stale)}")
 
     async def _parse_trade_message(
         self,
@@ -331,10 +385,9 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         message_queue: asyncio.Queue
     ) -> None:
         data: List[Dict[str, Any]] = raw_message["data"]
-        symbol: str = raw_message["arg"]["instId"]
-        if await self._is_v3_symbol(symbol):
+        trading_pair = await self._v2_stream_pair(raw_message["arg"]["instId"])
+        if trading_pair is None:
             return
-        trading_pair: str = await self._connector.trading_pair_associated_to_exchange_symbol(symbol)
 
         for trade_data in data:
             trade_type: float = float(TradeType.BUY.value) \
@@ -374,13 +427,24 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
         async with self._ws_subscription_lock:
             try:
                 subscription_topics: List[Dict[str, str]] = []
-                pairs = [p for p in dict.fromkeys(self._trading_pairs) if p not in self._v3_pairs]
+                symbol_map = await self._connector.trading_pair_symbol_map()
+                pairs: List[str] = []
+                unmapped: List[str] = []
 
-                for trading_pair in pairs:
-                    symbol: str = await self._connector.exchange_symbol_associated_to_pair(
-                        trading_pair
-                    )
+                for trading_pair in dict.fromkeys(self._trading_pairs):
+                    if trading_pair in self._v3_pairs:
+                        continue
+                    symbol: Optional[str] = symbol_map.inverse.get(trading_pair)
+                    if symbol is None:
+                        unmapped.append(trading_pair)
+                        continue
+                    pairs.append(trading_pair)
                     subscription_topics.extend(self._subscription_topics(symbol))
+                if unmapped:
+                    self.logger().warning(
+                        f"[BITGET_WS] SUBSCRIBE_SKIPPED pairs={unmapped} reason=not_in_symbol_map "
+                        f"(other pairs unaffected)"
+                    )
 
                 if subscription_topics:
                     await ws.send(
