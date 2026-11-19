@@ -3512,6 +3512,16 @@ class MultiCoinGridController(ControllerBase):
                     filtered_pairs = [(pair, vol) for pair, vol in sorted_pairs if vol
                                       >= min_volume and pair not in blacklist]
 
+                    # Pairs with a proven unusable route must not occupy the volume-ranked window,
+                    # otherwise they block every deeper candidate on each discovery cycle.
+                    window_pairs = [(pair, vol) for pair, vol in filtered_pairs
+                                    if not self._monitoring_route_rejected(pair)]
+                    route_rejected = len(filtered_pairs) - len(window_pairs)
+                    if route_rejected:
+                        self.logger().info(
+                            f"📊 Discovery skipped {route_rejected} pairs with a proven unsupported order-book route")
+                    window_pairs = window_pairs[:100]
+
                     # Spread check: only include coins with spread < 0.5% using ticker bid/ask
                     spread_limit = 0.005  # 0.5%
                     spread_checked_pairs = []
@@ -3519,10 +3529,10 @@ class MultiCoinGridController(ControllerBase):
                     # If no ticker data available, skip spread check and use all filtered pairs
                     if not ticker_data:
                         self.logger().info("📊 No ticker data - using all pairs without spread check")
-                        for pair, vol in filtered_pairs[:100]:
+                        for pair, vol in window_pairs:
                             spread_checked_pairs.append((pair, vol, 0.0))  # spread=0 indicates no data
                     else:
-                        for pair, vol in filtered_pairs[:100]:
+                        for pair, vol in window_pairs:
                             # For Bitget: use hb_symbol directly, for Kraken: find exchange_symbol
                             if is_bitget:
                                 ticker_key = normalize_bitget_pair(pair)
@@ -3976,6 +3986,10 @@ class MultiCoinGridController(ControllerBase):
     def _monitoring_market_supported(self, pair: str) -> bool:
         """Connector-specific hook: False keeps an unprotected pair out of the monitoring pool."""
         return True
+
+    def _monitoring_route_rejected(self, pair: str) -> bool:
+        """Connector-specific hook: True only when the pair's market route is proven unsupported."""
+        return False
 
     def _monitoring_blacklist(self) -> set:
         """Effective (global + connector) blacklist, as applied by the initial discovery."""

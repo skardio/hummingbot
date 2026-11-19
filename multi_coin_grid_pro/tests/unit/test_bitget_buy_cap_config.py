@@ -10,6 +10,7 @@ from hummingbot.connector.exchange.bitget.bitget_api_order_book_data_source impo
 from multi_coin_grid_pro.controllers.multi_coin_grid_controller import MultiCoinGridController
 from multi_coin_grid_pro.spot_bitget.config_schema import SpotGridBitgetConfig
 from multi_coin_grid_pro.spot_bitget.controller import SpotGridBitgetController
+from multi_coin_grid_pro.utils.dynamic_pair_manager import normalize_bitget_pair
 
 
 def test_buy_cap_is_disabled_without_activation_timestamp():
@@ -244,3 +245,119 @@ async def test_route_probe_failure_is_cleared_after_success():
     source._route_probe_failures["N0-USDT"] = "http_429"
     assert await source.classify_order_book_route("N0-USDT") == "v2"
     assert source.route_probe_failure_summary(["N0-USDT"]) == {}
+
+
+TOP100_V3 = [f"rT{i}-USDT" for i in range(100)]
+
+
+async def run_bitget_discovery_cycle(controller, ranked_pairs):
+    """One real first-run discovery cycle: volume rank -> spread -> route probe -> bounded pool."""
+    controller.monitored_coins = []
+    controller.all_available_pairs = []
+    controller.config.quote_asset = "USDT"
+    controller.config.min_24h_volume_usdt = 0
+    controller.config.manual_trading_pairs = None
+    controller.connector.trading_pair_symbol_map_ready = lambda: True
+    controller.connector.trading_pair_symbol_map = AsyncMock(
+        return_value={pair.replace("-", ""): pair for pair in ranked_pairs})
+
+    async def call(func, *args):
+        return await func(*args)
+
+    controller._api_call_with_error_handling = call
+    controller._get_ticker_data_safe = AsyncMock(return_value={
+        normalize_bitget_pair(pair): {"a": ["1.001"], "b": ["1.0"]} for pair in ranked_pairs})
+    controller._ticker_pair_metrics = MagicMock(return_value=(
+        {pair: 10_000_000 - i for i, pair in enumerate(ranked_pairs)}, {}))
+    controller.coin_discovery_refresh_interval = 0
+    try:
+        await controller.update_processed_data()
+    except Exception:
+        pass  # only the discovery prefix is under test; later stages need a full controller
+    return controller.monitored_coins
+
+
+@pytest.mark.asyncio
+async def test_discovery_reaches_v2_pairs_behind_100_v3_candidates():
+    source = route_source()
+    controller = pool_controller(source)
+    ranked = TOP100_V3 + NORMALS
+    assert await run_bitget_discovery_cycle(controller, ranked) == []
+    assert source._v3_pairs == set(TOP100_V3)  # bounded: exactly the 100-probe budget was used
+    assert source._request_order_book_snapshot.await_count == CONSTANTS.ORDERBOOK_ROUTE_PROBE_LIMIT
+
+    assert await run_bitget_discovery_cycle(controller, ranked) == NORMALS[:3]
+    probed = [c.args[0] for c in source._request_order_book_snapshot.await_args_list[100:]]
+    assert probed == NORMALS[:3]  # proven V3 pairs are neither re-probed nor occupying the window
+    assert controller._monitoring_candidates == NORMALS
+
+
+@pytest.mark.asyncio
+async def test_discovery_respects_shared_backoff_and_resumes_afterwards():
+    source = route_source(v3=TOP100_V3)
+    clock = {"now": 100.0}
+    source._time = lambda: clock["now"]
+    source._snapshot_rate_limit_until = 130.0  # shared 429 backoff active until t=130
+
+    async def negotiate(pair):
+        source._v2_pairs.add(pair)
+        return {}
+
+    source._request_order_book_snapshot = AsyncMock(side_effect=negotiate)
+    controller = pool_controller(source)
+    ranked = TOP100_V3 + NORMALS
+    assert await run_bitget_discovery_cycle(controller, ranked) == []  # unknown routes stay excluded
+    source._request_order_book_snapshot.assert_not_awaited()  # no probe while backoff is active
+    assert all(source.order_book_route(pair) is None for pair in NORMALS)
+
+    clock["now"] = 129.9
+    assert await run_bitget_discovery_cycle(controller, ranked) == []
+    source._request_order_book_snapshot.assert_not_awaited()
+
+    clock["now"] = 130.0  # backoff expired: resume at the first unproven ranked candidates
+    assert await run_bitget_discovery_cycle(controller, ranked) == NORMALS[:3]
+    probed = [c.args[0] for c in source._request_order_book_snapshot.await_args_list]
+    assert probed == NORMALS[:3]
+
+
+@pytest.mark.asyncio
+async def test_discovery_stops_probing_once_a_probe_hits_429():
+    source = route_source()
+    clock = {"now": 100.0}
+    source._time = lambda: clock["now"]
+
+    async def negotiate(pair):
+        if pair == "N1-USDT" and source._snapshot_rate_limit_until == 0.0:
+            source._snapshot_rate_limit_until = clock["now"] + 30.0
+            raise IOError(f"Bitget order book HTTP 429 for {pair}")
+        source._v2_pairs.add(pair)
+        return {}
+
+    source._request_order_book_snapshot = AsyncMock(side_effect=negotiate)
+    controller = pool_controller(source)
+    assert await build_pool(controller, NORMALS) == ["N0-USDT", "N2-USDT"]
+    assert source._request_order_book_snapshot.await_count == 3  # N1 is not retried within the backoff
+    assert source.order_book_route("N1-USDT") is None and source.order_book_route("N3-USDT") is None
+
+    clock["now"] = 130.0
+    assert await build_pool(controller, NORMALS) == NORMALS[:3]
+    assert [c.args[0] for c in source._request_order_book_snapshot.await_args_list[3:]] == ["N1-USDT"]
+
+
+@pytest.mark.asyncio
+async def test_discovery_window_keeps_blacklist_spread_and_kraken_unchanged():
+    source = route_source(v3=TOP100_V3)
+    controller = blacklisted_pool_controller(source, ["N0-USDT"])
+    ranked = TOP100_V3 + NORMALS
+    tickers = {normalize_bitget_pair(pair): {"a": ["1.001"], "b": ["1.0"]} for pair in ranked}
+    tickers["N1-USDT"] = {"a": ["1.1"], "b": ["1.0"]}  # spread > 0.5%
+    pool = await run_bitget_discovery_cycle(controller, ranked)
+    controller._get_ticker_data_safe = AsyncMock(return_value=tickers)
+    controller.monitored_coins = []
+    try:
+        await controller.update_processed_data()
+    except Exception:
+        pass
+    assert pool == NORMALS[1:4]
+    assert controller.monitored_coins == NORMALS[2:5]
+    assert not MultiCoinGridController._monitoring_route_rejected(controller, TOP100_V3[0])

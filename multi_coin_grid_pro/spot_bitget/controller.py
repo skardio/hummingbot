@@ -119,6 +119,11 @@ class SpotGridBitgetController(MultiCoinGridController):
         source = self._live_bitget_order_book_source()
         return source is None or source.order_book_route(pair) == "v2"
 
+    def _monitoring_route_rejected(self, pair: str) -> bool:
+        """Proven V3 pairs are never admitted, so discovery skips them; unknown routes stay in rank."""
+        source = self._live_bitget_order_book_source()
+        return source is not None and source.order_book_route(pair) == "v3"
+
     async def _prepare_monitoring_candidates(self, candidates: List[str]) -> None:
         """Classify unproven routes in rank order until enough V2 pairs can fill the pool."""
         source = self._live_bitget_order_book_source()
@@ -141,6 +146,13 @@ class SpotGridBitgetController(MultiCoinGridController):
                     break
             batch = pending[:budget]
             if not batch:
+                return
+            backoff = source.shared_rate_limit_backoff_remaining()
+            if backoff > 0:
+                # No probe during shared backoff; the next cycle resumes from the same ranked candidates.
+                self.logger().warning(
+                    "[MONITORING] order-book route probes deferred for %s candidates; left out of live pool; "
+                    "reason=shared_rate_limit_backoff remaining_s=%.1f", len(batch), backoff)
                 return
             budget -= len(batch)
             routes = await asyncio.gather(*(source.classify_order_book_route(pair) for pair in batch))

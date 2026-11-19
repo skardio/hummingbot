@@ -66,6 +66,10 @@ class BitgetAPIOrderBookDataSource(OrderBookTrackerDataSource):
             return "v3"
         return "v2" if trading_pair in self._v2_pairs else None
 
+    def shared_rate_limit_backoff_remaining(self) -> float:
+        """Seconds left in the shared order-book REST backoff (set after an HTTP 429)."""
+        return max(0.0, self._snapshot_rate_limit_until - self._time())
+
     async def classify_order_book_route(self, trading_pair: str) -> Optional[str]:
         """Learn the route through the normal snapshot negotiation; failures leave it unproven."""
         if self.order_book_route(trading_pair) is None:
