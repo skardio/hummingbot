@@ -249,6 +249,84 @@ class TestTimeStopIsUnconditionalExit(unittest.TestCase):
         self.assertEqual(captured["position"].entry_price, Decimal("3.009"))
         self.assertEqual(captured["position"].current_price, Decimal("8"))
 
+    def test_time_stop_uses_reliable_position_pnl_when_atr_is_unavailable(self):
+        self.controller.trend_calculator = None
+        self.controller.executors_info[0].custom_info = {
+            "position_size_quote": "100",
+            "position_pnl_quote": "-3.14",
+            "break_even_price": "261.4",
+            "price_reliable": True,
+        }
+
+        actions = self.controller._check_professional_exit_signals()
+
+        self.assertEqual(len(actions), 1)
+        self.assertFalse(actions[0].keep_position)
+
+    def test_profit_lock_uses_position_pnl_when_market_price_is_unavailable(self):
+        self.controller.trend_calculator = None
+        self.controller.professional_risk_manager.position_high_water_marks[
+            "BCH-USDT"
+        ] = 0.015
+        self.controller.executors_info[0].custom_info = {
+            "position_size_quote": "100",
+            "position_pnl_quote": "0.3",
+            "break_even_price": "261.4",
+            "price_reliable": True,
+        }
+
+        actions = self.controller._check_professional_exit_signals()
+
+        self.assertEqual(len(actions), 1)
+        self.assertFalse(actions[0].keep_position)
+
+    def test_atr_stop_is_skipped_without_reliable_atr_data(self):
+        now = self.controller.market_data_provider.time()
+        self.controller._executor_creation_timestamps[self.executor_id] = now - 60
+        self.controller.config.max_hold_time_seconds = 21600
+        self.controller.trend_calculator = None
+        self.controller.executors_info[0].custom_info = {
+            "position_size_quote": "100",
+            "position_pnl_quote": "-5",
+            "break_even_price": "261.4",
+            "price_reliable": True,
+        }
+
+        actions = self.controller._check_professional_exit_signals()
+
+        self.assertEqual(actions, [])
+
+    def test_missing_pnl_is_passed_as_unknown_without_seeding_profit_peak(self):
+        self.controller.executors_info[0].custom_info = {
+            "position_size_quote": "100",
+            "break_even_price": "261.4",
+            "price_reliable": True,
+        }
+        self.controller.professional_risk_manager.position_high_water_marks[
+            "BCH-USDT"
+        ] = 0.015
+        captured = {}
+
+        def capture(position):
+            captured["position"] = position
+            return "HOLD", "PnL unavailable"
+
+        with patch.object(
+            self.controller.professional_risk_manager,
+            "should_exit_position",
+            side_effect=capture,
+        ):
+            actions = self.controller._check_professional_exit_signals()
+
+        self.assertEqual(actions, [])
+        self.assertIsNone(captured["position"].unrealized_pnl_pct)
+        self.assertEqual(
+            self.controller.professional_risk_manager.position_high_water_marks[
+                "BCH-USDT"
+            ],
+            0.015,
+        )
+
     def test_prefill_price_peak_cannot_trigger_profit_lock_after_first_fill(self):
         risk_manager = self.controller.professional_risk_manager
         risk_manager.position_high_water_marks["BCH-USDT"] = 0.0123

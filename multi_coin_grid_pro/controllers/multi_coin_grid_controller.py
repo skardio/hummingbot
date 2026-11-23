@@ -7740,56 +7740,79 @@ class MultiCoinGridController(ControllerBase):
                     self.professional_risk_manager.position_high_water_marks.pop(trading_pair, None)
                     continue
 
-                if (
-                    "position_pnl_quote" not in custom_info
-                    or "break_even_price" not in custom_info
-                    or custom_info.get("price_reliable") is False
+                pnl_pct: Optional[float] = None
+                if custom_info.get("price_reliable") is True and "position_pnl_quote" in custom_info:
+                    try:
+                        position_pnl_quote = Decimal(str(custom_info["position_pnl_quote"]))
+                        if position_pnl_quote.is_finite():
+                            pnl_pct = float(position_pnl_quote / position_size_quote)
+                    except (ArithmeticError, TypeError, ValueError):
+                        if should_log(f"professional_exit_pnl_invalid_{executor_id}", interval_sec=300):
+                            self.logger().warning(
+                                f"⚠️  US-005 invalid executor P&L for {trading_pair}"
+                            )
+                if pnl_pct is None and should_log(
+                    f"professional_exit_pnl_missing_{executor_id}", interval_sec=300
                 ):
-                    if should_log(f"professional_exit_pnl_missing_{executor_id}", interval_sec=300):
-                        self.logger().warning(
-                            f"⚠️  US-005 skipped for {trading_pair}: fill-cost or reliable P&L data is missing"
-                        )
-                    continue
-                try:
-                    position_pnl_quote = Decimal(str(custom_info["position_pnl_quote"]))
-                    entry_price = Decimal(str(custom_info["break_even_price"]))
-                except (ArithmeticError, TypeError, ValueError):
-                    if should_log(f"professional_exit_pnl_invalid_{executor_id}", interval_sec=300):
-                        self.logger().warning(
-                            f"⚠️  US-005 skipped for {trading_pair}: invalid fill-cost or P&L data"
-                        )
-                    continue
-                if (
-                    not position_pnl_quote.is_finite()
-                    or not entry_price.is_finite()
-                    or entry_price <= 0
-                ):
-                    if should_log(f"professional_exit_pnl_invalid_{executor_id}", interval_sec=300):
-                        self.logger().warning(
-                            f"⚠️  US-005 skipped for {trading_pair}: invalid fill-cost or P&L data"
-                        )
-                    continue
+                    self.logger().warning(
+                        f"⚠️  US-005 P&L unavailable for {trading_pair}; "
+                        "position-dependent exits will be skipped"
+                    )
 
-                # Get current price from trend calculator for risk diagnostics.
+                entry_price: Optional[Decimal] = None
+                if "break_even_price" in custom_info:
+                    try:
+                        parsed_entry_price = Decimal(str(custom_info["break_even_price"]))
+                        if parsed_entry_price.is_finite() and parsed_entry_price > 0:
+                            entry_price = parsed_entry_price
+                    except (ArithmeticError, TypeError, ValueError):
+                        if should_log(f"professional_exit_entry_invalid_{executor_id}", interval_sec=300):
+                            self.logger().warning(
+                                f"⚠️  US-005 invalid executor break-even for {trading_pair}"
+                            )
+
+                current_price: Optional[Decimal] = None
+                atr_pct: Optional[float] = None
                 trend = self.trend_calculator.get_trend(trading_pair) if self.trend_calculator else None
-                if not trend or not trend.current_price:
-                    continue
-
-                current_price = Decimal(str(trend.current_price))
-
-                # Use the executor's fee-adjusted P&L on the remaining filled inventory.
-                # Grid creation price is not a substitute for actual fill cost.
-                pnl_pct = float(position_pnl_quote / position_size_quote)
+                if trend and trend.current_price:
+                    try:
+                        parsed_current_price = Decimal(str(trend.current_price))
+                        if parsed_current_price.is_finite() and parsed_current_price > 0:
+                            current_price = parsed_current_price
+                    except (ArithmeticError, TypeError, ValueError):
+                        if should_log(f"professional_exit_price_invalid_{executor_id}", interval_sec=300):
+                            self.logger().warning(
+                                f"⚠️  US-005 invalid current price for {trading_pair}"
+                            )
+                if current_price is not None:
+                    try:
+                        atr_value = getattr(trend, "atr_value", None)
+                        if atr_value:
+                            parsed_atr = Decimal(str(atr_value)) / current_price
+                            if parsed_atr.is_finite() and parsed_atr >= 0:
+                                atr_pct = float(parsed_atr)
+                        elif getattr(trend, "atr_pct", None) is not None:
+                            parsed_atr = float(trend.atr_pct)
+                            if parsed_atr >= 0 and math.isfinite(parsed_atr):
+                                atr_pct = parsed_atr
+                    except (ArithmeticError, TypeError, ValueError):
+                        if should_log(f"professional_exit_atr_invalid_{executor_id}", interval_sec=300):
+                            self.logger().warning(
+                                f"⚠️  US-005 invalid ATR data for {trading_pair}"
+                            )
+                if atr_pct is None and pnl_pct is not None and should_log(
+                    f"professional_exit_atr_missing_{executor_id}", interval_sec=300
+                ):
+                    self.logger().warning(
+                        f"⚠️  US-005 ATR unavailable for {trading_pair}; "
+                        "ATR stop-loss will be skipped"
+                    )
 
                 # Calculate time held
                 creation_time = self._executor_creation_timestamps.get(executor_id, now)
                 time_held_minutes = int((now - creation_time) / 60)
 
                 # Get ATR % (from trend or calculate)
-                atr_pct = getattr(trend, 'atr_pct', 0.02)  # Default 2% if not available
-                if hasattr(trend, 'atr_value') and trend.atr_value and trend.current_price:
-                    atr_pct = float(trend.atr_value / trend.current_price)
-
                 # Get max hold time from config
                 max_hold_minutes = int(getattr(self.config, 'max_hold_time_seconds', 21600) / 60)  # Default 6h
 

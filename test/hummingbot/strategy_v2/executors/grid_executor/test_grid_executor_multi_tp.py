@@ -340,6 +340,82 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         self.assertEqual(self.tracked_position(), Decimal("6.84"))
         self.assertEqual(self.tracked_position(), self.ex.held)
 
+    async def test_step_rounding_dust_does_not_defer_additional_tp(self):
+        await self._two_levels_first_tp_open()
+        self.executor.update_grid_levels()
+        self.executor.update_position_metrics()
+        level2 = self.buy_levels[1]
+        first_tp = self.executor.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED][0]
+
+        first_tp.active_close_order.order.amount = Decimal("7.31")
+        self.executor.position_size_base = Decimal("14.62536")
+        self.ex.held = Decimal("14.62956")
+        candidate = SimpleNamespace(amount=Decimal("7.31268"), price=Decimal("3.082"))
+
+        allowed = self.executor._cap_additional_close_amount(level2, candidate)
+
+        self.assertTrue(allowed)
+        self.assertEqual(candidate.amount, Decimal("7.31"))
+
+    def test_near_ledger_registers_fee_remainder_as_dust_without_double_fee(self):
+        def buy(order_id, price, trade_id):
+            fee = Decimal("0.00732")
+            amount = Decimal("7.32")
+            return {
+                "client_order_id": order_id,
+                "trading_pair": PAIR,
+                "trade_type": TradeType.BUY.name,
+                "executed_amount_base": str(amount),
+                "executed_amount_quote": str(amount * price),
+                "cumulative_fee_paid_quote": str(fee * price),
+                "order_fills": {
+                    trade_id: {
+                        "fill_price": str(price),
+                        "fee": {
+                            "flat_fees": [{"token": "NEAR", "amount": str(fee)}]
+                        },
+                    }
+                },
+            }
+
+        self.executor._filled_orders = [
+            buy("BUY-1", Decimal("3.012"), "T1"),
+            buy("BUY-2", Decimal("3.012"), "T2"),
+            buy("BUY-3", Decimal("3.003"), "T3"),
+            {
+                "client_order_id": "SELL-1",
+                "trading_pair": PAIR,
+                "trade_type": TradeType.SELL.name,
+                "executed_amount_base": "21.93",
+                "executed_amount_quote": "66.2286",
+                "cumulative_fee_paid_quote": "0.0662286",
+                "order_fills": {
+                    "TS1": {
+                        "fill_price": "3.02",
+                        "fee": {
+                            "flat_fees": [
+                                {"token": "USDT", "amount": "0.0662286"}
+                            ]
+                        },
+                    }
+                },
+            },
+        ]
+        self.executor.close_type = CloseType.EARLY_STOP
+
+        self.executor.update_realized_pnl_metrics()
+
+        self.assertEqual(self.executor._residual_dust_base, Decimal("0.00804"))
+        self.assertEqual(
+            self.executor.realized_buy_size_quote, Decimal("66.05344764")
+        )
+        self.assertEqual(
+            self.executor.realized_fees_quote, Decimal("0.13230624")
+        )
+        self.assertEqual(
+            self.executor.realized_pnl_quote, Decimal("0.10892376")
+        )
+
     async def test_real_dust_shortfall_caps_tp_and_residual_is_cost_not_sale(self):
         await self._two_levels_first_tp_open()
         self.ex.held -= Decimal("0.05")  # exchange really holds 0.05 less (unsellable: notional < 1)

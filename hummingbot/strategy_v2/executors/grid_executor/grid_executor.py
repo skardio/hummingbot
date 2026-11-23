@@ -3031,7 +3031,8 @@ class GridExecutor(ExecutorBase):
             available = total = Decimal("0")
         wanted = order_candidate.amount
         held_free = min(self.position_size_base, total) - reserved
-        amount = min(wanted, held_free, available)
+        raw_amount = min(wanted, held_free, available)
+        amount = raw_amount
         rules = self.trading_rules
         increment = getattr(rules, "min_base_amount_increment", None)
         if increment and increment > 0 and amount > 0:
@@ -3046,7 +3047,7 @@ class GridExecutor(ExecutorBase):
         reason = None
         if not _sellable(amount):
             reason = "below exchange minimum"
-        elif shortfall > 0 and held_free >= wanted:
+        elif raw_amount < wanted and held_free >= wanted:
             reason = "temporarily locked/unsynced balance"
         elif _sellable(shortfall):
             reason = "material shortfall vs tracked inventory"
@@ -3059,11 +3060,18 @@ class GridExecutor(ExecutorBase):
                 )
             return False
         if shortfall > 0:
-            self.logger().warning(
-                f"✂️ TP amount capped {self.config.trading_pair}: {wanted} → {amount} {base_asset}; "
-                f"unsellable dust residual {shortfall} {base_asset} not held on exchange "
-                f"(exchange_total={total}, reserved_by_open_tps={reserved}); booked as cost, not as sale"
-            )
+            if raw_amount >= wanted:
+                self.logger().warning(
+                    f"✂️ TP amount capped {self.config.trading_pair}: {wanted} → {amount} {base_asset}; "
+                    f"step-size residual {shortfall} {base_asset} remains tracked as inventory "
+                    f"(exchange_total={total}, reserved_by_open_tps={reserved})"
+                )
+            else:
+                self.logger().warning(
+                    f"✂️ TP amount capped {self.config.trading_pair}: {wanted} → {amount} {base_asset}; "
+                    f"unsellable dust residual {shortfall} {base_asset} not held on exchange "
+                    f"(exchange_total={total}, reserved_by_open_tps={reserved}); booked as cost, not as sale"
+                )
         order_candidate.amount = amount
         return True
 
@@ -6056,6 +6064,8 @@ class GridExecutor(ExecutorBase):
             held_residual = min(residual_base, getattr(self, "_held_residual_base", Decimal("0")))
             removable = residual_base if Decimal("0") < residual_base < min_order_size else held_residual
             if removable > 0:
+                if removable == residual_base and Decimal("0") < residual_base < min_order_size:
+                    self._residual_dust_base = residual_base
                 held_base = getattr(self, "_held_residual_base", Decimal("0"))
                 if removable == held_residual and held_base > 0:
                     # Same unit cost as the position break-even of the held residual.

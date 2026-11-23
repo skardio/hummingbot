@@ -25,11 +25,11 @@ logger = logging.getLogger(__name__)
 class PositionRisk:
     """Risk metrics for an open position"""
     symbol: str
-    entry_price: Decimal
-    current_price: Decimal
-    unrealized_pnl_pct: float
+    entry_price: Optional[Decimal]
+    current_price: Optional[Decimal]
+    unrealized_pnl_pct: Optional[float]
     time_held_minutes: int
-    atr_pct: float  # Current ATR as % of price
+    atr_pct: Optional[float]  # Current ATR as % of price; None when unavailable
 
     # Dynamic stops
     initial_stop_pct: float
@@ -325,15 +325,16 @@ class ProfessionalRiskManager:
         #   BTC ATR 1.2% → 2.4% → clamped to 2.4% (within bounds)
         #   RENDER ATR 3.5% → 7.0% → clamped to 7.0%
         #   Super volatile 10% → clamped to 8% (max)
-        atr_based_stop = position.atr_pct * self.atr_stop_multiplier
-        effective_stop = max(self.min_stop_pct, min(atr_based_stop, self.max_stop_pct))
+        if position.atr_pct is not None and pnl_pct is not None:
+            atr_based_stop = position.atr_pct * self.atr_stop_multiplier
+            effective_stop = max(self.min_stop_pct, min(atr_based_stop, self.max_stop_pct))
 
-        if pnl_pct <= -effective_stop:
-            return "STOP_LOSS", f"ATR stop hit: {pnl_pct:.2%} <= -{effective_stop * 100:.1f}% (clamp({self.atr_stop_multiplier}×{position.atr_pct * 100:.1f}% = {atr_based_stop * 100:.1f}%))"
+            if pnl_pct <= -effective_stop:
+                return "STOP_LOSS", f"ATR stop hit: {pnl_pct:.2%} <= -{effective_stop * 100:.1f}% (clamp({self.atr_stop_multiplier}×{position.atr_pct * 100:.1f}% = {atr_based_stop * 100:.1f}%))"
 
         # 2. Context-aware time-based stop
         # Only exit if: time expired AND losing AND (price stalled OR no recent fills)
-        if position.is_time_expired and pnl_pct < 0:
+        if position.is_time_expired and pnl_pct is not None and pnl_pct < 0:
             if self.time_stop_requires_stall:
                 is_stalled = price_movement_last_hour_atr < self.price_stall_threshold_atr
 
@@ -356,6 +357,9 @@ class ProfessionalRiskManager:
                     logger.debug(f"{position.symbol} - Time expired but healthy (moving: {price_movement_last_hour_atr:.2f}×ATR, fills: {minutes_since_fill:.0f}min ago)")
             else:
                 return "TIME_STOP", f"Time limit expired with loss: {position.time_held_minutes}min >= {position.max_hold_time_minutes}min, PnL: {pnl_pct:.2%}"
+
+        if pnl_pct is None:
+            return "HOLD", "Position PnL unavailable; exit evaluation skipped"
 
         # 3. Profit tier logic (HIGH WATERMARK DRAWDOWN)
         # Tiers: [(peak_pct, required_pullback_pct, lock_pct)]
