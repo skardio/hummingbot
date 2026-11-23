@@ -16,6 +16,7 @@ Design
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Optional
@@ -464,7 +465,11 @@ class RiskBucketExposureTracker:
         added_pct = (additional_notional / self._portfolio) * 100.0
         projected_pct = current_pct + added_pct
 
-        if projected_pct > max_pct:
+        # Allow one representable float step at the configured cap.  At 10% this is
+        # 1.776e-15 percentage points -- exactly the reported runtime roundoff --
+        # without admitting a value above the cap's next float representation.
+        cap_tolerance_pct = math.ulp(float(max_pct))
+        if projected_pct > max_pct + cap_tolerance_pct:
             return (
                 False,
                 (

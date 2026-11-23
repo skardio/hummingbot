@@ -250,9 +250,10 @@ async def test_route_probe_failure_is_cleared_after_success():
 TOP100_V3 = [f"rT{i}-USDT" for i in range(100)]
 
 
-async def run_bitget_discovery_cycle(controller, ranked_pairs):
+async def run_bitget_discovery_cycle(controller, ranked_pairs, tickers=None, keep_pool=False):
     """One real first-run discovery cycle: volume rank -> spread -> route probe -> bounded pool."""
-    controller.monitored_coins = []
+    if not keep_pool:
+        controller.monitored_coins = []
     controller.all_available_pairs = []
     controller.config.quote_asset = "USDT"
     controller.config.min_24h_volume_usdt = 0
@@ -265,7 +266,7 @@ async def run_bitget_discovery_cycle(controller, ranked_pairs):
         return await func(*args)
 
     controller._api_call_with_error_handling = call
-    controller._get_ticker_data_safe = AsyncMock(return_value={
+    controller._get_ticker_data_safe = AsyncMock(return_value=tickers or {
         normalize_bitget_pair(pair): {"a": ["1.001"], "b": ["1.0"]} for pair in ranked_pairs})
     controller._ticker_pair_metrics = MagicMock(return_value=(
         {pair: 10_000_000 - i for i, pair in enumerate(ranked_pairs)}, {}))
@@ -361,3 +362,33 @@ async def test_discovery_window_keeps_blacklist_spread_and_kraken_unchanged():
     assert pool == NORMALS[1:4]
     assert controller.monitored_coins == NORMALS[2:5]
     assert not MultiCoinGridController._monitoring_route_rejected(controller, TOP100_V3[0])
+
+
+@pytest.mark.asyncio
+async def test_discovery_reaches_v2_pairs_behind_100_wide_spread_unprobed_pairs():
+    wide = [f"W{i}-USDT" for i in range(150)]  # route unknown, spread 1% -> never probed
+    ranked = wide + NORMALS
+    tickers = {normalize_bitget_pair(pair): {"a": ["1.01"], "b": ["1.0"]} for pair in wide}
+    tickers.update({normalize_bitget_pair(pair): {"a": ["1.001"], "b": ["1.0"]} for pair in NORMALS})
+    source = route_source()
+    controller = pool_controller(source)
+    assert await run_bitget_discovery_cycle(controller, ranked, tickers) == NORMALS[:3]
+    assert controller._monitoring_candidates == NORMALS  # spread filter unchanged: no wide pair admitted
+    probed = [c.args[0] for c in source._request_order_book_snapshot.await_args_list]
+    assert probed == NORMALS[:3]
+
+
+@pytest.mark.asyncio
+async def test_empty_discovery_does_not_overwrite_pool_set_by_concurrent_pair_scan():
+    source = route_source(v3=TOP100_V3)
+    controller = pool_controller(source)
+    scan_pool = ["BGB-USDT", "NEAR-USDT"]
+
+    async def probes_while_pair_scan_runs(candidates):
+        controller.monitored_coins = list(scan_pool)  # US-007 rotation lands during the await
+
+    controller._prepare_monitoring_candidates = probes_while_pair_scan_runs
+    controller._bounded_monitored_coins = MagicMock(return_value=[])
+    assert await run_bitget_discovery_cycle(controller, TOP100_V3 + NORMALS) == scan_pool
+    errors = [c.args[0] for c in controller.logger.return_value.error.call_args_list]
+    assert "❌ No coins discovered!" not in errors

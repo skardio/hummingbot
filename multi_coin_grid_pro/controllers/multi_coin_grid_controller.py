@@ -3520,7 +3520,7 @@ class MultiCoinGridController(ControllerBase):
                     if route_rejected:
                         self.logger().info(
                             f"📊 Discovery skipped {route_rejected} pairs with a proven unsupported order-book route")
-                    window_pairs = window_pairs[:100]
+                    discovery_window = 100
 
                     # Spread check: only include coins with spread < 0.5% using ticker bid/ask
                     spread_limit = 0.005  # 0.5%
@@ -3529,10 +3529,14 @@ class MultiCoinGridController(ControllerBase):
                     # If no ticker data available, skip spread check and use all filtered pairs
                     if not ticker_data:
                         self.logger().info("📊 No ticker data - using all pairs without spread check")
-                        for pair, vol in window_pairs:
+                        for pair, vol in window_pairs[:discovery_window]:
                             spread_checked_pairs.append((pair, vol, 0.0))  # spread=0 indicates no data
                     else:
+                        # Walk the volume ranking until the window holds enough spread-qualified pairs,
+                        # so wide-spread pairs cannot permanently hide deeper qualifying ones.
                         for pair, vol in window_pairs:
+                            if len(spread_checked_pairs) >= discovery_window:
+                                break
                             # For Bitget: use hb_symbol directly, for Kraken: find exchange_symbol
                             if is_bitget:
                                 ticker_key = normalize_bitget_pair(pair)
@@ -3571,7 +3575,14 @@ class MultiCoinGridController(ControllerBase):
                     self.logger().info("=" * 80)
                     self._monitoring_candidates = [pair for pair, _, _ in spread_checked_pairs]
                     await self._prepare_monitoring_candidates(self._monitoring_candidates)
-                    self.monitored_coins = self._bounded_monitored_coins(self._monitoring_candidates)
+                    selected_coins = self._bounded_monitored_coins(self._monitoring_candidates)
+                    if not selected_coins and self.monitored_coins:
+                        # The US-007 pair scan filled the pool while route probes were awaited; keep it.
+                        self.logger().info(
+                            f"📊 Discovery found 0 pairs; keeping {len(self.monitored_coins)} coins "
+                            f"selected meanwhile by the pair scan")
+                        return
+                    self.monitored_coins = selected_coins
 
                     self.logger().info(
                         f"✅ All {len(self.monitored_coins)} selected coins by 24h volume and spread < 0.5%:")
@@ -7702,20 +7713,73 @@ class MultiCoinGridController(ControllerBase):
                 if not executor_config:
                     continue
 
-                # Calculate position metrics
-                entry_price = self.entry_prices.get(trading_pair, Decimal("0"))
-                if entry_price <= 0:
+                custom_info = getattr(executor, "custom_info", None)
+                if not isinstance(custom_info, dict) or "position_size_quote" not in custom_info:
+                    if should_log(f"professional_exit_position_missing_{executor_id}", interval_sec=300):
+                        self.logger().warning(
+                            f"⚠️  US-005 skipped for {trading_pair}: executor position data is missing"
+                        )
                     continue
 
-                # Get current price from trend calculator
+                try:
+                    position_size_quote = Decimal(str(custom_info["position_size_quote"]))
+                except (ArithmeticError, TypeError, ValueError):
+                    if should_log(f"professional_exit_position_invalid_{executor_id}", interval_sec=300):
+                        self.logger().warning(
+                            f"⚠️  US-005 skipped for {trading_pair}: invalid position_size_quote"
+                        )
+                    continue
+
+                if not position_size_quote.is_finite() or position_size_quote < 0:
+                    if should_log(f"professional_exit_position_invalid_{executor_id}", interval_sec=300):
+                        self.logger().warning(
+                            f"⚠️  US-005 skipped for {trading_pair}: invalid position_size_quote"
+                        )
+                    continue
+                if position_size_quote == 0:
+                    self.professional_risk_manager.position_high_water_marks.pop(trading_pair, None)
+                    continue
+
+                if (
+                    "position_pnl_quote" not in custom_info
+                    or "break_even_price" not in custom_info
+                    or custom_info.get("price_reliable") is False
+                ):
+                    if should_log(f"professional_exit_pnl_missing_{executor_id}", interval_sec=300):
+                        self.logger().warning(
+                            f"⚠️  US-005 skipped for {trading_pair}: fill-cost or reliable P&L data is missing"
+                        )
+                    continue
+                try:
+                    position_pnl_quote = Decimal(str(custom_info["position_pnl_quote"]))
+                    entry_price = Decimal(str(custom_info["break_even_price"]))
+                except (ArithmeticError, TypeError, ValueError):
+                    if should_log(f"professional_exit_pnl_invalid_{executor_id}", interval_sec=300):
+                        self.logger().warning(
+                            f"⚠️  US-005 skipped for {trading_pair}: invalid fill-cost or P&L data"
+                        )
+                    continue
+                if (
+                    not position_pnl_quote.is_finite()
+                    or not entry_price.is_finite()
+                    or entry_price <= 0
+                ):
+                    if should_log(f"professional_exit_pnl_invalid_{executor_id}", interval_sec=300):
+                        self.logger().warning(
+                            f"⚠️  US-005 skipped for {trading_pair}: invalid fill-cost or P&L data"
+                        )
+                    continue
+
+                # Get current price from trend calculator for risk diagnostics.
                 trend = self.trend_calculator.get_trend(trading_pair) if self.trend_calculator else None
                 if not trend or not trend.current_price:
                     continue
 
                 current_price = Decimal(str(trend.current_price))
 
-                # Calculate unrealized PnL %
-                pnl_pct = float((current_price - entry_price) / entry_price) if entry_price > 0 else 0.0
+                # Use the executor's fee-adjusted P&L on the remaining filled inventory.
+                # Grid creation price is not a substitute for actual fill cost.
+                pnl_pct = float(position_pnl_quote / position_size_quote)
 
                 # Calculate time held
                 creation_time = self._executor_creation_timestamps.get(executor_id, now)

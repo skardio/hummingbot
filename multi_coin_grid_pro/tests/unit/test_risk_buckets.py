@@ -290,6 +290,46 @@ class TestRiskBucketExposureTracker:
         assert allowed is False
         assert "MEME" in reason
 
+    @pytest.mark.parametrize(
+        "additional_notional, expected",
+        [
+            (44.16072033875972 - 0.000001, True),
+            (44.16072033875972, True),
+            (44.16072033875972 + 0.000001, False),
+        ],
+    )
+    def test_illiquid_cap_accepts_only_roundoff_at_runtime_boundary(
+        self, additional_notional, expected
+    ):
+        cfg = RiskBucketConfig()
+        cfg.limits[CoinBucket.ILLIQUID] = 10.0
+        tracker = RiskBucketExposureTracker(
+            portfolio_value=441.6072033875971, config=cfg
+        )
+        metrics = MarketMetrics(volume_24h_usd=3_559_759, spread_pct=0.1)
+
+        allowed, _ = tracker.can_add("JCT-USDT", additional_notional, metrics)
+
+        assert allowed is expected
+
+    def test_existing_exposure_is_included_at_runtime_cap_boundary(self):
+        cfg = RiskBucketConfig()
+        cfg.limits[CoinBucket.ILLIQUID] = 10.0
+        tracker = RiskBucketExposureTracker(
+            portfolio_value=441.6072033875971, config=cfg
+        )
+        metrics = MarketMetrics(volume_24h_usd=3_559_759, spread_pct=0.1)
+        tracker.set_pending("BTW-USDT", 20.0, metrics)
+
+        allowed, reason = tracker.can_add("JCT-USDT", 24.16072033875972, metrics)
+
+        assert allowed is True
+        assert reason.startswith("ok | ILLIQUID")
+
+        allowed, reason = tracker.can_add("JCT-USDT", 24.16072233875972, metrics)
+        assert allowed is False
+        assert "current=" in reason and "requested=" in reason and "projected=" in reason
+
     def test_can_add_at_exact_cap_is_rejected(self):
         tracker = RiskBucketExposureTracker(portfolio_value=1000.0)
         tracker.set_filled("BTC-EUR", 400.0)  # exactly 40% = L1 cap

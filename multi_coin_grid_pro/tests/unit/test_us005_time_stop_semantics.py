@@ -63,6 +63,13 @@ def _wire_active_position(controller, trading_pair="BCH-USDT", executor_id="exec
     executor_info = MagicMock()
     executor_info.id = executor_id
     executor_info.is_active = True
+    executor_info.custom_info = {
+        "position_size_quote": "100",
+        "position_pnl_quote": "-3.14",
+        "position_pnl_pct": "-0.0314",
+        "break_even_price": "261.4",
+        "price_reliable": True,
+    }
     controller.executors_info = [executor_info]
 
     controller.active_coins = {trading_pair: executor_id}
@@ -155,6 +162,11 @@ class TestTimeStopIsUnconditionalExit(unittest.TestCase):
         # Simulate the executor already being mid-unwind by giving it a
         # custom_info flag some callers might (incorrectly) expect to matter.
         self.controller.executors_info[0].custom_info = {
+            "position_size_quote": "100",
+            "position_pnl_quote": "-3.14",
+            "position_pnl_pct": "-0.0314",
+            "break_even_price": "261.4",
+            "price_reliable": True,
             "unwind_phase": "AGGRESSIVE",
             "unwind_close_reason": "NO_PROGRESS_TIMEOUT",
         }
@@ -182,6 +194,105 @@ class TestTimeStopIsUnconditionalExit(unittest.TestCase):
             actions = self.controller._check_professional_exit_signals()
 
         self.assertEqual(actions, [])
+
+    def test_known_zero_position_clears_peak_without_calling_risk_manager(self):
+        self.controller.executors_info[0].custom_info = {
+            "position_size_quote": "0",
+            "position_pnl_quote": "0",
+            "position_pnl_pct": "0",
+            "break_even_price": "0",
+            "price_reliable": True,
+        }
+        self.controller.professional_risk_manager.position_high_water_marks[
+            "BCH-USDT"
+        ] = 0.015
+
+        with patch.object(
+            self.controller.professional_risk_manager,
+            "should_exit_position",
+        ) as should_exit:
+            actions = self.controller._check_professional_exit_signals()
+
+        self.assertEqual(actions, [])
+        should_exit.assert_not_called()
+        self.assertNotIn(
+            "BCH-USDT",
+            self.controller.professional_risk_manager.position_high_water_marks,
+        )
+
+    def test_partial_fill_uses_executor_cost_and_remaining_position_pnl(self):
+        self.controller.executors_info[0].custom_info = {
+            "position_size_quote": "66.0",
+            "position_pnl_quote": "0.198",
+            "position_pnl_pct": "0.9",
+            "break_even_price": "3.009",
+            "price_reliable": True,
+        }
+        trend = self.controller.trend_calculator.get_trend.return_value
+        trend.current_price = Decimal("8")  # Must not drive the position P&L.
+
+        captured = {}
+
+        def capture(position):
+            captured["position"] = position
+            return "HOLD", "healthy"
+
+        with patch.object(
+            self.controller.professional_risk_manager,
+            "should_exit_position",
+            side_effect=capture,
+        ):
+            actions = self.controller._check_professional_exit_signals()
+
+        self.assertEqual(actions, [])
+        self.assertAlmostEqual(captured["position"].unrealized_pnl_pct, 0.003)
+        self.assertEqual(captured["position"].entry_price, Decimal("3.009"))
+        self.assertEqual(captured["position"].current_price, Decimal("8"))
+
+    def test_prefill_price_peak_cannot_trigger_profit_lock_after_first_fill(self):
+        risk_manager = self.controller.professional_risk_manager
+        risk_manager.position_high_water_marks["BCH-USDT"] = 0.0123
+        self.controller.executors_info[0].custom_info = {
+            "position_size_quote": "0",
+            "position_pnl_quote": "0",
+            "position_pnl_pct": "0",
+            "break_even_price": "0",
+            "price_reliable": True,
+        }
+
+        self.assertEqual(self.controller._check_professional_exit_signals(), [])
+        self.assertNotIn("BCH-USDT", risk_manager.position_high_water_marks)
+
+        self.controller.executors_info[0].custom_info = {
+            "position_size_quote": "100",
+            "position_pnl_quote": "0.3",
+            "position_pnl_pct": "0.003",
+            "break_even_price": "3.009",
+            "price_reliable": True,
+        }
+        self.assertEqual(self.controller._check_professional_exit_signals(), [])
+        self.assertAlmostEqual(
+            risk_manager.position_high_water_marks["BCH-USDT"], 0.003
+        )
+
+    def test_missing_position_state_is_not_treated_as_zero(self):
+        self.controller.executors_info[0].custom_info = {}
+        self.controller.professional_risk_manager.position_high_water_marks[
+            "BCH-USDT"
+        ] = 0.015
+
+        with patch.object(
+            self.controller.professional_risk_manager,
+            "should_exit_position",
+        ) as should_exit:
+            actions = self.controller._check_professional_exit_signals()
+
+        self.assertEqual(actions, [])
+        should_exit.assert_not_called()
+        self.assertIn(
+            "BCH-USDT",
+            self.controller.professional_risk_manager.position_high_water_marks,
+        )
 
 
 if __name__ == "__main__":
