@@ -347,7 +347,7 @@ market_regime:
 # ==============================================================================
 
 time_based_rules:
-  enabled: true   # 🔧 2026-05-30: false→true (entry-uren blokkeren; gevalideerd op 4.5 maanden data)
+  enabled: false   # 🔧 2026-05-30: false→true (entry-uren blokkeren; gevalideerd op 4.5 maanden data)
 
   # Low liquidity hours (UTC). Conversie: CEST=UTC+2, CET=UTC+1
   # Gevalideerde slechte uren (4.5 mnd analyse):
