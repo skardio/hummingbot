@@ -144,6 +144,11 @@ class ExchangePyBase(ExchangeBase, ABC):
         raise NotImplementedError
 
     @property
+    def accelerate_pending_cancel_polling(self) -> bool:
+        """Opt-in: poll pending cancel outcomes at the short interval."""
+        return False
+
+    @property
     @abstractmethod
     def is_trading_required(self) -> bool:
         raise NotImplementedError
@@ -1127,9 +1132,12 @@ class ExchangePyBase(ExchangeBase, ABC):
         return exchange_info
 
     def _get_poll_interval(self, timestamp: float) -> float:
-        has_pending_cancel = any(
-            order.is_pending_cancel_confirmation
-            for order in self._order_tracker.active_orders.values()
+        has_pending_cancel = (
+            self.accelerate_pending_cancel_polling
+            and any(
+                order.is_pending_cancel_confirmation
+                for order in self._order_tracker.active_orders.values()
+            )
         )
         last_user_stream_message_time = (
             0 if self._user_stream_tracker is None else self._user_stream_tracker.last_recv_time

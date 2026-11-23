@@ -16,13 +16,15 @@ from test.logger_mixin_for_test import LoggerMixinForTest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+from hummingbot.connector.client_order_tracker import ClientOrderTracker
 from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.core.data_type.common import OrderType, PositionAction, TradeType
-from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, TradeUpdate
+from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, OrderUpdate, TradeUpdate
 from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee, TokenAmount
 from hummingbot.core.event.events import (
     BuyOrderCreatedEvent,
+    MarketEvent,
     MarketOrderFailureEvent,
     OrderCancelledEvent,
     OrderFilledEvent,
@@ -94,6 +96,9 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         type(self.strategy).current_timestamp = PropertyMock(side_effect=lambda: self.clock[0])
         self.strategy.cancel.return_value = None
         connector = MagicMock(spec=ExchangePyBase)
+        type(connector).accelerate_pending_cancel_polling = PropertyMock(
+            return_value=True
+        )
         type(connector).trading_rules = PropertyMock(return_value={PAIR: TradingRule(
             trading_pair=PAIR,
             min_order_size=Decimal("0.01"),
@@ -354,6 +359,121 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         self.assertNotIn("SELL-2", cancel_ids)
         self.assertEqual(self.tracked_position(), Decimal("3.84"))
         self.assertEqual(self.ex.held, Decimal("3.84"))
+
+    async def test_shutdown_waits_for_rest_cancel_status_and_places_one_remaining_close(self):
+        self.fill("BUY-1", Decimal("6.84"))
+        self.fill("BUY-2", Decimal("6.84"))
+        for _ in range(2):
+            await self.tick()
+            self.confirm_sells()
+        self.assertEqual(len(self.tp_levels()), 2)
+
+        tracker = ClientOrderTracker(self.connector)
+
+        def route_event(event_tag, event):
+            if event_tag == MarketEvent.OrderCancelled:
+                self.executor.process_order_canceled_event(None, None, event)
+            elif event_tag == MarketEvent.OrderFilled:
+                self.executor.process_order_filled_event(None, None, event)
+
+        self.connector.trigger_event.side_effect = route_event
+        self.connector._order_tracker = tracker
+        active_orders = {}
+        for level in self.executor.grid_levels:
+            for tracked in (level.active_open_order, level.active_close_order):
+                if tracked is not None and tracked.order is not None:
+                    active_orders[tracked.order_id] = tracked.order
+                    tracker.start_tracking_order(tracked.order)
+
+        self.executor.close_type = CloseType.STOP_LOSS
+        self.executor._status = RunnableStatus.SHUTTING_DOWN
+        self.strategy.cancel.reset_mock()
+        await self.tick()
+        self.assertGreaterEqual(self.strategy.cancel.call_count, 4)
+
+        for order in active_orders.values():
+            await tracker._process_order_update(OrderUpdate(
+                trading_pair=order.trading_pair,
+                update_timestamp=self.clock[0],
+                new_state=OrderState.PENDING_CANCEL,
+                client_order_id=order.client_order_id,
+                exchange_order_id=order.exchange_order_id,
+            ))
+        self.strategy.cancel.reset_mock()
+        await self.tick()
+        self.strategy.cancel.assert_not_called()
+        self.assertEqual(self.ex.sell_count, 2)
+
+        partial_tp = self.executor.levels_by_state[
+            GridLevelStates.CLOSE_ORDER_PLACED
+        ][0].active_close_order.order
+        tracker.process_trade_update(TradeUpdate(
+            trade_id="TP-PARTIAL",
+            client_order_id=partial_tp.client_order_id,
+            exchange_order_id="E-TP-PARTIAL",
+            trading_pair=partial_tp.trading_pair,
+            fill_timestamp=self.clock[0],
+            fill_price=partial_tp.price,
+            fill_base_amount=Decimal("3.00"),
+            fill_quote_amount=Decimal("3.00") * partial_tp.price,
+            fee=AddedToCostTradeFee(),
+        ))
+        self.ex.held -= Decimal("3.00")
+
+        cancel_ids = sorted(active_orders)
+        for order_id in cancel_ids[:-1]:
+            await tracker._process_order_update(OrderUpdate(
+                trading_pair=active_orders[order_id].trading_pair,
+                update_timestamp=self.clock[0],
+                new_state=OrderState.CANCELED,
+                client_order_id=order_id,
+                exchange_order_id=active_orders[order_id].exchange_order_id,
+            ))
+        await self.tick()
+        self.assertEqual(self.ex.sell_count, 2)
+
+        final_id = cancel_ids[-1]
+        await tracker._process_order_update(OrderUpdate(
+            trading_pair=active_orders[final_id].trading_pair,
+            update_timestamp=self.clock[0],
+            new_state=OrderState.CANCELED,
+            client_order_id=final_id,
+            exchange_order_id=active_orders[final_id].exchange_order_id,
+        ))
+        with patch("time.sleep"):
+            await self.tick()
+
+        self.assertEqual(self.ex.sell_count, 3)
+        close_order = self.ex.pending["SELL-3"]
+        self.assertEqual(close_order.amount, Decimal("10.68"))
+        self.assertEqual(close_order.amount, self.ex.held)
+
+        await tracker._process_order_update(OrderUpdate(
+            trading_pair=active_orders[final_id].trading_pair,
+            update_timestamp=self.clock[0],
+            new_state=OrderState.CANCELED,
+            client_order_id=final_id,
+            exchange_order_id=active_orders[final_id].exchange_order_id,
+        ))
+        self.assertEqual(self.ex.sell_count, 3)
+
+    async def test_connector_without_pending_cancel_opt_in_keeps_duplicate_retry_behavior(self):
+        self.fill("BUY-1", Decimal("6.84"))
+        await self.tick()
+        self.confirm_sells()
+        tracked_tp = self.tp_levels()[0].active_close_order.order
+        tracked_tp.current_state = OrderState.PENDING_CANCEL
+        self.strategy.cancel.reset_mock()
+        type(self.connector).accelerate_pending_cancel_polling = PropertyMock(
+            return_value=False
+        )
+
+        self.executor.cancel_open_orders()
+
+        self.assertIn(
+            tracked_tp.client_order_id,
+            {call.kwargs["order_id"] for call in self.strategy.cancel.call_args_list},
+        )
 
     async def test_additional_tp_is_capped_to_unlocked_balance(self):
         # Exchange holds less than tracked (e.g. unrecorded base fee): 2nd TP must not oversell.

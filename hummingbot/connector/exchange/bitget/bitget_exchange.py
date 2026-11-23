@@ -115,6 +115,10 @@ class BitgetExchange(ExchangePyBase):
         return False
 
     @property
+    def accelerate_pending_cancel_polling(self) -> bool:
+        return True
+
+    @property
     def is_trading_required(self) -> bool:
         return self._trading_required
 

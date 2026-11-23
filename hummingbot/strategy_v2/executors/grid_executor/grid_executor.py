@@ -4677,7 +4677,16 @@ class GridExecutor(ExecutorBase):
                 continue
 
             order_id = order.order_id
-            if order.order is not None and order.order.is_pending_cancel_confirmation:
+            connector = self._strategy.connectors.get(self.config.connector_name)
+            accelerate_pending_cancel = bool(
+                connector
+                and getattr(connector, "accelerate_pending_cancel_polling", False)
+            )
+            if (
+                accelerate_pending_cancel
+                and order.order is not None
+                and order.order.is_pending_cancel_confirmation
+            ):
                 self.logger().debug(
                     f"Executor ID: {self.config.id} - Cancel confirmation pending for {order_id}; "
                     "not sending a duplicate request"

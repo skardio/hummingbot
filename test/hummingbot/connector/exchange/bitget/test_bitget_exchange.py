@@ -3,7 +3,7 @@ import json
 import re
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from aioresponses import aioresponses
 from aioresponses.core import RequestCall
@@ -540,6 +540,7 @@ class BitgetExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests)
         await asyncio.sleep(0)
 
         self.assertEqual(OrderState.PENDING_CANCEL, order.current_state)
+        self.assertTrue(self.exchange.accelerate_pending_cancel_polling)
         self.exchange._poll_notifier.clear()
         self.exchange._last_timestamp = self.exchange.current_timestamp - 1
         self.exchange.tick(self.exchange.current_timestamp)
@@ -557,6 +558,10 @@ class BitgetExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests)
         self.assertEqual(OrderState.CANCELED, order.current_state)
         self.assertEqual(1, len(self.order_cancelled_logger.event_log))
         self.assertEqual(1, len(self._all_executed_requests(mock_api, status_url)))
+        self.assertEqual(
+            self.exchange.LONG_POLL_INTERVAL,
+            self.exchange._get_poll_interval(self.exchange.current_timestamp),
+        )
 
         duplicate_update = self.exchange._create_order_update(
             order, self._order_status_request_canceled_mock_response(order)
@@ -564,6 +569,34 @@ class BitgetExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests)
         self.exchange._order_tracker.process_order_update(duplicate_update)
         await asyncio.sleep(0)
         self.assertEqual(1, len(self.order_cancelled_logger.event_log))
+
+    def test_pending_cancel_polling_is_opt_in_for_other_connectors(self):
+        self.exchange._set_current_timestamp(1640780000)
+        self.exchange._user_stream_tracker = type(
+            "FreshUserStream", (), {"last_recv_time": self.exchange.current_timestamp}
+        )()
+        order = InFlightOrder(
+            client_order_id="pending-other",
+            exchange_order_id=str(self.expected_exchange_order_id),
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.SELL,
+            price=Decimal("10000"),
+            amount=Decimal("1"),
+            creation_timestamp=self.exchange.current_timestamp,
+            initial_state=OrderState.PENDING_CANCEL,
+        )
+        self.exchange._order_tracker.start_tracking_order(order)
+
+        with patch.object(
+            type(self.exchange),
+            "accelerate_pending_cancel_polling",
+            new=property(lambda _: False),
+        ):
+            self.assertEqual(
+                self.exchange.LONG_POLL_INTERVAL,
+                self.exchange._get_poll_interval(self.exchange.current_timestamp),
+            )
 
     @aioresponses()
     async def test_pending_cancel_status_errors_keep_order_unresolved_for_reconciliation(self, mock_api):
