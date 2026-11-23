@@ -172,6 +172,12 @@ class BitgetExchange(ExchangePyBase):
         return False
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder) -> bool:
+        self.logger().debug(
+            "CANCEL_START order=%s exchange_order=%s pair=%s",
+            tracked_order.client_order_id,
+            tracked_order.exchange_order_id,
+            tracked_order.trading_pair,
+        )
         cancel_order_response = await self._api_post(
             path_url=CONSTANTS.CANCEL_ORDER_ENDPOINT,
             data={
@@ -189,6 +195,11 @@ class BitgetExchange(ExchangePyBase):
             ))
 
         self._expected_market_amounts.pop(tracked_order.client_order_id, None)
+        self.logger().debug(
+            "CANCEL_ACK order=%s code=%s awaiting_terminal_status",
+            tracked_order.client_order_id,
+            response_code,
+        )
 
         return True
 
@@ -384,6 +395,11 @@ class BitgetExchange(ExchangePyBase):
         order_update = self._create_order_update(
             order=tracked_order,
             order_update_response=order_info_response
+        )
+        self.logger().debug(
+            "ORDER_STATUS_REST order=%s state=%s",
+            tracked_order.client_order_id,
+            order_update.new_state.name,
         )
 
         return order_update

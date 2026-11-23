@@ -299,6 +299,62 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         self.assertEqual(self.ex.sell_count, 3)
         self.assertEqual(len(self.tp_levels()), 2)
 
+    async def test_pending_cancel_is_not_resent_but_open_status_is_retried(self):
+        self.fill("BUY-1", Decimal("6.84"))
+        await self.tick()
+        self.confirm_sells()
+        level = self.tp_levels()[0]
+        tracked_tp = level.active_close_order.order
+        self.strategy.cancel.reset_mock()
+
+        tracked_tp.current_state = OrderState.PENDING_CANCEL
+        for open_level in self.executor.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]:
+            open_level.active_open_order.order.current_state = OrderState.PENDING_CANCEL
+        self.executor.cancel_open_orders()
+        self.strategy.cancel.assert_not_called()
+
+        tracked_tp.current_state = OrderState.OPEN
+        self.clock[0] += 11
+        self.executor.cancel_open_orders()
+        self.strategy.cancel.assert_called_once()
+        self.assertEqual(
+            self.strategy.cancel.call_args.kwargs["order_id"], tracked_tp.client_order_id
+        )
+
+    async def test_fills_during_pending_cancel_preserve_only_remaining_sell_quantity(self):
+        self.fill("BUY-1", Decimal("6.84"))
+        self.fill("BUY-2", Decimal("6.84"))
+        for _ in range(2):
+            await self.tick()
+            self.confirm_sells()
+        self.assertEqual(len(self.tp_levels()), 2)
+
+        tp1, tp2 = sorted(
+            self.tp_levels(), key=lambda level: level.active_close_order.order_id
+        )
+        tp1.active_close_order.order.current_state = OrderState.PENDING_CANCEL
+        self.fill(tp1.active_close_order.order_id, Decimal("3.00"))
+        self.confirm_cancel(tp1.active_close_order.order_id)
+        self.assertEqual(self.tracked_position(), Decimal("10.68"))
+
+        await self.tick()
+        self.confirm_sells()
+        replacement = self.ex.confirmed["SELL-3"]
+        self.assertEqual(replacement.amount, Decimal("3.84"))
+        self.assertEqual(self.offered_tp_base(), Decimal("10.68"))
+
+        tp2.active_close_order.order.current_state = OrderState.PENDING_CANCEL
+        self.fill(tp2.active_close_order.order_id, Decimal("6.84"))
+        self.executor.update_grid_levels()
+        self.strategy.cancel.reset_mock()
+        self.executor.cancel_open_orders()
+        cancel_ids = {
+            call.kwargs["order_id"] for call in self.strategy.cancel.call_args_list
+        }
+        self.assertNotIn("SELL-2", cancel_ids)
+        self.assertEqual(self.tracked_position(), Decimal("3.84"))
+        self.assertEqual(self.ex.held, Decimal("3.84"))
+
     async def test_additional_tp_is_capped_to_unlocked_balance(self):
         # Exchange holds less than tracked (e.g. unrecorded base fee): 2nd TP must not oversell.
         self.fill("BUY-1", Decimal("6.84"))

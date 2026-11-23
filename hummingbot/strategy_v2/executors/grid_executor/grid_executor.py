@@ -4677,6 +4677,12 @@ class GridExecutor(ExecutorBase):
                 continue
 
             order_id = order.order_id
+            if order.order is not None and order.order.is_pending_cancel_confirmation:
+                self.logger().debug(
+                    f"Executor ID: {self.config.id} - Cancel confirmation pending for {order_id}; "
+                    "not sending a duplicate request"
+                )
+                continue
 
             # Check if we've exceeded max retries for this order
             retry_count = self._cancel_retry_count.get(order_id, 0)

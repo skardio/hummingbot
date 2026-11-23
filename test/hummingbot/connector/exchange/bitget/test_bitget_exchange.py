@@ -3,6 +3,7 @@ import json
 import re
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from unittest.mock import AsyncMock
 
 from aioresponses import aioresponses
 from aioresponses.core import RequestCall
@@ -14,7 +15,7 @@ from hummingbot.connector.exchange.bitget.bitget_exchange import BitgetExchange,
 from hummingbot.connector.test_support.exchange_connector_test import AbstractExchangeConnectorTests
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.core.data_type.common import OrderType, TradeType
-from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState
+from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, OrderUpdate
 from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee, TokenAmount, TradeFeeBase
 
 
@@ -515,6 +516,141 @@ class BitgetExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests)
 
         self.assertTrue(order.is_open)
         self.assertEqual(0, self.exchange._order_tracker._order_not_found_records[order_id])
+
+    @aioresponses()
+    async def test_pending_cancel_uses_rest_status_when_websocket_confirmation_is_missing(self, mock_api):
+        self.exchange._set_current_timestamp(1640780000)
+        order_id = self.client_order_id_prefix + "cancel-poll"
+        self.exchange.start_tracking_order(
+            order_id=order_id,
+            exchange_order_id=str(self.expected_exchange_order_id),
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            price=Decimal("10000"),
+            amount=Decimal("1"),
+        )
+        order = self.exchange.in_flight_orders[order_id]
+        cancel_url = self.configure_successful_cancelation_response(order, mock_api)
+        self.exchange._user_stream_tracker = type(
+            "FreshUserStream", (), {"last_recv_time": self.exchange.current_timestamp}
+        )()
+
+        await self.exchange._execute_cancel(self.trading_pair, order_id)
+        await asyncio.sleep(0)
+
+        self.assertEqual(OrderState.PENDING_CANCEL, order.current_state)
+        self.exchange._poll_notifier.clear()
+        self.exchange._last_timestamp = self.exchange.current_timestamp - 1
+        self.exchange.tick(self.exchange.current_timestamp)
+        self.assertTrue(self.exchange._poll_notifier.is_set())
+        self.assertEqual(self.exchange.SHORT_POLL_INTERVAL, self.exchange._get_poll_interval(
+            self.exchange.current_timestamp
+        ))
+        self.assertEqual(1, len(self._all_executed_requests(mock_api, cancel_url)))
+
+        status_url = self.configure_canceled_order_status_response(order, mock_api)
+        self.exchange._all_trade_updates_for_order = AsyncMock(return_value=[])
+        await self.exchange._update_order_status()
+        await asyncio.sleep(0)
+
+        self.assertEqual(OrderState.CANCELED, order.current_state)
+        self.assertEqual(1, len(self.order_cancelled_logger.event_log))
+        self.assertEqual(1, len(self._all_executed_requests(mock_api, status_url)))
+
+        duplicate_update = self.exchange._create_order_update(
+            order, self._order_status_request_canceled_mock_response(order)
+        )
+        self.exchange._order_tracker.process_order_update(duplicate_update)
+        await asyncio.sleep(0)
+        self.assertEqual(1, len(self.order_cancelled_logger.event_log))
+
+    @aioresponses()
+    async def test_pending_cancel_status_errors_keep_order_unresolved_for_reconciliation(self, mock_api):
+        self.exchange._set_current_timestamp(1640780000)
+        order_id = self.client_order_id_prefix + "cancel-error"
+        self.exchange.start_tracking_order(
+            order_id=order_id,
+            exchange_order_id=str(self.expected_exchange_order_id),
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.SELL,
+            price=Decimal("10000"),
+            amount=Decimal("1"),
+        )
+        order = self.exchange.in_flight_orders[order_id]
+        order.current_state = OrderState.PENDING_CANCEL
+        self.exchange._all_trade_updates_for_order = AsyncMock(return_value=[])
+        timeout_url = self.configure_http_error_order_status_response(order, mock_api)
+
+        await self.exchange._update_order_status()
+
+        self.assertEqual(OrderState.PENDING_CANCEL, order.current_state)
+        self.assertEqual(0, self.exchange._order_tracker._order_not_found_records[order_id])
+        self.assertEqual(1, len(self._all_executed_requests(mock_api, timeout_url)))
+
+    async def test_pending_cancel_transient_failures_and_open_status_are_not_cancellation(self):
+        self.exchange._set_current_timestamp(1640780000)
+        order_id = self.client_order_id_prefix + "cancel-outcomes"
+        self.exchange.start_tracking_order(
+            order_id=order_id,
+            exchange_order_id=str(self.expected_exchange_order_id),
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.SELL,
+            price=Decimal("10000"),
+            amount=Decimal("1"),
+        )
+        order = self.exchange.in_flight_orders[order_id]
+        order.current_state = OrderState.PENDING_CANCEL
+        self.exchange._all_trade_updates_for_order = AsyncMock(return_value=[])
+
+        for error in (asyncio.TimeoutError(), IOError("HTTP status 429")):
+            self.exchange._request_order_status = AsyncMock(side_effect=error)
+            await self.exchange._update_order_status()
+            self.assertEqual(OrderState.PENDING_CANCEL, order.current_state)
+
+        self.exchange._request_order_status = AsyncMock(return_value=OrderUpdate(
+            trading_pair=self.trading_pair,
+            update_timestamp=self.exchange.current_timestamp,
+            new_state=OrderState.OPEN,
+            client_order_id=order_id,
+            exchange_order_id=str(self.expected_exchange_order_id),
+        ))
+        await self.exchange._update_order_status()
+        await asyncio.sleep(0)
+        self.assertEqual(OrderState.OPEN, order.current_state)
+
+    async def test_pending_cancel_order_not_found_is_confirmed_before_terminal_failure(self):
+        self.exchange._set_current_timestamp(1640780000)
+        order_id = self.client_order_id_prefix + "cancel-not-found"
+        self.exchange.start_tracking_order(
+            order_id=order_id,
+            exchange_order_id=str(self.expected_exchange_order_id),
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.SELL,
+            price=Decimal("10000"),
+            amount=Decimal("1"),
+        )
+        order = self.exchange.in_flight_orders[order_id]
+        order.current_state = OrderState.PENDING_CANCEL
+        self.exchange._all_trade_updates_for_order = AsyncMock(return_value=[])
+        self.exchange._request_order_status = AsyncMock(
+            side_effect=ValueError("confirmed not found")
+        )
+
+        for expected_count in (1, 2, 3):
+            await self.exchange._update_order_status()
+            self.assertEqual(OrderState.PENDING_CANCEL, order.current_state)
+            self.assertEqual(
+                expected_count,
+                self.exchange._order_tracker._order_not_found_records[order_id],
+            )
+
+        await self.exchange._update_order_status()
+        await asyncio.sleep(0)
+        self.assertEqual(OrderState.FAILED, order.current_state)
 
     def test_client_oid_status_lookup_recovers_missing_exchange_order_id(self):
         order_id = self.client_order_id_prefix + "1"
