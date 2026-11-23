@@ -202,6 +202,46 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
         for level in self.tp_levels():
             self.assertGreater(level.active_close_order.order.price, level.price)
 
+    async def test_three_7_32_buys_each_get_7_31_tp_without_rounding_defer(self):
+        for i, oid in enumerate(("BUY-1", "BUY-2", "BUY-3"), start=1):
+            order = self.ex.confirmed[oid]
+            order.amount = Decimal("7.32")
+            order.price = Decimal("3.012") if i < 3 else Decimal("3.003")
+            self.fill(oid, Decimal("7.32"), Decimal("0.00732"))
+            await self.tick()
+            self.confirm_sells()
+
+        self.assertEqual(self.ex.sell_count, 3)
+        self.assertEqual(len(self.tp_levels()), 3)
+        amounts = sorted(
+            level.active_close_order.order.amount for level in self.tp_levels()
+        )
+        self.assertEqual(amounts, [Decimal("7.31")] * 3)
+        self.assertEqual(self.offered_tp_base(), Decimal("21.93"))
+        self.assertEqual(self.ex.held, Decimal("21.93804"))
+        self.assertEqual(self.ex.available(), Decimal("0.00804"))
+        self.assertFalse(
+            any(
+                "TP_DEFERRED" in record.getMessage()
+                for record in self.log_records
+            )
+        )
+
+        for oid in ("SELL-1", "SELL-2", "SELL-3"):
+            self.fill(oid, self.ex.confirmed[oid].amount)
+        self.executor.close_type = CloseType.EARLY_STOP
+        self.executor.update_grid_levels()
+        self.executor.update_position_metrics()
+        self.executor.update_realized_pnl_metrics()
+        first_dust = self.executor._residual_dust_base
+        first_pnl = self.executor.realized_pnl_quote
+        self.executor.update_position_metrics()
+        self.executor.update_realized_pnl_metrics()
+
+        self.assertEqual(first_dust, Decimal("0.00804"))
+        self.assertEqual(self.executor._residual_dust_base, first_dust)
+        self.assertEqual(self.executor.realized_pnl_quote, first_pnl)
+
     async def test_partial_fills_and_repeated_ticks_do_not_duplicate_tps(self):
         self.fill("BUY-1", Decimal("6.84"))
         await self.tick()
