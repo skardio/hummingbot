@@ -24,7 +24,8 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
-from hummingbot.core.data_type.common import TradeType
+from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.core.event.events import BuyOrderCompletedEvent
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
 from hummingbot.strategy_v2.executors.grid_executor.grid_executor import GridExecutor
@@ -32,6 +33,18 @@ from hummingbot.strategy_v2.executors.position_executor.data_types import Triple
 from hummingbot.strategy_v2.models.base import RunnableStatus
 from hummingbot.strategy_v2.models.executors import CloseType, EarlyStopReason
 from multi_coin_grid_pro.persistence.fill_risk_snapshot_store import FillRiskSnapshotStore
+
+
+def _buy_completed_event(order_id: str) -> BuyOrderCompletedEvent:
+    return BuyOrderCompletedEvent(
+        timestamp=1_000_100.0,
+        order_id=order_id,
+        base_asset="BCH",
+        quote_asset="USDT",
+        base_asset_amount=Decimal("0.1"),
+        quote_asset_amount=Decimal("25.32"),
+        order_type=OrderType.LIMIT,
+    )
 
 
 def _make_strategy(timestamp: float = 1_000_000.0, connector_name: str = "bitget") -> MagicMock:
@@ -225,6 +238,26 @@ class TestPostFillRiskPersistence(IsolatedAsyncioWrapperTestCase, LoggerMixinFor
         self.executor.stop()
         rows = self._store.query_post_fill_recent(days=100000)
         self.assertTrue(any(r.is_final for r in rows))
+
+    def test_completed_buy_events_sample_at_one_and_two_then_write_one_final_row(self):
+        executor = _make_executor(_make_grid_config(post_fill_sampling_start_fill=1))
+        executor.update_tracked_orders_with_order_id = MagicMock()
+        executor._order_belongs_to_this_executor = MagicMock(return_value=True)
+
+        executor.process_order_completed_event(None, None, _buy_completed_event("buy-1"))
+        executor._maybe_sample_post_fill_risk()
+        executor.position_pnl_pct = Decimal("-0.03")
+        executor.process_order_completed_event(None, None, _buy_completed_event("buy-2"))
+        executor._maybe_sample_post_fill_risk()
+        executor.stop()
+        executor.stop()
+
+        rows = self._store.query_post_fill_recent(
+            days=100000, executor_id="test-post-fill-risk"
+        )
+        self.assertEqual(executor.buy_fill_count, 2)
+        self.assertEqual([row.buy_fill_count for row in rows if not row.is_final], [1, 2])
+        self.assertEqual(sum(row.is_final for row in rows), 1)
 
     def test_snapshots_always_carry_exchange_and_bot_instance_id_never_mixed(self):
         """Generic rollout across Bitget/OKX/Kraken USD/EUR shares the same

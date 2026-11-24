@@ -284,6 +284,7 @@ class TestGridCreation:
         controller.config.dynamic_tp_enabled = True
         controller.config.dynamic_tp_min_pct = Decimal("0.020")
         controller.config.dynamic_tp_max_pct = Decimal("0.020")
+        controller.config.post_fill_sampling_start_fill = 1
 
         action = controller._create_grid_action("XRP-EUR")
 
@@ -296,6 +297,7 @@ class TestGridCreation:
         assert action.executor_config.custom_info["atr_pct"] == volatility
         assert action.executor_config.custom_info["dynamic_tp_min_pct"] == 0.020
         assert action.executor_config.custom_info["dynamic_tp_max_pct"] == 0.020
+        assert action.executor_config.custom_info["post_fill_sampling_start_fill"] == 1
 
     def test_create_stop_action(self, controller):
         """Test _create_stop_action method"""

@@ -14,6 +14,8 @@ buy_cap_config_version: bitget-buy-cap-v1
 decision_telemetry_enabled: true
 decision_telemetry_queue_size: 1000
 decision_telemetry_retention_days: 90
+# Observational only: capture recovery paths after the first completed BUY.
+post_fill_sampling_start_fill: 1
 log_level: INFO
 
 # ==============================================================================

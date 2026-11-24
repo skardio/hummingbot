@@ -8,9 +8,17 @@ import pytest
 from hummingbot.connector.exchange.bitget import bitget_constants as CONSTANTS
 from hummingbot.connector.exchange.bitget.bitget_api_order_book_data_source import BitgetAPIOrderBookDataSource
 from multi_coin_grid_pro.controllers.multi_coin_grid_controller import MultiCoinGridController
+from multi_coin_grid_pro.spot_bitget.config_manager import SpotGridBitgetConfigManager
 from multi_coin_grid_pro.spot_bitget.config_schema import SpotGridBitgetConfig
 from multi_coin_grid_pro.spot_bitget.controller import SpotGridBitgetController
 from multi_coin_grid_pro.utils.dynamic_pair_manager import normalize_bitget_pair
+
+
+def test_bitget_recovery_sampling_starts_after_first_completed_buy():
+    config = SpotGridBitgetConfig(**SpotGridBitgetConfigManager().load_config())
+
+    assert config.post_fill_sampling_start_fill == 1
+    assert config.soft_risk_baseline_fills == 4
 
 
 def test_buy_cap_is_disabled_without_activation_timestamp():
