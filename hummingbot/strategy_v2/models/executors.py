@@ -47,6 +47,8 @@ class EarlyStopReason(Enum):
     STOP_LOSS = 60                 # Controller stop is an explicit stop-loss unwind
     HARD_STOP_EXIT = 61            # Controller hard-stop/emergency unwind
     EMERGENCY_EXIT = 62            # Generic emergency unwind
+    PROFIT_LOCK = 63               # Profit-tier lock requested by controller
+    TIME_STOP = 64                 # Maximum-hold or dead-position exit requested by controller
 
 
 class CloseType(Enum):

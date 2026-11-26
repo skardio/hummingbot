@@ -2732,7 +2732,6 @@ class GridExecutor(ExecutorBase):
                     self.stop()
                 else:
                     await self.control_close_order()
-                    self._current_retries += 1
         else:
             self.cancel_open_orders()
         await self._sleep(5.0)
@@ -2769,6 +2768,24 @@ class GridExecutor(ExecutorBase):
                         return  # Close order filled, dust remaining — will be handled by control_shutdown_process
                 else:
                     # Story C1: Throttle this log to max 1 per 60s per executor
+                    stale_close_timeout = (self.config.custom_info or {}).get(
+                        "stale_close_timeout_sec", 300
+                    )
+                    order_age = self._strategy.current_timestamp - in_flight_order.creation_timestamp
+                    if order_age >= stale_close_timeout:
+                        self._stale_close_cancel_count += 1
+                        self.logger().warning(
+                            f"⏰ STALE_CLOSE_ORDER: {self.config.trading_pair} | "
+                            f"Close order {self._close_order.order_id} pending for {order_age:.0f}s "
+                            f"(timeout: {stale_close_timeout}s) | "
+                            f"Cancel #{self._stale_close_cancel_count} to allow re-placement"
+                        )
+                        self._strategy.cancel(
+                            connector_name=self.config.connector_name,
+                            trading_pair=self.config.trading_pair,
+                            order_id=self._close_order.order_id,
+                        )
+                        return
                     if HAS_LOG_THROTTLE and should_log(f"close_wait_{self.config.id}", interval_sec=60):
                         self.logger().info("Waiting for close order to be filled")
                     elif not HAS_LOG_THROTTLE:
@@ -5710,6 +5727,14 @@ class GridExecutor(ExecutorBase):
         failed orders list.
         """
         self._ensure_buy_cap_state()
+        failure_counted = False
+
+        def count_failure_once() -> None:
+            nonlocal failure_counted
+            if not failure_counted:
+                self._current_retries += 1
+                failure_counted = True
+
         # BITGET FIX: Clear cancel retry tracking when order fails (including "order not found" errors)
         order_id = event.order_id
         if order_id in getattr(self, "_aggressive_close_orders", set()):
@@ -5840,6 +5865,7 @@ class GridExecutor(ExecutorBase):
         levels_close_order_placed = [level for level in self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
         for level in levels_open_order_placed:
             if event.order_id == level.active_open_order.order_id:
+                count_failure_once()
                 self._failed_orders.append(level.active_open_order.order_id)
                 self.max_open_creation_timestamp = 0
                 level.reset_open_order()
@@ -5867,6 +5893,7 @@ class GridExecutor(ExecutorBase):
 
         for level in levels_close_order_placed:
             if event.order_id == level.active_close_order.order_id:
+                count_failure_once()
                 self._failed_orders.append(level.active_close_order.order_id)
                 self.max_close_creation_timestamp = 0
                 level.reset_close_order()
@@ -5918,6 +5945,7 @@ class GridExecutor(ExecutorBase):
                     self._close_order_id = None
 
         if self._close_order and event.order_id == self._close_order.order_id:
+            count_failure_once()
             self._failed_orders.append(self._close_order.order_id)
             self._close_order = None
 

@@ -24,7 +24,7 @@ from hummingbot.strategy_v2.executors.twap_executor.data_types import TWAPExecut
 from hummingbot.strategy_v2.executors.twap_executor.twap_executor import TWAPExecutor
 from hummingbot.strategy_v2.models.base import RunnableStatus
 from hummingbot.strategy_v2.models.executor_actions import CreateExecutorAction, StopExecutorAction, StoreExecutorAction
-from hummingbot.strategy_v2.models.executors import CloseType
+from hummingbot.strategy_v2.models.executors import CloseType, EarlyStopReason
 from hummingbot.strategy_v2.models.executors_info import ExecutorInfo, PerformanceReport
 
 
@@ -365,7 +365,13 @@ class TestExecutorOrchestrator(unittest.TestCase):
         position_executor.config = MagicMock(PositionExecutorConfig)
         position_executor.config.id = "123"
         self.orchestrator.active_executors["test"] = [position_executor]
-        self.orchestrator.stop_executor(StopExecutorAction(executor_id="123", controller_id="test"))
+        self.orchestrator.stop_executor(StopExecutorAction(
+            executor_id="123",
+            controller_id="test",
+            keep_position=False,
+            early_stop_reason=EarlyStopReason.PROFIT_LOCK,
+        ))
+        position_executor.early_stop.assert_called_once_with(False, reason=EarlyStopReason.PROFIT_LOCK)
 
     @patch("hummingbot.strategy_v2.executors.executor_orchestrator.MarketsRecorder.get_instance")
     def test_generate_performance_report_with_loaded_positions(self, mock_get_instance: MagicMock):

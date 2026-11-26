@@ -31,6 +31,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from hummingbot.strategy_v2.models.executor_actions import StopExecutorAction
+from hummingbot.strategy_v2.models.executors import EarlyStopReason
 
 
 def _make_controller():
@@ -108,6 +109,18 @@ class TestTimeStopIsUnconditionalExit(unittest.TestCase):
         self.assertIsInstance(actions[0], StopExecutorAction)
         self.assertEqual(actions[0].executor_id, self.executor_id)
         self.assertFalse(actions[0].keep_position, "TIME_STOP must request a real close, not POSITION_HOLD")
+        self.assertEqual(actions[0].early_stop_reason, EarlyStopReason.TIME_STOP)
+
+    def test_profit_lock_reason_is_preserved_on_stop_action(self):
+        with patch.object(
+            self.controller.professional_risk_manager,
+            "should_exit_position",
+            return_value=("PROFIT_LOCK", "Profit tier lock"),
+        ):
+            actions = self.controller._check_professional_exit_signals()
+
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].early_stop_reason, EarlyStopReason.PROFIT_LOCK)
 
     def test_time_stop_creates_stop_action_when_no_better_coin_available(self):
         """Scenario 2: TIME_STOP + NO better coin available.

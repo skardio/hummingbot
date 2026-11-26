@@ -1511,6 +1511,149 @@ class TestGridExecutor(IsolatedAsyncioWrapperTestCase, LoggerMixinForTest):
         await executor.control_task()
         self.assertEqual(executor._status, RunnableStatus.TERMINATED)
 
+    @patch.object(GridExecutor, "get_price", return_value=Decimal("100"))
+    async def test_open_sell_wait_cycles_do_not_count_as_order_failures(self, _):
+        config = GridExecutorConfig(
+            id="wait-cycles",
+            timestamp=123,
+            side=TradeType.BUY,
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            start_price=Decimal("100"),
+            end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+            ),
+        )
+        executor = self.get_grid_executor_from_config(config)
+        close_order = InFlightOrder(
+            client_order_id="close-1",
+            trading_pair="ETH-USDT",
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.SELL,
+            amount=Decimal("0.1"),
+            price=Decimal("100"),
+            creation_timestamp=1234567890,
+            initial_state=OrderState.OPEN,
+        )
+        executor._close_order = TrackedOrder("close-1")
+        executor._close_order.order = close_order
+        executor._status = RunnableStatus.SHUTTING_DOWN
+        executor.close_type = CloseType.EARLY_STOP
+        executor.position_size_base = Decimal("0.1")
+        executor.position_size_quote = Decimal("10")
+        executor.open_liquidity_placed = Decimal("0")
+        executor.close_liquidity_placed = Decimal("0")
+        executor.update_metrics = MagicMock()
+        executor._sleep = AsyncMock()
+
+        for _ in range(12):
+            await executor.control_task()
+
+        self.assertEqual(executor._current_retries, 0)
+        self.assertEqual(executor.close_type, CloseType.EARLY_STOP)
+        self.assertEqual(executor.status, RunnableStatus.SHUTTING_DOWN)
+        self.strategy.sell.assert_not_called()
+        self.assertIs(executor._close_order.order, close_order)
+
+    @patch.object(GridExecutor, "get_price", return_value=Decimal("100"))
+    async def test_stale_open_sell_uses_existing_cancel_and_replace_path(self, _):
+        config = GridExecutorConfig(
+            id="stale-close",
+            timestamp=123,
+            side=TradeType.BUY,
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            start_price=Decimal("100"),
+            end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+            ),
+            custom_info={"stale_close_timeout_sec": 300},
+        )
+        executor = self.get_grid_executor_from_config(config)
+        close_order = InFlightOrder(
+            client_order_id="close-stale",
+            trading_pair="ETH-USDT",
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.SELL,
+            amount=Decimal("0.1"),
+            price=Decimal("100"),
+            creation_timestamp=1234567589,
+            initial_state=OrderState.OPEN,
+        )
+        executor._close_order = TrackedOrder("close-stale")
+        executor._close_order.order = close_order
+        executor._status = RunnableStatus.SHUTTING_DOWN
+        executor.close_type = CloseType.EARLY_STOP
+        executor.position_size_base = Decimal("0.1")
+        executor.position_size_quote = Decimal("10")
+        executor.open_liquidity_placed = Decimal("0")
+        executor.close_liquidity_placed = Decimal("0")
+        executor.update_metrics = MagicMock()
+        executor._sleep = AsyncMock()
+
+        await executor.control_task()
+
+        self.strategy.cancel.assert_called_once_with(
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            order_id="close-stale",
+        )
+        self.assertEqual(executor._current_retries, 0)
+        self.assertEqual(executor.close_type, CloseType.EARLY_STOP)
+        self.assertEqual(executor.status, RunnableStatus.SHUTTING_DOWN)
+        self.strategy.sell.assert_not_called()
+
+    @patch.object(GridExecutor, "get_price", return_value=Decimal("100"))
+    def test_owned_order_failure_counts_and_remains_bounded(self, _):
+        config = GridExecutorConfig(
+            id="failed-close",
+            timestamp=123,
+            side=TradeType.BUY,
+            connector_name="binance",
+            trading_pair="ETH-USDT",
+            start_price=Decimal("100"),
+            end_price=Decimal("120"),
+            total_amount_quote=Decimal("100"),
+            min_spread_between_orders=Decimal("0.01"),
+            min_order_amount_quote=Decimal("10"),
+            limit_price=Decimal("90"),
+            triple_barrier_config=TripleBarrierConfig(
+                take_profit=Decimal("0.001"),
+                stop_loss=Decimal("0.05"),
+            ),
+        )
+        executor = self.get_grid_executor_from_config(config)
+        executor.grid_levels[0].active_open_order = TrackedOrder("OID-BUY-FAILED")
+        executor._current_retries = executor._max_retries
+
+        executor.process_order_failed_event(
+            None,
+            None,
+            MarketOrderFailureEvent(
+                timestamp=1234567890,
+                order_id="OID-BUY-FAILED",
+                order_type=OrderType.LIMIT,
+            ),
+        )
+        executor.update_position_metrics = MagicMock()
+        executor.evaluate_max_retries()
+
+        self.assertEqual(executor._current_retries, executor._max_retries + 1)
+        self.assertEqual(executor.close_type, CloseType.FAILED)
+        self.assertEqual(executor.status, RunnableStatus.TERMINATED)
+
     @patch.object(GridExecutor, "_sleep")
     @patch.object(GridExecutor, "get_price")
     async def test_control_shutdown_process_position_hold(self, mock_price, _):

@@ -991,6 +991,10 @@ class MultiCoinGridController(ControllerBase):
             return EarlyStopReason.HARD_STOP_EXIT
         if reason == "emergency_exit":
             return EarlyStopReason.EMERGENCY_EXIT
+        if reason == "profit_lock":
+            return EarlyStopReason.PROFIT_LOCK
+        if reason == "time_stop":
+            return EarlyStopReason.TIME_STOP
         if reason == "api_error_threshold":
             return EarlyStopReason.RISK_GUARD
         if "switch" in reason:
@@ -7862,7 +7866,9 @@ class MultiCoinGridController(ControllerBase):
                     )
                     stop_action = StopExecutorAction(
                         controller_id=controller_id,
-                        executor_id=executor_id
+                        executor_id=executor_id,
+                        keep_position=False,
+                        early_stop_reason=self._early_stop_reason_from_stop_reason(action),
                     )
                     actions.append(stop_action)
 
