@@ -4687,7 +4687,8 @@ class GridExecutor(ExecutorBase):
                 continue
 
             order_id = order.order_id
-            if order_id in self._cancel_exhausted_order_ids:
+            exhausted_order_ids = self._cancel_exhausted_orders()
+            if order_id in exhausted_order_ids:
                 continue
             connector = self._strategy.connectors.get(self.config.connector_name)
             accelerate_pending_cancel = bool(
@@ -4712,7 +4713,7 @@ class GridExecutor(ExecutorBase):
                     f"⚠️  Executor ID: {self.config.id} - Giving up on canceling order {order_id} "
                     f"after {retry_count} attempts (may already be filled or cancelled)"
                 )
-                self._cancel_exhausted_order_ids.add(order_id)
+                exhausted_order_ids.add(order_id)
                 continue
 
             # Check if enough time has passed since last cancel request (backoff)
@@ -4750,6 +4751,13 @@ class GridExecutor(ExecutorBase):
                     f"Executor ID: {self.config.id} - Retry {retry_count + 1}/{self._cancel_max_retries} "
                     f"canceling order {order_id} (backoff: {backoff_time:.0f}s)"
                 )
+
+    def _cancel_exhausted_orders(self) -> set:
+        exhausted = getattr(self, "_cancel_exhausted_order_ids", None)
+        if exhausted is None:
+            exhausted = set()
+            self._cancel_exhausted_order_ids = exhausted
+        return exhausted
 
     async def cancel_open_orders_and_wait(self, max_wait_seconds: float = 10.0):
         """
@@ -5615,7 +5623,7 @@ class GridExecutor(ExecutorBase):
         self._ensure_buy_cap_state()
         # BITGET FIX: Clear cancel retry tracking when order is successfully cancelled
         order_id = event.order_id
-        self._cancel_exhausted_order_ids.discard(order_id)
+        self._cancel_exhausted_orders().discard(order_id)
         if order_id in self._buy_cap_cancel_requested_ids:
             self._buy_cap_cancel_requested_ids.discard(order_id)
             self._emit_decision_telemetry(
@@ -5745,7 +5753,7 @@ class GridExecutor(ExecutorBase):
 
         # BITGET FIX: Clear cancel retry tracking when order fails (including "order not found" errors)
         order_id = event.order_id
-        self._cancel_exhausted_order_ids.discard(order_id)
+        self._cancel_exhausted_orders().discard(order_id)
         if order_id in getattr(self, "_aggressive_close_orders", set()):
             # Bounded aggressive close: count rejections and back off before retrying.
             self._aggressive_close_attempts = getattr(self, "_aggressive_close_attempts", 0) + 1
