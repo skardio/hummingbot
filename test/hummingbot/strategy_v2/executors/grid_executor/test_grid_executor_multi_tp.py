@@ -813,6 +813,66 @@ class TestGridExecutorMultiTakeProfit(IsolatedAsyncioWrapperTestCase, LoggerMixi
                       if o["trade_type"] == TradeType.SELL.name)
         self.assertEqual(sold, [Decimal("2.00"), Decimal("3.00")], "partial TP sales archived once each")
 
+    async def test_stale_executor_close_waits_for_cancel_and_sells_only_unfilled_remainder(self):
+        for oid in ("BUY-1", "BUY-2", "BUY-3"):
+            self.fill(oid, Decimal("6.84"))
+        self.executor.mid_price = Decimal("3.23")
+        self.executor.update_grid_levels()
+        self.executor.update_position_metrics()
+
+        old_order = InFlightOrder(
+            client_order_id="CLOSE-OLD",
+            trading_pair=PAIR,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.SELL,
+            amount=Decimal("20.52"),
+            price=Decimal("3.23"),
+            creation_timestamp=self.clock[0],
+            initial_state=OrderState.OPEN,
+        )
+        self.ex.confirmed["CLOSE-OLD"] = old_order
+        self.executor._close_order = TrackedOrder("CLOSE-OLD")
+        self.executor._close_order.order = old_order
+        self.executor._close_order_id = "CLOSE-OLD"
+        self.executor._closing_in_progress = True
+        self.executor._status = RunnableStatus.SHUTTING_DOWN
+        self.executor.close_type = CloseType.STOP_LOSS
+
+        self.clock[0] += 301
+        await self.tick()
+        self.strategy.cancel.assert_any_call(
+            connector_name=CONNECTOR,
+            trading_pair=PAIR,
+            order_id="CLOSE-OLD",
+        )
+        self.assertEqual(self.ex.sell_count, 0, "must not replace before terminal cancel")
+
+        self.confirm_cancel("BUY-4")
+        self.strategy.cancel.reset_mock()
+        old_order.current_state = OrderState.PENDING_CANCEL
+        self.fill("CLOSE-OLD", Decimal("5.00"))
+        for _ in range(3):
+            await self.tick()
+        self.strategy.cancel.assert_not_called()
+        self.assertEqual(self.ex.sell_count, 0)
+
+        self.confirm_cancel("CLOSE-OLD")
+        await self.tick()
+        replacement = self.executor._close_order
+        self.assertIsNotNone(replacement)
+        self.assertEqual(
+            self.ex.pending[replacement.order_id].amount,
+            Decimal("15.52"),
+        )
+        self.assertEqual(self.ex.sell_count, 1)
+
+        self.executor.process_order_canceled_event(
+            None, None, OrderCancelledEvent(self.clock[0], "CLOSE-OLD")
+        )
+        await self.tick()
+        self.assertEqual(self.ex.sell_count, 1, "duplicate terminal events must not create a second close")
+        self.assertIs(self.executor._close_order, replacement)
+
     # ------------------------------------------- partial TP P&L, exits and residuals
     def _snapshot(self, price):
         self.executor.mid_price = price

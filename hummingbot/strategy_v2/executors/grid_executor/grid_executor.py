@@ -139,6 +139,7 @@ class GridExecutor(ExecutorBase):
         self._held_residual_cost_quote = Decimal("0")
         self._failed_orders = []
         self._canceled_orders = []
+        self._executor_close_sold_base_by_order: Dict[str, Decimal] = {}
 
         self.step = Decimal("0")
         self.position_break_even_price = Decimal("0")
@@ -199,6 +200,7 @@ class GridExecutor(ExecutorBase):
         # Prevents excessive cancel retries when exchange is slow to confirm
         self._cancel_request_times = {}  # order_id -> last cancel request timestamp
         self._cancel_retry_count = {}    # order_id -> number of cancel attempts
+        self._cancel_exhausted_order_ids: set = set()
         self._cancel_min_interval = 10.0  # minimum 10 seconds between cancel retries
         self._cancel_max_retries = 5     # give up after 5 attempts
 
@@ -2079,16 +2081,7 @@ class GridExecutor(ExecutorBase):
                                     f"(timeout: {stale_close_timeout}s) | "
                                     f"Cancel #{self._stale_close_cancel_count} to allow re-placement"
                                 )
-                                try:
-                                    self._strategy.cancel(
-                                        connector_name=self.config.connector_name,
-                                        trading_pair=self.config.trading_pair,
-                                        order_id=self._close_order_id
-                                    )
-                                except Exception as cancel_err:
-                                    self.logger().warning(
-                                        f"⚠️  Failed to cancel stale close order: {cancel_err}"
-                                    )
+                                self.cancel_open_orders()
                                 # process_order_canceled_event will reset state
                                 return
                     else:
@@ -2761,6 +2754,7 @@ class GridExecutor(ExecutorBase):
                             f"Archiving partial close and placing new close order."
                         )
                         # Archive the filled close order so its sell data is preserved
+                        self._record_executor_close_fill(in_flight_order)
                         self._filled_orders.append(in_flight_order.to_json())
                         self._close_order = None
                         # Fall through to place a new close order for the remainder
@@ -2780,11 +2774,7 @@ class GridExecutor(ExecutorBase):
                             f"(timeout: {stale_close_timeout}s) | "
                             f"Cancel #{self._stale_close_cancel_count} to allow re-placement"
                         )
-                        self._strategy.cancel(
-                            connector_name=self.config.connector_name,
-                            trading_pair=self.config.trading_pair,
-                            order_id=self._close_order.order_id,
-                        )
+                        self.cancel_open_orders()
                         return
                     if HAS_LOG_THROTTLE and should_log(f"close_wait_{self.config.id}", interval_sec=60):
                         self.logger().info("Waiting for close order to be filled")
@@ -4680,20 +4670,25 @@ class GridExecutor(ExecutorBase):
 
         :return: None
         """
-        import time
-
         open_order_placed = [level.active_open_order for level in
                              self.levels_by_state[GridLevelStates.OPEN_ORDER_PLACED]]
         close_order_placed = [level.active_close_order for level in
                               self.levels_by_state[GridLevelStates.CLOSE_ORDER_PLACED]]
+        orders = open_order_placed + close_order_placed
+        if self._close_order and self._close_order.order_id not in {
+            order.order_id for order in orders if order
+        }:
+            orders.append(self._close_order)
 
-        current_time = time.time()
+        current_time = float(self._strategy.current_timestamp)
 
-        for order in open_order_placed + close_order_placed:
+        for order in orders:
             if not order:
                 continue
 
             order_id = order.order_id
+            if order_id in self._cancel_exhausted_order_ids:
+                continue
             connector = self._strategy.connectors.get(self.config.connector_name)
             accelerate_pending_cancel = bool(
                 connector
@@ -4717,9 +4712,7 @@ class GridExecutor(ExecutorBase):
                     f"⚠️  Executor ID: {self.config.id} - Giving up on canceling order {order_id} "
                     f"after {retry_count} attempts (may already be filled or cancelled)"
                 )
-                # Remove from tracking to prevent further retries
-                self._cancel_request_times.pop(order_id, None)
-                self._cancel_retry_count.pop(order_id, None)
+                self._cancel_exhausted_order_ids.add(order_id)
                 continue
 
             # Check if enough time has passed since last cancel request (backoff)
@@ -5622,6 +5615,7 @@ class GridExecutor(ExecutorBase):
         self._ensure_buy_cap_state()
         # BITGET FIX: Clear cancel retry tracking when order is successfully cancelled
         order_id = event.order_id
+        self._cancel_exhausted_order_ids.discard(order_id)
         if order_id in self._buy_cap_cancel_requested_ids:
             self._buy_cap_cancel_requested_ids.discard(order_id)
             self._emit_decision_telemetry(
@@ -5668,6 +5662,7 @@ class GridExecutor(ExecutorBase):
                 level.reset_close_order()
         if self._close_order and event.order_id == self._close_order.order_id:
             self._archive_partial_fill(self._close_order)
+            self._record_executor_close_fill(self._close_order)
             self._canceled_orders.append(self._close_order.order_id)
             self._close_order = None
             # ZOMBIE GUARD FIX: Reset close guard so executor can retry close.
@@ -5721,6 +5716,19 @@ class GridExecutor(ExecutorBase):
         )
         return True
 
+    def _record_executor_close_fill(self, tracked_order) -> Decimal:
+        """Retain completed/cancelled executor-level SELL quantity for replacement sizing."""
+        order = getattr(tracked_order, "order", tracked_order)
+        if order is None:
+            return Decimal("0")
+        executed = Decimal(str(getattr(order, "executed_amount_base", 0) or 0))
+        if executed <= 0:
+            return Decimal("0")
+        order_id = str(getattr(order, "client_order_id", "") or "")
+        previous = self._executor_close_sold_base_by_order.get(order_id, Decimal("0"))
+        self._executor_close_sold_base_by_order[order_id] = max(previous, executed)
+        return self._executor_close_sold_base_by_order[order_id]
+
     def process_order_failed_event(self, _, market, event: MarketOrderFailureEvent):
         """
         This method is responsible for processing the order failed event. Here we will add the InFlightOrder to the
@@ -5737,6 +5745,7 @@ class GridExecutor(ExecutorBase):
 
         # BITGET FIX: Clear cancel retry tracking when order fails (including "order not found" errors)
         order_id = event.order_id
+        self._cancel_exhausted_order_ids.discard(order_id)
         if order_id in getattr(self, "_aggressive_close_orders", set()):
             # Bounded aggressive close: count rejections and back off before retrying.
             self._aggressive_close_attempts = getattr(self, "_aggressive_close_attempts", 0) + 1
@@ -6005,8 +6014,15 @@ class GridExecutor(ExecutorBase):
             GridLevelStates.CLOSE_ORDER_PLACED, [])
         side_multiplier = 1 if self.config.side == TradeType.BUY else -1
         executed_amount_base = Decimal(sum([level.active_open_order.order.amount for level in open_filled_levels]))
-        close_order_size_base = self._close_order.executed_amount_base if self._close_order and self._close_order.is_done else Decimal(
-            "0")
+        close_order_size_base = sum(
+            self._executor_close_sold_base_by_order.values(), Decimal("0")
+        )
+        if (
+            self._close_order
+            and self._close_order.is_done
+            and self._close_order.order_id not in self._executor_close_sold_base_by_order
+        ):
+            close_order_size_base += self._close_order.executed_amount_base
         if executed_amount_base == Decimal("0"):
             self.position_size_base = Decimal("0")
             self.position_size_quote = Decimal("0")

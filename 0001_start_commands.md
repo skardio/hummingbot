@@ -29,6 +29,30 @@ cd /home/mo/repos/hummingbot
 bin/hummingbot.py
 
 
+
+# ARBI — TODO
+
+Bijgewerkt: 27 november 2026 (CET).
+
+## Geparkeerd — externe signalen voor de Bitget-gridbot
+
+- [ ] Onderzoeken of externe marktdata/signalen iets toevoegen aan de bestaande coinselectie, regimes en herstelmetingen.
+- Kandidaten: CoinGlass, Santiment, LunarCrush en CryptoQuant.
+- Eerste onderzoekskandidaat: CoinGlass als aanvullende risicobron; nog geen keuze of abonnement.
+- Vooraf controleren: dekking van daadwerkelijk verhandelde coins, tijdsresolutie, beschikbaarheid op het beslismoment, historische revisies, API-kosten en gebruiksrechten.
+- Eén toetsbare hypothese kiezen over herstel tot break-even na fees of doorlopende dalingen.
+- Eerst alleen signalen met ontvangsttijd vastleggen, zonder invloed op orders. Daarna op nieuwe gegevens vergelijken, inclusief gemiste winnaars en datakosten.
+- Hervatten nadat de huidige ARIA-afsluitanalyse en de basis voor betrouwbare resultaat-/herstelmeting zijn afgehandeld; geen automatische hervatting of geplande herinnering ingesteld.
+
+## Huidige focus (context)
+
+ARIA-executor 26iWVLWoPMzurVcLhEAyGX7StFSeZK7d3q3NsaoZ9RaB: Copilot rapporteert op basis van de logs dat PROFIT_LOCK zonder early_stop_reason is doorgegeven en dat shutdown-wachtcycli de retrylimiet bereikten, waarna forced-close met FAILED startte. De laatste sell is volgens de logs volledig gevuld. Nog gericht beoordelen/testen voordat wijzigingen worden gemaakt. Externe signalen blijven geparkeerd.
+
+
+
+
+
+
 instaleer package:
 sudo apt install ./code_1.139.1-1790309529_amd64.deb
 
